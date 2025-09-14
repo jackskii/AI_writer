@@ -374,21 +374,18 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
 
   // Handle note click to jump to linked text
   const handleNoteClick = (note: Note) => {
-    if (!note.linked_text || !textareaRef.current) return;
+    if (!textareaRef.current) return;
 
-    // First try to find exact match
-    const exactMatchIndex = content.indexOf(note.linked_text);
+    // Try to find markers for this note
+    const markerPositions = MarkerUtils.findMarkerPositions(contentWithMarkers, note.id);
     
-    if (exactMatchIndex !== -1) {
-      // Exact match found - highlight it
-      const startPos = exactMatchIndex;
-      const endPos = exactMatchIndex + note.linked_text.length;
-      
+    if (markerPositions) {
+      // Markers found - highlight the text between them
       textareaRef.current.focus();
-      textareaRef.current.setSelectionRange(startPos, endPos);
+      textareaRef.current.setSelectionRange(markerPositions.start, markerPositions.end);
       
       // Calculate scroll position
-      const textBeforePosition = content.slice(0, startPos);
+      const textBeforePosition = content.slice(0, markerPositions.start);
       const lines = textBeforePosition.split('\n');
       const lineNumber = lines.length - 1;
       const lineHeight = 30;
@@ -397,16 +394,13 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
       textareaRef.current.scrollTop = Math.max(0, scrollPosition - 100);
       
       // Update selection state
-      setSelectedText(note.linked_text);
-      setSelectionStart(startPos);
-      setSelectionEnd(endPos);
+      const linkedText = MarkerUtils.getTextBetweenMarkers(contentWithMarkers, note.id) || '';
+      setSelectedText(linkedText);
+      setSelectionStart(markerPositions.start);
+      setSelectionEnd(markerPositions.end);
     } else {
-      // No exact match found - show warning but still focus editor
+      // No markers found - note has no link or it was deleted, just focus editor
       textareaRef.current.focus();
-      addNotification({
-        type: 'warning',
-        message: '关联的文本内容已被修改，无法精确定位。请使用"更新链接"功能重新关联。'
-      });
     }
   };
 
