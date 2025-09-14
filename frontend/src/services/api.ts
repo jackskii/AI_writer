@@ -1,7 +1,7 @@
 import axios from 'axios';
 import type { Work, Act, Chapter, LoreEntry, Note, ChatMessage, AIContext } from '../types';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8001/api';
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8001/api';
 
 export const api = axios.create({
   baseURL: API_BASE_URL,
@@ -11,9 +11,32 @@ export const api = axios.create({
   withCredentials: true,
 });
 
+// Add auth token interceptor
+api.interceptors.request.use(
+  (config) => {
+    // Get token from Zustand persist storage
+    const authStorage = localStorage.getItem('auth-storage');
+    if (authStorage) {
+      try {
+        const parsedStorage = JSON.parse(authStorage);
+        const token = parsedStorage?.state?.token;
+        if (token) {
+          config.headers.Authorization = `Token ${token}`;
+        }
+      } catch (e) {
+        console.error('Failed to parse auth storage:', e);
+      }
+    }
+    return config;
+  },
+  (error) => {
+    return Promise.reject(error);
+  }
+);
+
 // 作品相关 API
 export const worksApi = {
-  list: () => api.get<Work[]>('/works/'),
+  list: () => api.get<{ results: Work[]; count: number; next?: string; previous?: string }>('/works/'),
   get: (id: number) => api.get<Work>(`/works/${id}/`),
   create: (data: Partial<Work>) => api.post<Work>('/works/', data),
   update: (id: number, data: Partial<Work>) => api.patch<Work>(`/works/${id}/`, data),
@@ -220,6 +243,68 @@ export const aiApi = {
 
     eventSource.onerror = (error) => {
       console.error('EventSource error:', error);
+      onError?.('Connection error occurred');
+      eventSource.close();
+    };
+
+    // Return the EventSource so it can be closed manually if needed
+    return eventSource;
+  },
+
+  // Streaming version of chat
+  chatStream: (
+    workId: number, 
+    chapterId: number, 
+    message: string,
+    onChunk: (chunk: string) => void,
+    onStart?: () => void,
+    onEnd?: (fullResponse: string) => void,
+    onError?: (error: string) => void
+  ) => {
+    const params = new URLSearchParams({
+      work_id: workId.toString(),
+      chapter_id: chapterId.toString(),
+      message: message,
+    });
+
+    const eventSource = new EventSource(`${API_BASE_URL}/ai/chat/stream/?${params.toString()}`, {
+      withCredentials: true,
+    });
+
+    let fullResponse = '';
+
+    eventSource.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        
+        switch (data.type) {
+          case 'start':
+            console.log('Chat streaming started');
+            onStart?.();
+            break;
+          case 'chunk':
+            fullResponse += data.content;
+            onChunk(data.content);
+            break;
+          case 'end':
+            console.log('Chat streaming completed');
+            onEnd?.(fullResponse);
+            eventSource.close();
+            break;
+          case 'error':
+            onError?.(data.message);
+            eventSource.close();
+            break;
+        }
+      } catch (error) {
+        console.error('Error parsing chat SSE data:', error);
+        onError?.('Error parsing server response');
+        eventSource.close();
+      }
+    };
+
+    eventSource.onerror = (error) => {
+      console.error('Chat EventSource error:', error);
       onError?.('Connection error occurred');
       eventSource.close();
     };

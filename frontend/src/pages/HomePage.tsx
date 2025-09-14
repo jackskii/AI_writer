@@ -1,28 +1,28 @@
 import React, { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { Plus, BookOpen, Calendar, FileText } from 'lucide-react';
+import { Plus, BookOpen, Calendar, FileText, Trash2, MoreVertical } from 'lucide-react';
 import { worksApi } from '../services/api';
 import { useWorkStore } from '../stores/useWorkStore';
 import { Button } from '../components/ui/Button';
 import { Card, CardContent, CardFooter, CardHeader } from '../components/ui/Card';
 import { LoadingScreen, LoadingSpinner } from '../components/ui/Loading';
+import { UserMenu } from '../components/ui/UserMenu';
 import { CreateWorkModal } from '../components/modals/CreateWorkModal';
 import type { Work } from '../types';
 
 export const HomePage: React.FC = () => {
   const navigate = useNavigate();
-  const { works, setWorks, setCurrentWork } = useWorkStore();
+  const queryClient = useQueryClient();
+  const { setCurrentWork } = useWorkStore();
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [deleteModalWork, setDeleteModalWork] = useState<Work | null>(null);
 
-  const { data, isLoading, error, refetch } = useQuery({
+  const { data: works, isLoading, error, refetch } = useQuery({
     queryKey: ['works'],
     queryFn: async () => {
       const response = await worksApi.list();
       return response.data.results; // Extract the results array from paginated response
-    },
-    onSuccess: (data: Work[]) => {
-      setWorks(data);
     }
   });
 
@@ -36,9 +36,29 @@ export const HomePage: React.FC = () => {
   };
 
   const handleWorkCreated = (work: Work) => {
-    refetch(); // Refresh the works list
+    // Invalidate and refetch works list to get fresh data from API
+    queryClient.invalidateQueries({ queryKey: ['works'] });
     setIsCreateModalOpen(false);
     navigate(`/works/${work.id}`);
+  };
+
+  const deleteMutation = useMutation({
+    mutationFn: (workId: number) => worksApi.delete(workId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['works'] });
+      setDeleteModalWork(null);
+    }
+  });
+
+  const handleDeleteClick = (work: Work, e: React.MouseEvent) => {
+    e.stopPropagation(); // Prevent opening the work
+    setDeleteModalWork(work);
+  };
+
+  const handleConfirmDelete = () => {
+    if (deleteModalWork) {
+      deleteMutation.mutate(deleteModalWork.id);
+    }
   };
 
   if (isLoading) {
@@ -57,7 +77,7 @@ export const HomePage: React.FC = () => {
     );
   }
 
-  const worksList = data || works || [];
+  const worksList = works || [];
 
   return (
     <div className="min-h-screen bg-dark-bg">
@@ -69,17 +89,20 @@ export const HomePage: React.FC = () => {
               <h1 className="text-2xl font-bold text-dark-text">AI 小说写作助手</h1>
               <p className="text-dark-text-muted mt-1">智能写作，创意无限</p>
             </div>
-            <Button onClick={handleCreateWork} className="flex items-center gap-2">
-              <Plus size={18} />
-              新建作品
-            </Button>
+            <div className="flex items-center gap-4">
+              <Button onClick={handleCreateWork} className="flex items-center gap-2">
+                <Plus size={18} />
+                新建作品
+              </Button>
+              <UserMenu />
+            </div>
           </div>
         </div>
       </header>
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-6 py-8">
-        {worksList.length === 0 ? (
+        {!worksList || worksList.length === 0 ? (
           // Empty State
           <div className="text-center py-16">
             <BookOpen size={64} className="mx-auto text-dark-text-muted mb-4" />
@@ -99,7 +122,7 @@ export const HomePage: React.FC = () => {
               <Card key={work.id} className="hover:border-dark-primary transition-colors cursor-pointer">
                 <CardHeader>
                   <div className="flex items-start justify-between">
-                    <div className="flex-1">
+                    <div className="flex-1" onClick={() => handleWorkClick(work)}>
                       <h3 className="font-semibold text-dark-text text-lg truncate">
                         {work.title}
                       </h3>
@@ -111,10 +134,17 @@ export const HomePage: React.FC = () => {
                         ) : '暂无简介'}
                       </p>
                     </div>
+                    <button
+                      onClick={(e) => handleDeleteClick(work, e)}
+                      className="p-1 text-dark-text-muted hover:text-red-400 transition-colors"
+                      title="删除作品"
+                    >
+                      <Trash2 size={16} />
+                    </button>
                   </div>
                 </CardHeader>
                 
-                <CardContent>
+                <CardContent onClick={() => handleWorkClick(work)}>
                   <div className="grid grid-cols-2 gap-4 text-sm">
                     <div className="flex items-center gap-2 text-dark-text-muted">
                       <FileText size={16} />
@@ -153,6 +183,44 @@ export const HomePage: React.FC = () => {
         onClose={() => setIsCreateModalOpen(false)}
         onWorkCreated={handleWorkCreated}
       />
+
+      {/* Delete Confirmation Modal */}
+      {deleteModalWork && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <Card className="w-full max-w-md mx-4">
+            <CardHeader>
+              <h3 className="text-lg font-semibold text-dark-text">确认删除作品</h3>
+            </CardHeader>
+            <CardContent>
+              <p className="text-dark-text-muted">
+                您确定要删除作品《<span className="font-medium text-dark-text">{deleteModalWork.title}</span>》吗？
+              </p>
+              <p className="text-red-400 text-sm mt-2">
+                此操作不可撤销，将永久删除该作品及其所有章节、笔记等内容。
+              </p>
+            </CardContent>
+            <CardFooter>
+              <div className="flex justify-end gap-3 w-full">
+                <Button
+                  variant="outline"
+                  onClick={() => setDeleteModalWork(null)}
+                  disabled={deleteMutation.isPending}
+                >
+                  取消
+                </Button>
+                <Button
+                  variant="outline"
+                  className="text-red-400 border-red-400 hover:bg-red-400 hover:text-white"
+                  onClick={handleConfirmDelete}
+                  disabled={deleteMutation.isPending}
+                >
+                  {deleteMutation.isPending ? '删除中...' : '确认删除'}
+                </Button>
+              </div>
+            </CardFooter>
+          </Card>
+        </div>
+      )}
     </div>
   );
 };

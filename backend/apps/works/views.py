@@ -10,10 +10,10 @@ from .serializers import WorkSerializer, WorkDetailSerializer, ActSerializer, Ch
 
 class WorkViewSet(viewsets.ModelViewSet):
     serializer_class = WorkSerializer
-    permission_classes = [AllowAny]
+    permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        return Work.objects.all()  # For demo purposes, return all works
+        return Work.objects.filter(author=self.request.user)
 
     def get_serializer_class(self):
         if self.action == 'retrieve':
@@ -21,25 +21,21 @@ class WorkViewSet(viewsets.ModelViewSet):
         return WorkSerializer
 
     def perform_create(self, serializer):
-        # For demo purposes, create a dummy user if none exists
-        from django.contrib.auth import get_user_model
-        User = get_user_model()
-        user, created = User.objects.get_or_create(username='demo_user')
-        serializer.save(author=user)
+        serializer.save(author=self.request.user)
 
 
 class ActViewSet(viewsets.ModelViewSet):
     serializer_class = ActSerializer
-    permission_classes = [AllowAny]
+    permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
         work_id = self.kwargs.get('work_pk')
-        work = get_object_or_404(Work, id=work_id)
+        work = get_object_or_404(Work, id=work_id, author=self.request.user)
         return Act.objects.filter(work=work).order_by('order')
 
     def perform_create(self, serializer):
         work_id = self.kwargs.get('work_pk')
-        work = get_object_or_404(Work, id=work_id)
+        work = get_object_or_404(Work, id=work_id, author=self.request.user)
         
         # Auto-set order to the next available number
         next_order = work.acts.count() + 1
@@ -49,16 +45,16 @@ class ActViewSet(viewsets.ModelViewSet):
 
 class ChapterViewSet(viewsets.ModelViewSet):
     serializer_class = ChapterSerializer
-    permission_classes = [AllowAny]
+    permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
         work_id = self.kwargs.get('work_pk')
-        work = get_object_or_404(Work, id=work_id)
+        work = get_object_or_404(Work, id=work_id, author=self.request.user)
         return Chapter.objects.filter(work=work)
 
     def perform_create(self, serializer):
         work_id = self.kwargs.get('work_pk')
-        work = get_object_or_404(Work, id=work_id)
+        work = get_object_or_404(Work, id=work_id, author=self.request.user)
         
         # Get the act from the serializer data - it should be an Act instance now
         act = serializer.validated_data.get('act')
@@ -68,6 +64,11 @@ class ChapterViewSet(viewsets.ModelViewSet):
                 work=work, order=1,
                 defaults={'name': '第1卷'}
             )
+        else:
+            # Validate that the act belongs to this work
+            if act.work != work:
+                from rest_framework.exceptions import ValidationError
+                raise ValidationError(f"Act {act.id} does not belong to work {work.id}")
         
         # Auto-set order to the next available number globally (across all acts)
         next_order = work.chapters.count() + 1
@@ -121,14 +122,14 @@ class ChapterViewSet(viewsets.ModelViewSet):
 
 class LoreEntryViewSet(viewsets.ModelViewSet):
     serializer_class = LoreEntrySerializer
-    permission_classes = [AllowAny]
+    permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
         work_id = self.kwargs.get('work_pk')
-        work = get_object_or_404(Work, id=work_id)
+        work = get_object_or_404(Work, id=work_id, author=self.request.user)
         return LoreEntry.objects.filter(work=work)
 
     def perform_create(self, serializer):
         work_id = self.kwargs.get('work_pk')
-        work = get_object_or_404(Work, id=work_id)
+        work = get_object_or_404(Work, id=work_id, author=self.request.user)
         serializer.save(work=work)

@@ -42,10 +42,19 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ work, chapter }) => {
       if (typingTimer.current) {
         clearTimeout(typingTimer.current);
       }
+      if (streamEventSource) {
+        streamEventSource.close();
+        setStreamEventSource(null);
+      }
     };
   }, [work.id, chapter.id]);
 
-  // Fallback chat mutation for when WebSocket is not available
+  // State for streaming
+  const [isStreamingChat, setIsStreamingChat] = useState(false);
+  const [streamingMessage, setStreamingMessage] = useState('');
+  const [streamEventSource, setStreamEventSource] = useState<EventSource | null>(null);
+
+  // Fallback chat mutation for when streaming fails
   const chatMutation = useMutation({
     mutationFn: (message: string) => aiApi.chat(work.id, chapter.id, message),
     onSuccess: (response, message) => {
@@ -73,25 +82,66 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ work, chapter }) => {
 
   const handleSendMessage = () => {
     const message = inputMessage.trim();
-    if (!message || chatMutation.isPending) return;
+    if (!message || isStreamingChat || chatMutation.isPending) return;
 
     setInputMessage('');
 
-    // Try WebSocket first, fallback to HTTP API
-    if (isConnected && chatWebSocket.current) {
-      chatWebSocket.current.sendChatMessage(message);
-    } else {
-      // Add user message to chat for HTTP fallback
-      const userMessage: ChatMessage = {
-        id: Date.now().toString() + '_user',
-        role: 'user',
-        content: message,
-        timestamp: new Date().toISOString()
-      };
+    // Add user message immediately
+    const userMessage: ChatMessage = {
+      id: Date.now().toString() + '_user',
+      role: 'user',
+      content: message,
+      timestamp: new Date().toISOString()
+    };
+    setMessages(prev => [...prev, userMessage]);
 
-      setMessages(prev => [...prev, userMessage]);
+    // Try streaming first, fallback to regular API
+    try {
+      setIsStreamingChat(true);
+      setStreamingMessage('');
       
-      // Send to AI via HTTP API
+      const eventSource = aiApi.chatStream(
+        work.id,
+        chapter.id,
+        message,
+        // onChunk
+        (chunk: string) => {
+          setStreamingMessage(prev => prev + chunk);
+        },
+        // onStart
+        () => {
+          console.log('Chat streaming started');
+        },
+        // onEnd
+        (fullResponse: string) => {
+          const aiResponse: ChatMessage = {
+            id: Date.now().toString() + '_ai',
+            role: 'assistant',
+            content: fullResponse,
+            timestamp: new Date().toISOString()
+          };
+          
+          setMessages(prev => [...prev, aiResponse]);
+          setIsStreamingChat(false);
+          setStreamingMessage('');
+          setStreamEventSource(null);
+        },
+        // onError
+        (error: string) => {
+          console.error('Streaming chat error:', error);
+          setIsStreamingChat(false);
+          setStreamingMessage('');
+          setStreamEventSource(null);
+          
+          // Fallback to regular API
+          chatMutation.mutate(message);
+        }
+      );
+      
+      setStreamEventSource(eventSource);
+    } catch (error) {
+      console.error('Failed to start streaming:', error);
+      setIsStreamingChat(false);
       chatMutation.mutate(message);
     }
   };
@@ -167,51 +217,99 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ work, chapter }) => {
       {/* Chat Messages */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
         {messages.map((message) => (
-          <div
-            key={message.id}
-            className={`flex items-start gap-3 ${
+          <div key={message.id} className="w-full">
+            {/* Avatar on top */}
+            <div className={`flex items-center mb-2 ${
               message.role === 'user' ? 'justify-end' : 'justify-start'
-            }`}
-          >
-            {message.role === 'assistant' && (
-              <div className="flex-shrink-0 w-8 h-8 bg-dark-primary rounded-full flex items-center justify-center">
-                <Bot size={16} className="text-white" />
+            }`}>
+              <div className={`flex items-center gap-2 ${
+                message.role === 'user' ? 'flex-row-reverse' : 'flex-row'
+              }`}>
+                <div className={`flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center ${
+                  message.role === 'assistant' 
+                    ? 'bg-dark-primary' 
+                    : 'bg-dark-secondary'
+                }`}>
+                  {message.role === 'assistant' ? (
+                    <Bot size={12} className="text-white" />
+                  ) : (
+                    <User size={12} className="text-white" />
+                  )}
+                </div>
+                <span className="text-xs text-dark-text-muted">
+                  {message.role === 'assistant' ? 'AI助手' : '你'}
+                </span>
               </div>
-            )}
+            </div>
             
+            {/* Full width text bubble */}
             <div
-              className={`max-w-[80%] p-3 rounded-lg text-sm ${
+              className={`w-full p-3 rounded-lg text-sm mb-1 ${
                 message.role === 'user'
                   ? 'bg-dark-primary text-white'
                   : 'bg-dark-surface border border-dark-border text-dark-text'
               }`}
             >
               <div className="whitespace-pre-wrap">{message.content}</div>
-              <div className={`text-xs mt-1 opacity-70 ${
-                message.role === 'user' ? 'text-blue-100' : 'text-dark-text-muted'
-              }`}>
-                {new Date(message.timestamp).toLocaleTimeString('zh-CN', {
-                  hour: '2-digit',
-                  minute: '2-digit'
-                })}
-              </div>
             </div>
             
-            {message.role === 'user' && (
-              <div className="flex-shrink-0 w-8 h-8 bg-dark-secondary rounded-full flex items-center justify-center">
-                <User size={16} className="text-white" />
-              </div>
-            )}
+            {/* Timestamp */}
+            <div className={`text-xs opacity-70 mb-4 ${
+              message.role === 'user' 
+                ? 'text-right text-blue-100' 
+                : 'text-left text-dark-text-muted'
+            }`}>
+              {new Date(message.timestamp).toLocaleTimeString('zh-CN', {
+                hour: '2-digit',
+                minute: '2-digit'
+              })}
+            </div>
           </div>
         ))}
         
-        {/* Loading indicator for HTTP requests */}
-        {chatMutation.isPending && !isConnected && (
-          <div className="flex items-start gap-3">
-            <div className="flex-shrink-0 w-8 h-8 bg-dark-primary rounded-full flex items-center justify-center">
-              <Bot size={16} className="text-white" />
+        {/* Streaming message indicator */}
+        {isStreamingChat && (
+          <div className="w-full">
+            {/* Avatar on top */}
+            <div className="flex items-center mb-2 justify-start">
+              <div className="flex items-center gap-2">
+                <div className="flex-shrink-0 w-6 h-6 bg-dark-primary rounded-full flex items-center justify-center">
+                  <Bot size={12} className="text-white" />
+                </div>
+                <span className="text-xs text-dark-text-muted">AI助手</span>
+              </div>
             </div>
-            <div className="bg-dark-surface border border-dark-border rounded-lg p-3">
+            
+            {/* Streaming content */}
+            <div className="w-full bg-dark-surface border border-dark-border rounded-lg p-3 mb-1">
+              <div className="whitespace-pre-wrap text-dark-text">
+                {streamingMessage}
+                <span className="inline-block w-2 h-4 bg-dark-primary animate-pulse ml-1" />
+              </div>
+            </div>
+            
+            {/* Timestamp */}
+            <div className="text-xs opacity-70 mb-4 text-left text-dark-text-muted">
+              正在输入...
+            </div>
+          </div>
+        )}
+
+        {/* Loading indicator for HTTP requests */}
+        {chatMutation.isPending && !isStreamingChat && (
+          <div className="w-full">
+            {/* Avatar on top */}
+            <div className="flex items-center mb-2 justify-start">
+              <div className="flex items-center gap-2">
+                <div className="flex-shrink-0 w-6 h-6 bg-dark-primary rounded-full flex items-center justify-center">
+                  <Bot size={12} className="text-white" />
+                </div>
+                <span className="text-xs text-dark-text-muted">AI助手</span>
+              </div>
+            </div>
+            
+            {/* Full width loading bubble */}
+            <div className="w-full bg-dark-surface border border-dark-border rounded-lg p-3">
               <div className="flex items-center gap-2 text-dark-text-muted">
                 <LoadingSpinner size="sm" />
                 <span className="text-sm">AI正在思考...</span>
@@ -222,11 +320,19 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ work, chapter }) => {
 
         {/* Typing indicator for WebSocket */}
         {isTyping && isConnected && (
-          <div className="flex items-start gap-3">
-            <div className="flex-shrink-0 w-8 h-8 bg-dark-primary rounded-full flex items-center justify-center">
-              <Bot size={16} className="text-white" />
+          <div className="w-full">
+            {/* Avatar on top */}
+            <div className="flex items-center mb-2 justify-start">
+              <div className="flex items-center gap-2">
+                <div className="flex-shrink-0 w-6 h-6 bg-dark-primary rounded-full flex items-center justify-center">
+                  <Bot size={12} className="text-white" />
+                </div>
+                <span className="text-xs text-dark-text-muted">AI助手</span>
+              </div>
             </div>
-            <div className="bg-dark-surface border border-dark-border rounded-lg p-3">
+            
+            {/* Full width typing bubble */}
+            <div className="w-full bg-dark-surface border border-dark-border rounded-lg p-3">
               <div className="flex items-center gap-2 text-dark-text-muted">
                 <div className="flex gap-1">
                   <div className="w-2 h-2 bg-dark-text-muted rounded-full animate-bounce" style={{animationDelay: '0ms'}} />
@@ -253,13 +359,13 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ work, chapter }) => {
               onKeyPress={handleKeyPress}
               placeholder="与AI助手聊天..."
               className="bg-dark-bg border-dark-border text-sm"
-              disabled={chatMutation.isPending && !isConnected}
+              disabled={isStreamingChat || chatMutation.isPending}
             />
           </div>
           
           <Button
             onClick={handleSendMessage}
-            disabled={!inputMessage.trim() || (chatMutation.isPending && !isConnected)}
+            disabled={!inputMessage.trim() || isStreamingChat || chatMutation.isPending}
             size="sm"
             className="flex items-center gap-2 px-3 py-2"
           >

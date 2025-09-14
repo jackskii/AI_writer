@@ -1,5 +1,4 @@
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
 import type { Work, Chapter, LoreEntry, Note } from '../types';
 
 interface WorkState {
@@ -45,9 +44,7 @@ interface WorkState {
   clearAll: () => void;
 }
 
-export const useWorkStore = create<WorkState>()(
-  persist(
-    (set, get) => ({
+export const useWorkStore = create<WorkState>()((set, get) => ({
       // Initial state
       currentWork: null,
       currentChapter: null,
@@ -192,18 +189,4 @@ export const useWorkStore = create<WorkState>()(
         loreEntries: {},
         notes: {}
       })
-    }),
-    {
-      name: 'work-store', // unique name
-      partialize: (state) => ({
-        // Only persist certain parts of the state
-        works: state.works,
-        chapters: state.chapters,
-        loreEntries: state.loreEntries,
-        notes: state.notes,
-        currentWork: state.currentWork,
-        currentChapter: state.currentChapter
-      })
-    }
-  )
-);
+    }));

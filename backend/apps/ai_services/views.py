@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 
 @api_view(['POST'])
-@permission_classes([AllowAny])
+@permission_classes([IsAuthenticated])
 def ai_chat(request):
     """AI聊天端点"""
     work_id = request.data.get('work_id')
@@ -28,8 +28,8 @@ def ai_chat(request):
             status=status.HTTP_400_BAD_REQUEST
         )
     
-    # 获取作品和章节（demo模式下不验证用户权限）
-    work = get_object_or_404(Work, id=work_id)
+    # 获取作品和章节
+    work = get_object_or_404(Work, id=work_id, author=request.user)
     chapter = get_object_or_404(Chapter, id=chapter_id, work=work)
     
     try:
@@ -53,7 +53,7 @@ def ai_chat(request):
 
 
 @api_view(['POST'])
-@permission_classes([AllowAny])
+@permission_classes([IsAuthenticated])
 def ai_continue(request):
     """AI续写端点"""
     work_id = request.data.get('work_id')
@@ -68,8 +68,8 @@ def ai_continue(request):
             status=status.HTTP_400_BAD_REQUEST
         )
     
-    # 获取作品和章节（demo模式下不验证用户权限）
-    work = get_object_or_404(Work, id=work_id)
+    # 获取作品和章节
+    work = get_object_or_404(Work, id=work_id, author=request.user)
     chapter = get_object_or_404(Chapter, id=chapter_id, work=work)
     
     try:
@@ -98,7 +98,7 @@ def ai_continue(request):
 
 
 @api_view(['POST'])
-@permission_classes([AllowAny])
+@permission_classes([IsAuthenticated])
 def ai_suggest(request):
     """AI建议端点"""
     work_id = request.data.get('work_id')
@@ -111,8 +111,8 @@ def ai_suggest(request):
             status=status.HTTP_400_BAD_REQUEST
         )
     
-    # 获取作品和章节（demo模式下不验证用户权限）
-    work = get_object_or_404(Work, id=work_id)
+    # 获取作品和章节
+    work = get_object_or_404(Work, id=work_id, author=request.user)
     chapter = get_object_or_404(Chapter, id=chapter_id, work=work)
     
     try:
@@ -132,7 +132,7 @@ def ai_suggest(request):
 
 
 @api_view(['POST'])
-@permission_classes([AllowAny])
+@permission_classes([IsAuthenticated])
 def ai_summarize(request):
     """AI总结端点"""
     work_id = request.data.get('work_id')
@@ -144,8 +144,8 @@ def ai_summarize(request):
             status=status.HTTP_400_BAD_REQUEST
         )
     
-    # 获取作品和章节（demo模式下不验证用户权限）
-    work = get_object_or_404(Work, id=work_id)
+    # 获取作品和章节
+    work = get_object_or_404(Work, id=work_id, author=request.user)
     chapter = get_object_or_404(Chapter, id=chapter_id, work=work)
     
     try:

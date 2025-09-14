@@ -7,6 +7,7 @@ import { useWorkStore } from '../stores/useWorkStore';
 import { Button } from '../components/ui/Button';
 import { Card, CardContent, CardHeader } from '../components/ui/Card';
 import { LoadingScreen } from '../components/ui/Loading';
+import { UserMenu } from '../components/ui/UserMenu';
 import { Textarea } from '../components/ui/Input';
 import { CreateLoreModal } from '../components/modals/CreateLoreModal';
 import { SettingsModal } from '../components/modals/SettingsModal';
@@ -409,6 +410,7 @@ export const WorkDetailPage: React.FC = () => {
                   新建世界观条目
                 </Button>
               )}
+              <UserMenu />
             </div>
           </div>
         </div>

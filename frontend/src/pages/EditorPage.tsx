@@ -7,6 +7,7 @@ import { useWorkStore } from '../stores/useWorkStore';
 import { useUIStore } from '../stores/useUIStore';
 import { Button } from '../components/ui/Button';
 import { LoadingScreen } from '../components/ui/Loading';
+import { UserMenu } from '../components/ui/UserMenu';
 import { EditorPanel } from '../components/editor/EditorPanel';
 import { ChatPanel } from '../components/editor/ChatPanel';
 import { AutoSaveIndicator } from '../components/editor/AutoSaveIndicator';
@@ -277,6 +278,7 @@ export const EditorPage: React.FC = () => {
               <Save size={16} />
               {isAutoSaving ? '保存中...' : '保存'}
             </Button>
+            <UserMenu />
           </div>
         </div>
       </header>
@@ -294,7 +296,7 @@ export const EditorPage: React.FC = () => {
         </div>
 
         {/* Right Panel - Full Height Chat */}
-        <div className="w-80 border-l border-dark-border">
+        <div className="w-96 border-l border-dark-border">
           <div className="h-full flex flex-col">
             <div className="flex-shrink-0 px-4 py-3 border-b border-dark-border bg-dark-surface">
               <div className="flex items-center gap-2 text-sm font-medium text-dark-text">
