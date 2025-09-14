@@ -1,0 +1,96 @@
+// 基础数据类型定义
+
+export interface Work {
+  id: number;
+  title: string;
+  synopsis: string;
+  created_at: string;
+  updated_at: string;
+  word_count: number;
+  chapter_count: number;
+}
+
+export interface Act {
+  id: number;
+  work: number;
+  name: string;
+  order: number;
+  word_count: number;
+  chapter_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Chapter {
+  id: number;
+  work: number;
+  title: string;
+  content: string;
+  order: number;
+  act: number;
+  act_name?: string;
+  act_order?: number;
+  chapter_number: number;
+  word_count: number;
+  created_at: string;
+  updated_at: string;
+  summary?: string;
+}
+
+export interface LoreEntry {
+  id: number;
+  work: number;
+  name: string;
+  description: string;
+  triggers: string[];
+  extra_triggers: string[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Note {
+  id: number;
+  work?: number;
+  chapter?: number;
+  content: string;
+  color: string;
+  text_start_position?: number;
+  text_end_position?: number;
+  linked_text?: string;
+  is_ai_generated?: boolean;
+  note_type?: 'user' | 'suggestion' | 'reminder' | 'character' | 'plot' | 'setting';
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ChatMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp: string;
+}
+
+export interface AIService {
+  type: 'chat' | 'continue' | 'suggest' | 'summary';
+  model: 'deepseek-reasoner' | 'deepseek-chat';
+}
+
+export interface Suggestion {
+  id: string;
+  type: 'expand' | 'improve' | 'rewrite' | 'continue';
+  content: string;
+  targetText?: string;
+  position?: {
+    start: number;
+    end: number;
+  };
+  created_at: string;
+}
+
+export interface AIContext {
+  synopsis: string;
+  loreEntries: LoreEntry[];
+  recentChapterSummaries: string[];
+  currentChapterContent: string;
+  guide?: string;
+}
