@@ -1,10 +1,36 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides comprehensive guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Project Overview
 
-AI Novel Writing Assistant (AI 小说写作助手) - A Chinese AI-powered novel writing tool with intelligent suggestions, chat features, and world-building management.
+AI Novel Writing Assistant (AI 小说写作助手) - A sophisticated Chinese AI-powered novel writing tool with intelligent suggestions, real-time chat features, and comprehensive world-building management.
+
+## 📚 Documentation Navigation
+
+### Quick Access to All Documentation:
+
+#### 🏗️ Architecture & Setup
+- **[CLAUDE.md](./CLAUDE.md)** - This file (main architecture & guidelines)
+- **[Backend README](./backend/README.md)** - Django backend architecture & setup
+- **[API Documentation](./backend/api_docs.md)** - Complete REST API reference
+
+#### 🎨 Frontend Systems
+- **[Editor System](./frontend/docs/EDITOR_SYSTEM.md)** - Marker-based highlighting & editor
+- **[Streaming System](./frontend/docs/STREAMING.md)** - SSE implementation & authentication
+- **[Authentication](./frontend/docs/AUTHENTICATION.md)** - Token management & security
+
+#### 🔧 Component Details
+- **[Editor Components](./frontend/src/components/editor/README.md)** - EditorPanel & ChatPanel
+- **[Services Layer](./frontend/src/services/README.md)** - API communication & WebSocket
+- **[AI Services](./backend/apps/ai_services/README.md)** - DeepSeek integration & context building
+
+#### 🚨 Critical Systems Documentation
+- **Marker System**: `frontend/docs/EDITOR_SYSTEM.md` (explains the fragile text highlighting)
+- **Streaming Auth**: `frontend/docs/STREAMING.md` (EventSource token workaround)
+- **AI Context**: `backend/apps/ai_services/README.md` (intelligent context building)
+
+---
 
 ## Development Commands
 
@@ -13,7 +39,7 @@ AI Novel Writing Assistant (AI 小说写作助手) - A Chinese AI-powered novel 
 cd backend
 pip install -r requirements.txt
 python manage.py migrate
-python manage.py runserver  # Runs on http://localhost:8000
+python manage.py runserver 0.0.0.0:8001  # Runs on http://localhost:8001
 
 # Testing
 python manage.py test
@@ -41,55 +67,258 @@ docker-compose up -d    # Full stack with PostgreSQL and Redis
 ## Architecture Overview
 
 ### Backend Structure (Django)
-- **apps/works/**: Novel and chapter management (Work, Chapter, LoreEntry models)
-- **apps/ai_services/**: AI integration with DeepSeek API (4 different AI assistants)
-- **apps/chat/**: WebSocket chat system for AI conversations
-- **apps/notes/**: Note-taking system with color coding and text associations
+- **apps/works/**: Novel and chapter management (Work, Chapter, Act, LoreEntry models)
+- **apps/ai_services/**: AI integration with DeepSeek API (4 specialized AI assistants)
+- **apps/chat/**: WebSocket chat system and message history management
+- **apps/notes/**: Advanced note-taking system with color coding and text position linking
+- **apps/core/**: Shared utilities and base models
 
 ### Frontend Structure (React + TypeScript)
 - **components/ui/**: Reusable UI components with Tailwind CSS
-- **components/editor/**: Monaco Editor integration for writing
-- **pages/**: Main application pages
-- **stores/**: Zustand state management
-- **services/**: API communication with backend
+- **components/editor/**: Complex editor system with marker-based text highlighting
+- **components/modals/**: Modal dialogs for various operations
+- **pages/**: Main application pages (Auth, Home, WorkDetail, Editor)
+- **stores/**: Zustand state management for UI and authentication
+- **services/**: API communication layer with axios interceptors
 
-### AI Integration
-Four specialized AI assistants using DeepSeek API:
-1. **General Chat AI** (deepseek-reasoner) - Context-aware conversations
-2. **Continuation AI** (deepseek-reasoner) - Story continuation based on context
-3. **Suggestion AI** (deepseek-chat) - Writing suggestions (auto-triggered at 300 chars)
-4. **Summary AI** (deepseek-chat) - Chapter summarization
+### AI Integration Architecture
+Four specialized AI assistants using DeepSeek API with different models and purposes:
+
+1. **General Chat AI** (`deepseek-chat`) - Context-aware conversations about story
+2. **Continuation AI** (`deepseek-chat`) - Story continuation based on context and guide
+3. **Suggestion AI** (`deepseek-chat`) - Writing improvement suggestions
+4. **Summary AI** (`deepseek-chat`) - Chapter summarization for context building
+
+**Key AI Features:**
+- **Context Building**: Automatically constructs context from work synopsis, triggered lore entries, and recent chapter summaries
+- **Streaming Responses**: All AI interactions use Server-Sent Events (SSE) for real-time streaming
+- **Token Management**: Configurable token limits for different AI operations
+- **Fallback Mechanisms**: HTTP fallback when streaming fails
 
 ### Database Schema
-**Core Models:**
-- `Work`: Novel with title, synopsis, author, computed word/chapter counts
-- `Chapter`: Content, order, AI summary, auto-save tracking
-- `LoreEntry`: World-building with trigger word matching system
-- `Note`: Color-coded notes with text position linking
 
-### Key Features
-- **Auto-save**: 5-second intervals with real-time status
-- **Three-panel Layout**: Editor + Notes + Chat interface
-- **Trigger Word System**: Automatic context loading for AI based on story content
-- **WebSocket Support**: Real-time chat and notifications (Django Channels)
-- **Dark Theme**: Professional writing interface optimized for Chinese text
+**Core Models:**
+- `Work`: Novel metadata (title, synopsis, author, computed statistics)
+- `Chapter`: Chapter content with auto-save, AI summaries, and order management
+- `Act`: Volume/book organization within works
+- `LoreEntry`: World-building entries with trigger word matching system
+- `Note`: Color-coded notes with text position linking using invisible markers
+- `ChatMessage`: Chat history between user and AI
+- `Suggestion`: AI-generated writing suggestions with targeting
+
+**Important ID Strategy:**
+- All models use `BigIntegerField` with `generate_large_id()` for collision-resistant IDs
+- Large IDs enable safe concurrent operations and avoid ID conflicts
+
+### Critical Features & Implementation Details
+
+#### 1. Marker-Based Text Highlighting System
+**Location**: `frontend/src/components/editor/EditorPanel.tsx`
+
+The system uses invisible Unicode characters to create unbreakable text markers:
+
+```javascript
+const MARKER_BASE_CHARS = [
+  '\u200B', // Zero-width space
+  '\u200C', // Zero-width non-joiner
+  '\u200D', // Zero-width joiner
+  '\u2060', // Word joiner
+  '\uFEFF', // Zero-width no-break space
+];
+```
+
+**How it works:**
+- Notes are linked to text using start/end markers: `\u200B{encodedId}\u200C` and `\u200D{encodedId}\u2060`
+- Note IDs are encoded in base-5 using invisible characters
+- Markers are preserved in the database content but stripped for display
+- Special keyboard handling prevents accidental marker deletion
+
+**Critical Issues:**
+- Markers can break when users type at text boundaries (end of highlighted words)
+- Restoration logic is complex and can fail in edge cases
+- The system requires careful cursor positioning to avoid marker corruption
+
+#### 2. Streaming Authentication System
+**Location**: `backend/apps/ai_services/views.py`, `frontend/src/services/api.ts`
+
+**The Problem**: EventSource (used for SSE) cannot send custom headers, breaking standard token authentication.
+
+**The Solution**: Token passed via query parameters for streaming endpoints:
+
+```javascript
+// Frontend: Add token to EventSource URL
+const authStorage = localStorage.getItem('auth-storage');
+const token = parsedStorage?.state?.token;
+if (token) {
+  params.append('token', token);
+}
+const eventSource = new EventSource(`${API_BASE_URL}/ai/chat/stream/?${params.toString()}`);
+```
+
+```python
+# Backend: Accept token via query params
+token = request.GET.get('token')
+if token:
+    token_obj = Token.objects.get(key=token)
+    user = token_obj.user
+    request.user = user
+```
+
+#### 3. Three-Panel Layout System
+**Location**: `frontend/src/pages/EditorPage.tsx`
+
+The main writing interface consists of:
+- **Left Panel**: Editor with syntax highlighting and auto-save
+- **Center Panel**: Notes sidebar with color-coded annotations
+- **Right Panel**: AI chat interface with context awareness
+
+**Auto-save Implementation**: 5-second intervals with visual feedback and conflict resolution.
+
+#### 4. AI Context Building
+**Location**: `backend/apps/ai_services/services.py` (`ContextBuilder` class)
+
+Context construction for AI requests includes:
+- Work synopsis and metadata
+- Triggered lore entries (based on content scanning for trigger words)
+- Recent chapter summaries (last 5 chapters)
+- Current chapter content
+
+**Trigger Word System**: Automatically includes relevant world-building information when specific words appear in content.
 
 ### Environment Configuration
-Backend requires `.env` file with:
-- `DEEPSEEK_API_KEY`: Required for AI functionality
-- `DEBUG`: Development mode flag
-- `SECRET_KEY`: Django secret key
-- Database settings (SQLite in dev, PostgreSQL in production)
+
+#### Backend (.env)
+```bash
+DEEPSEEK_API_KEY=your_api_key_here          # Required for AI functionality
+DEEPSEEK_API_BASE=https://api.deepseek.com  # DeepSeek API endpoint
+DEBUG=True                                   # Development mode
+SECRET_KEY=your_secret_key                   # Django secret key
+DATABASE_URL=sqlite:///db.sqlite3            # Database connection
+ALLOWED_HOSTS=localhost,127.0.0.1            # Allowed hosts
+```
+
+#### Frontend (.env)
+```bash
+VITE_API_URL=http://127.0.0.1:8001/api      # Backend API URL
+VITE_WS_HOST=localhost:8001                  # WebSocket host
+```
 
 ### API Endpoints Structure
-- `/api/works/`: Work CRUD and management
-- `/api/works/{id}/chapters/`: Chapter operations including auto-save
-- `/api/ai/`: All AI services (chat, continue, suggest, summarize)
-- `/api/notes/`: Note management with filtering support
 
-### Development Notes
-- Backend uses SQLite for development, PostgreSQL for production
-- Frontend uses Vite for fast development builds
-- AI context is intelligently constructed with work outline, recent chapters, and triggered lore entries
-- Auto-suggestions trigger after 300 characters of new content
-- All AI responses are streamed for better UX
+#### Core Data APIs
+- `GET/POST /api/works/` - Work management
+- `GET/POST/PATCH/DELETE /api/works/{id}/chapters/` - Chapter operations
+- `PATCH /api/works/{id}/chapters/{id}/autosave/` - Auto-save endpoint
+- `GET/POST/PATCH/DELETE /api/notes/` - Note management with filtering
+
+#### AI Service APIs
+- `POST /api/ai/chat/` - Standard AI chat (HTTP)
+- `GET /api/ai/chat/stream/` - Streaming AI chat (SSE)
+- `POST /api/ai/continue/` - Story continuation (HTTP)
+- `GET /api/ai/continue/stream/` - Streaming continuation (SSE)
+- `POST /api/ai/suggest/` - Writing suggestions
+- `POST /api/ai/summarize/` - Chapter summarization
+- `GET /api/ai/summarize/stream/` - Streaming summarization (SSE)
+
+#### Chat System APIs
+- `GET /api/chat/{work_id}/{chapter_id}/` - Get chat history
+- `POST /api/chat/{work_id}/{chapter_id}/save/` - Save message
+- `DELETE /api/chat/{work_id}/{chapter_id}/clear/` - Clear history
+
+### Common Issues & Solutions
+
+#### 1. Marker System Breaking
+**Problem**: Adding text at the end of highlighted words breaks markers
+**Root Cause**: Markers use invisible characters that can be split by text insertion
+**Prevention**:
+- Always validate marker integrity after content changes
+- Use the protection mechanisms in `handleKeyDown`
+- Never manually edit content strings without considering markers
+
+#### 2. Streaming Authentication Failures
+**Problem**: 401 errors on streaming endpoints
+**Root Cause**: EventSource can't send Authorization headers
+**Solution**: Use token query parameter authentication (already implemented)
+
+#### 3. AI Context Too Large
+**Problem**: AI requests failing due to context size
+**Solution**:
+- Limit recent chapter summaries (currently 5)
+- Truncate large content sections
+- Use intelligent lore entry filtering
+
+#### 4. Auto-save Conflicts
+**Problem**: Multiple auto-save requests creating conflicts
+**Solution**: Debounce save operations and handle concurrent updates gracefully
+
+### Development Guidelines
+
+#### When Working on the Editor:
+1. **NEVER** remove the AI Continue Writing section
+2. **NEVER** remove the Update Link functionality for notes
+3. **NEVER** remove streaming functionality without explicit request
+4. Test marker functionality thoroughly after any editor changes
+5. Preserve the three-panel layout structure
+
+#### When Working on AI Services:
+1. Always test both HTTP and streaming endpoints
+2. Verify authentication works for both regular and streaming requests
+3. Monitor token usage and context size
+4. Test fallback mechanisms
+
+#### When Working on Authentication:
+1. Remember that streaming endpoints use query parameter tokens
+2. Test both regular API calls and EventSource connections
+3. Verify token refresh and logout scenarios
+
+### Testing Approach
+
+#### Backend Testing
+```bash
+cd backend
+python manage.py test
+```
+
+#### Frontend Testing
+```bash
+cd frontend
+npm run lint
+npm run build  # Verify build succeeds
+```
+
+#### Integration Testing
+1. Test complete user workflow: auth → create work → write content → AI interactions
+2. Verify marker system doesn't break with various text editing scenarios
+3. Test streaming authentication across all AI endpoints
+4. Verify auto-save functionality under various conditions
+
+### Debugging Tools
+
+#### Backend Debugging
+- Set `DEBUG=True` in `.env`
+- Check Django logs for AI service errors
+- Monitor database queries with Django Debug Toolbar
+
+#### Frontend Debugging
+- Browser DevTools Network tab for API calls
+- Console logs for marker system debugging (extensive logging already in place)
+- React DevTools for component state inspection
+
+### Architecture Decisions & Rationale
+
+#### Why Invisible Unicode Markers?
+- Allows precise text-to-note linking without affecting content display
+- Survives copy/paste operations
+- Enables complex text highlighting without HTML markup
+
+#### Why Server-Sent Events for AI?
+- Real-time streaming improves user experience
+- Better than WebSocket for one-way AI responses
+- Simpler than polling approaches
+
+#### Why Django Channels for Chat?
+- Real-time bidirectional communication
+- Integrates well with Django authentication
+- Supports both HTTP and WebSocket protocols
+
+This documentation should prevent future issues by clearly explaining how each critical system works and what to avoid when making changes.
