@@ -172,12 +172,173 @@ from django.views.decorators.csrf import csrf_exempt
 from django.http import HttpResponse
 
 @csrf_exempt
+def ai_chat_stream(request):
+    """AI聊天端点 - SSE流式响应，支持聊天历史"""
+    if request.method != 'GET':
+        return HttpResponse(
+            'data: {"type": "error", "message": "仅支持GET请求"}\n\n',
+            content_type='text/event-stream'
+        )
+
+    # Check authentication via token query parameter for EventSource compatibility
+    user = None
+    token = request.GET.get('token')
+    if token:
+        from django.contrib.auth.models import AnonymousUser
+        from rest_framework.authtoken.models import Token
+        try:
+            token_obj = Token.objects.get(key=token)
+            user = token_obj.user
+            request.user = user
+        except Token.DoesNotExist:
+            return HttpResponse(
+                'data: {"type": "error", "message": "认证令牌无效"}\n\n',
+                content_type='text/event-stream',
+                status=401
+            )
+    elif not request.user.is_authenticated:
+        return HttpResponse(
+            'data: {"type": "error", "message": "需要登录"}\n\n',
+            content_type='text/event-stream',
+            status=401
+        )
+    else:
+        user = request.user
+        
+    work_id = request.GET.get('work_id')
+    chapter_id = request.GET.get('chapter_id')
+    message = request.GET.get('message')
+    
+    if not all([work_id, chapter_id, message]):
+        return HttpResponse(
+            'data: {"type": "error", "message": "缺少必要参数"}\n\n', 
+            content_type='text/event-stream'
+        )
+    
+    # 获取作品和章节
+    work = get_object_or_404(Work, id=work_id)
+    chapter = get_object_or_404(Chapter, id=chapter_id, work=work)
+    
+    def generate_stream():
+        """生成SSE数据流"""
+        try:
+            # 获取聊天历史
+            from apps.chat.models import ChatSession, ChatMessage
+            try:
+                session = ChatSession.objects.get(
+                    work=work,
+                    chapter=chapter,
+                    user=request.user if hasattr(request, 'user') and request.user.is_authenticated else None
+                )
+                # 获取最近10条消息作为上下文
+                recent_messages = session.messages.all().order_by('-created_at')[:10]
+                chat_history = []
+                for msg in reversed(list(recent_messages)):
+                    chat_history.append({
+                        'role': msg.role,
+                        'content': msg.content
+                    })
+            except ChatSession.DoesNotExist:
+                chat_history = []
+            
+            # Build context in sync environment
+            from .services import ContextBuilder
+            context = ContextBuilder.build_context(chapter)
+            
+            # 创建AI服务实例并开始流式生成
+            ai_service = AIService()
+            
+            # 运行异步生成器
+            import asyncio
+            import threading
+            from queue import Queue
+            
+            chunk_queue = Queue()
+            error_queue = Queue()
+            
+            def run_in_thread():
+                try:
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    
+                    async def collect_chunks():
+                        async for chunk in ai_service.chat_with_ai_stream(context, message, chat_history, chapter.id):
+                            chunk_queue.put(chunk)
+                        chunk_queue.put(None)  # 结束标记
+                    
+                    loop.run_until_complete(collect_chunks())
+                except Exception as e:
+                    error_queue.put(str(e))
+                    chunk_queue.put(None)
+                finally:
+                    loop.close()
+            
+            # 启动线程
+            thread = threading.Thread(target=run_in_thread)
+            thread.start()
+            
+            # 发送初始事件
+            yield f'data: {json.dumps({"type": "start", "message": "AI聊天开始"})}\n\n'
+            
+            # 流式发送chunks
+            accumulated_response = ''
+            while True:
+                # 检查错误
+                if not error_queue.empty():
+                    error = error_queue.get()
+                    yield f'data: {json.dumps({"type": "error", "message": f"AI聊天失败: {error}"})}\n\n'
+                    break
+                
+                # 获取chunk
+                try:
+                    chunk = chunk_queue.get(timeout=1)
+                    if chunk is None:  # 结束标记
+                        yield f'data: {json.dumps({"type": "end", "message": "AI聊天完成", "full_response": accumulated_response})}\n\n'
+                        break
+                    
+                    # 累积响应内容
+                    accumulated_response += chunk
+                    
+                    # 发送chunk
+                    yield f'data: {json.dumps({"type": "chunk", "content": chunk})}\n\n'
+                    
+                except:
+                    # 检查线程是否还活着
+                    if not thread.is_alive():
+                        yield f'data: {json.dumps({"type": "end", "message": "AI聊天完成", "full_response": accumulated_response})}\n\n'
+                        break
+            
+            thread.join(timeout=5)  # 最多等待5秒
+            
+        except Exception as e:
+            logger.error(f"Stream AI chat error: {str(e)}")
+            yield f'data: {json.dumps({"type": "error", "message": f"AI聊天失败: {str(e)}"})}\n\n'
+    
+    response = StreamingHttpResponse(
+        generate_stream(),
+        content_type='text/event-stream'
+    )
+    response['Cache-Control'] = 'no-cache'
+    response['X-Accel-Buffering'] = 'no'  # Disable nginx buffering
+    response['Access-Control-Allow-Origin'] = '*'  # CORS for SSE
+    return response
+
+
+@csrf_exempt
 def ai_continue_stream(request):
     """AI续写端点 - SSE流式响应"""
     if request.method != 'GET':
         return HttpResponse(
             'data: {"type": "error", "message": "仅支持GET请求"}\n\n', 
             content_type='text/event-stream'
+        )
+    
+    # Check authentication
+    if not request.user.is_authenticated:
+        return HttpResponse(
+            'data: {"type": "error", "message": "需要登录"}\n\n', 
+            content_type='text/event-stream',
+            status=401
         )
         
     work_id = request.GET.get('work_id')
@@ -295,6 +456,14 @@ def ai_summarize_stream(request):
         return HttpResponse(
             'data: {"type": "error", "message": "仅支持GET请求"}\n\n', 
             content_type='text/event-stream'
+        )
+    
+    # Check authentication
+    if not request.user.is_authenticated:
+        return HttpResponse(
+            'data: {"type": "error", "message": "需要登录"}\n\n', 
+            content_type='text/event-stream',
+            status=401
         )
         
     work_id = request.GET.get('work_id')

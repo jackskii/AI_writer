@@ -496,6 +496,47 @@ class AIService:
         except Exception as e:
             logger.error(f"Generate summary stream error: {str(e)}")
             raise Exception(f"摘要生成失败: {str(e)}")
+    
+    async def chat_with_ai_stream(self, context: Dict, user_message: str, chat_history: List[Dict] = None, chapter_id: int = None) -> AsyncGenerator[str, None]:
+        """AI聊天功能 - 流式版本，支持聊天历史"""
+        logger.debug(f"Starting AI chat stream for chapter {chapter_id}: {user_message[:50]}...")
+        
+        try:
+            logger.debug(f"Using provided context with {len(context.get('lore_entries', []))} lore entries")
+            
+            # 格式化上下文信息
+            formatted_context = self._format_context_for_user(context)
+            instructions = "你是中文小说写作助手。请简洁回答写作相关问题，提供创意建议或讨论情节。回答要专业、有建设性，控制在100字以内。支持Markdown格式。"
+            
+            # 构建消息列表，包含聊天历史
+            messages = []
+            
+            # 添加系统指令和上下文
+            system_content = f"{instructions}\n\n{formatted_context}"
+            messages.append({"role": "system", "content": system_content})
+            
+            # 添加聊天历史（如果有）
+            if chat_history:
+                for msg in chat_history:
+                    if msg.get('role') in ['user', 'assistant']:
+                        messages.append({
+                            "role": msg['role'],
+                            "content": msg['content']
+                        })
+            
+            # 添加当前用户消息
+            messages.append({"role": "user", "content": user_message})
+            
+            logger.debug(f"Sending {len(messages)} messages to DeepSeek API for streaming")
+
+            async for chunk in self.deepseek.chat_completion_stream(messages, "deepseek-chat"):
+                yield chunk
+                
+            logger.info(f"AI chat stream completed successfully for chapter {chapter_id}")
+            
+        except Exception as e:
+            logger.error(f"Chat AI stream error for chapter {chapter_id}: {str(e)}", exc_info=True)
+            raise Exception(f"AI聊天失败: {str(e)}")
 
 
 # 同步包装器，用于在Django视图中调用

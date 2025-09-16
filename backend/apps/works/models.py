@@ -1,10 +1,17 @@
 from django.db import models
 from django.contrib.auth.models import User
+import random
+
+
+def generate_large_id():
+    """Generate a random 7-digit ID"""
+    return random.randint(1000000, 9999999)
 
 
 class Work(models.Model):
     """小说作品模型"""
     
+    id = models.BigIntegerField(primary_key=True, default=generate_large_id)
     title = models.CharField('作品标题', max_length=200)
     synopsis = models.TextField('作品大纲', blank=True)
     author = models.ForeignKey(
@@ -39,6 +46,7 @@ class Work(models.Model):
 class Act(models.Model):
     """卷模型"""
     
+    id = models.BigIntegerField(primary_key=True, default=generate_large_id)
     work = models.ForeignKey(
         Work,
         on_delete=models.CASCADE,
@@ -80,6 +88,7 @@ class Act(models.Model):
 class Chapter(models.Model):
     """章节模型"""
     
+    id = models.BigIntegerField(primary_key=True, default=generate_large_id)
     work = models.ForeignKey(
         Work,
         on_delete=models.CASCADE,
@@ -142,6 +151,7 @@ class Chapter(models.Model):
 class LoreEntry(models.Model):
     """世界观条目模型"""
     
+    id = models.BigIntegerField(primary_key=True, default=generate_large_id)
     work = models.ForeignKey(
         Work,
         on_delete=models.CASCADE,

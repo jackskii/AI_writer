@@ -40,18 +40,21 @@ class UserLoginSerializer(serializers.Serializer):
         username_or_email = attrs.get('username')
         password = attrs.get('password')
 
+        # Get request from context (needed for Django Axes)
+        request = self.context.get('request')
+
         if username_or_email and password:
             # Try to find user by username first
-            user = authenticate(username=username_or_email, password=password)
-            
+            user = authenticate(request=request, username=username_or_email, password=password)
+
             # If not found, try to find user by email
             if not user:
                 try:
                     user_obj = User.objects.get(email=username_or_email)
-                    user = authenticate(username=user_obj.username, password=password)
+                    user = authenticate(request=request, username=user_obj.username, password=password)
                 except User.DoesNotExist:
                     pass
-            
+
             if not user:
                 raise serializers.ValidationError('用户名/邮箱或密码错误')
             if not user.is_active:
@@ -59,7 +62,7 @@ class UserLoginSerializer(serializers.Serializer):
             attrs['user'] = user
         else:
             raise serializers.ValidationError('请提供用户名/邮箱和密码')
-        
+
         return attrs
 
 

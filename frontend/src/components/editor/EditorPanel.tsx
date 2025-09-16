@@ -172,6 +172,14 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
   work,
   chapter
 }) => {
+  // Early return if work or chapter is not loaded yet
+  if (!work || !chapter) {
+    return (
+      <div className="flex-1 flex items-center justify-center">
+        <div className="text-dark-text-muted">Loading editor...</div>
+      </div>
+    );
+  }
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [guideText, setGuideText] = useState('');
   const [selectedText, setSelectedText] = useState('');
@@ -220,11 +228,13 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
 
   // Fetch notes for current chapter
   const { data: notes = [] } = useQuery({
-    queryKey: ['notes', work.id, chapter.id],
+    queryKey: ['notes', work?.id, chapter?.id],
     queryFn: async () => {
+      if (!work?.id || !chapter?.id) return [];
       const response = await notesApi.list(work.id, chapter.id);
       return response.data.results || response.data;
-    }
+    },
+    enabled: !!(work?.id && chapter?.id)
   });
 
   // Note: No complex marker restoration needed with the new simple approach!

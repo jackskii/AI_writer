@@ -68,7 +68,7 @@ def create_template_work_for_user(user):
 @permission_classes([AllowAny])
 def login_view(request):
     """用户登录"""
-    serializer = UserLoginSerializer(data=request.data)
+    serializer = UserLoginSerializer(data=request.data, context={'request': request})
     if serializer.is_valid():
         user = serializer.validated_data['user']
         token, created = Token.objects.get_or_create(user=user)

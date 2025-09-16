@@ -15,7 +15,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # Security settings
 SECRET_KEY = os.environ.get('SECRET_KEY', 'django-insecure-0#rt!guz40l1*_99@)_&c3#ztdx_@f=02hvpx9@$159n3fk8cy')
 DEBUG = os.environ.get('DEBUG', 'True').lower() == 'true'
-ALLOWED_HOSTS = ['localhost', '127.0.0.1']
+ALLOWED_HOSTS = os.environ.get('ALLOWED_HOSTS', 'localhost,127.0.0.1,83ddbd0bb18bc5642e91a6d3f3770c1a.serveo.net,98f47a5be1c9f6c953b91ad07961dcee.serveo.net').split(',')
 
 # Application definition
 DJANGO_APPS = [
@@ -32,6 +32,7 @@ THIRD_PARTY_APPS = [
     'rest_framework.authtoken',
     'corsheaders',
     'channels',
+    'axes',  # Login attempt monitoring
     # 'django_filters',
     # 'drf_spectacular',
 ]
@@ -42,17 +43,21 @@ LOCAL_APPS = [
     'apps.chat',
     'apps.notes',
     'apps.user_auth',
+    'apps.core',
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
 
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',
+    'apps.core.middleware.SecurityHeadersMiddleware',
+    'apps.core.middleware.RateLimitMiddleware',
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'axes.middleware.AxesMiddleware',  # Login attempt monitoring
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
@@ -79,25 +84,17 @@ TEMPLATES = [
 WSGI_APPLICATION = 'novel_ai.wsgi.application'
 # ASGI_APPLICATION = 'novel_ai.asgi.application'  # Will add after installing channels
 
-# Database - using SQLite for initial setup
+# Database configuration - use PostgreSQL for production
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': os.environ.get('DB_NAME', 'novel_ai_db'),
+        'USER': os.environ.get('DB_USER', 'novel_user'),
+        'PASSWORD': os.environ.get('DB_PASSWORD', 'novel_password'),
+        'HOST': os.environ.get('DB_HOST', 'localhost'),
+        'PORT': os.environ.get('DB_PORT', '5432'),
     }
 }
-
-# PostgreSQL configuration (commented for now)
-# DATABASES = {
-#     'default': {
-#         'ENGINE': 'django.db.backends.postgresql',
-#         'NAME': config('DB_NAME', default='novel_ai_db'),
-#         'USER': config('DB_USER', default='novel_user'),
-#         'PASSWORD': config('DB_PASSWORD', default='novel_password'),
-#         'HOST': config('DB_HOST', default='localhost'),
-#         'PORT': config('DB_PORT', default='5432'),
-#     }
-# }
 
 # Advanced configurations (commented for initial setup)
 
@@ -124,7 +121,7 @@ REST_FRAMEWORK = {
         'rest_framework.authentication.SessionAuthentication',
     ],
     'DEFAULT_PERMISSION_CLASSES': [
-        'rest_framework.permissions.AllowAny',
+        'rest_framework.permissions.IsAuthenticated',
     ],
 }
 
@@ -136,15 +133,26 @@ REST_FRAMEWORK = {
 #     'SERVE_INCLUDE_SCHEMA': False,
 # }
 
-# CORS settings - Allow all origins for development
-CORS_ALLOW_ALL_ORIGINS = True
+# CORS settings - Secure for production
+CORS_ALLOW_ALL_ORIGINS = DEBUG  # Only allow all origins in development
 CORS_ALLOWED_ORIGINS = [
+    os.environ.get('FRONTEND_URL', 'http://localhost:3001'),
     'http://localhost:3000',
-    'http://localhost:3001', 
+    'http://localhost:3001',
     'http://127.0.0.1:3000',
     'http://127.0.0.1:3001',
     'http://localhost:5173',
     'http://127.0.0.1:5173',
+    'https://83ddbd0bb18bc5642e91a6d3f3770c1a.serveo.net',
+    'https://98f47a5be1c9f6c953b91ad07961dcee.serveo.net',
+]
+
+# Allow tunnel URLs for development deployment
+CORS_ALLOWED_ORIGIN_REGEXES = [
+    r"^https?://.*\.ngrok\.io$",
+    r"^https?://.*\.ngrok-free\.app$",
+    r"^https?://.*\.loca\.lt$",
+    r"^https?://.*\.serveo\.net$",
 ]
 
 CORS_ALLOW_CREDENTIALS = True
@@ -255,3 +263,36 @@ LOGGING = {
 
 # Ensure logs directory exists
 os.makedirs(BASE_DIR / 'logs', exist_ok=True)
+
+# Security Settings
+SECURE_SSL_REDIRECT = os.environ.get('SECURE_SSL_REDIRECT', 'False').lower() == 'true'
+SECURE_HSTS_SECONDS = int(os.environ.get('SECURE_HSTS_SECONDS', '0'))
+SECURE_HSTS_INCLUDE_SUBDOMAINS = os.environ.get('SECURE_HSTS_INCLUDE_SUBDOMAINS', 'False').lower() == 'true'
+SECURE_HSTS_PRELOAD = os.environ.get('SECURE_HSTS_PRELOAD', 'False').lower() == 'true'
+SECURE_CONTENT_TYPE_NOSNIFF = os.environ.get('SECURE_CONTENT_TYPE_NOSNIFF', 'True').lower() == 'true'
+SECURE_BROWSER_XSS_FILTER = os.environ.get('SECURE_BROWSER_XSS_FILTER', 'True').lower() == 'true'
+X_FRAME_OPTIONS = os.environ.get('X_FRAME_OPTIONS', 'DENY')
+
+# Rate Limiting
+RATE_LIMIT_ENABLED = os.environ.get('RATE_LIMIT_ENABLED', 'True').lower() == 'true'
+
+# Django Axes Configuration (Login attempt monitoring)
+AUTHENTICATION_BACKENDS = [
+    'axes.backends.AxesStandaloneBackend',
+    'django.contrib.auth.backends.ModelBackend',
+]
+
+AXES_ENABLED = True
+AXES_FAILURE_LIMIT = 5  # Lock after 5 failed attempts
+AXES_COOLOFF_TIME = 1  # Lock for 1 hour (in hours)
+AXES_RESET_ON_SUCCESS = True  # Reset after successful login
+AXES_LOCKOUT_PARAMETERS = ['ip_address', 'username']  # Lock by IP and username
+AXES_HANDLER = 'axes.handlers.database.AxesDatabaseHandler'
+
+# Cookie Security Settings
+SESSION_COOKIE_SECURE = os.environ.get('SECURE_SSL_REDIRECT', 'False').lower() == 'true'
+SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SAMESITE = 'Strict'
+CSRF_COOKIE_SECURE = os.environ.get('SECURE_SSL_REDIRECT', 'False').lower() == 'true'
+CSRF_COOKIE_HTTPONLY = True
+CSRF_COOKIE_SAMESITE = 'Strict'

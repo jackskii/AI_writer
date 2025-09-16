@@ -1,10 +1,11 @@
 from django.db import models
-from apps.works.models import Work, Chapter
+from apps.works.models import Work, Chapter, generate_large_id
 
 
 class Note(models.Model):
     """笔记模型"""
     
+    id = models.BigIntegerField(primary_key=True, default=generate_large_id)
     NOTE_COLORS = [
         ('#f59e0b', '黄色'),  # amber-500
         ('#ef4444', '红色'),  # red-500

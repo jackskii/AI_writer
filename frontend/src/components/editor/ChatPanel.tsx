@@ -1,7 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Send, Bot, User, Wifi, WifiOff } from 'lucide-react';
 import { useMutation } from '@tanstack/react-query';
-import { aiApi, ChatWebSocket } from '../../services/api';
+import ReactMarkdown from 'react-markdown';
+import { aiApi, chatApi, ChatWebSocket } from '../../services/api';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
 import { LoadingSpinner } from '../ui/Loading';
@@ -47,7 +48,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ work, chapter }) => {
         setStreamEventSource(null);
       }
     };
-  }, [work.id, chapter.id]);
+  }, [work?.id, chapter?.id]);
 
   // State for streaming
   const [isStreamingChat, setIsStreamingChat] = useState(false);
@@ -56,8 +57,13 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ work, chapter }) => {
 
   // Fallback chat mutation for when streaming fails
   const chatMutation = useMutation({
-    mutationFn: (message: string) => aiApi.chat(work.id, chapter.id, message),
-    onSuccess: (response, message) => {
+    mutationFn: (message: string) => {
+      if (!work?.id || !chapter?.id) {
+        throw new Error('Work or chapter not available');
+      }
+      return aiApi.chat(work.id, chapter.id, message);
+    },
+    onSuccess: async (response, message) => {
       const aiResponse: ChatMessage = {
         id: Date.now().toString() + '_ai',
         role: 'assistant',
@@ -66,6 +72,15 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ work, chapter }) => {
       };
       
       setMessages(prev => [...prev, aiResponse]);
+      
+      // Save AI response to backend
+      if (work?.id && chapter?.id) {
+        try {
+          await chatApi.saveMessage(work.id, chapter.id, 'assistant', response.data.response);
+        } catch (error) {
+          console.error('Failed to save AI response:', error);
+        }
+      }
     },
     onError: (error) => {
       const errorMessage: ChatMessage = {
@@ -80,9 +95,15 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ work, chapter }) => {
     }
   });
 
-  const handleSendMessage = () => {
+  const handleSendMessage = async () => {
     const message = inputMessage.trim();
     if (!message || isStreamingChat || chatMutation.isPending) return;
+    
+    // Check if work and chapter are available
+    if (!work?.id || !chapter?.id) {
+      console.error('Work or chapter not available for chat');
+      return;
+    }
 
     setInputMessage('');
 
@@ -94,6 +115,13 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ work, chapter }) => {
       timestamp: new Date().toISOString()
     };
     setMessages(prev => [...prev, userMessage]);
+
+    // Save user message to backend
+    try {
+      await chatApi.saveMessage(work.id, chapter.id, 'user', message);
+    } catch (error) {
+      console.error('Failed to save user message:', error);
+    }
 
     // Try streaming first, fallback to regular API
     try {
@@ -113,7 +141,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ work, chapter }) => {
           console.log('Chat streaming started');
         },
         // onEnd
-        (fullResponse: string) => {
+        async (fullResponse: string) => {
           const aiResponse: ChatMessage = {
             id: Date.now().toString() + '_ai',
             role: 'assistant',
@@ -125,6 +153,13 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ work, chapter }) => {
           setIsStreamingChat(false);
           setStreamingMessage('');
           setStreamEventSource(null);
+          
+          // Save AI response to backend
+          try {
+            await chatApi.saveMessage(work.id, chapter.id, 'assistant', fullResponse);
+          } catch (error) {
+            console.error('Failed to save AI response:', error);
+          }
         },
         // onError
         (error: string) => {
@@ -174,24 +209,61 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ work, chapter }) => {
     }
   };
 
-  const handleClearChat = () => {
-    if (confirm('确定要清空聊天记录吗？')) {
+  const handleClearChat = async () => {
+    if (!confirm('确定要清空聊天记录吗？')) return;
+    
+    if (!work?.id || !chapter?.id) return;
+    
+    try {
+      await chatApi.clearHistory(work.id, chapter.id);
+      setMessages([]);
+    } catch (error) {
+      console.error('Failed to clear chat history:', error);
+      // Still clear locally even if API fails
       setMessages([]);
     }
   };
 
-  // Initial AI greeting
+  // Load chat history and show initial greeting if empty
   useEffect(() => {
-    if (messages.length === 0 && work && chapter) {
-      const greeting: ChatMessage = {
-        id: 'greeting',
-        role: 'assistant',
-        content: `你好！我是你的AI写作助手。我已经了解了你的作品《${work.title}》和当前章节《${chapter.title}》的内容。\n\n有什么我可以帮助你的吗？比如：\n• 讨论情节发展\n• 分析人物性格\n• 解决写作困难\n• 提供创意建议`,
-        timestamp: new Date().toISOString()
-      };
-      setMessages([greeting]);
+    const loadChatHistory = async () => {
+      if (!work?.id || !chapter?.id) return;
+
+      try {
+        const response = await chatApi.getHistory(work.id, chapter.id);
+        const history = response.data.messages;
+        
+        if (history.length > 0) {
+          setMessages(history);
+        } else {
+          // Show initial greeting if no history
+          const greeting: ChatMessage = {
+            id: 'greeting',
+            role: 'assistant',
+            content: `你好！我是你的AI写作助手。我已经了解了你的作品《${work.title}》和当前章节《${chapter.title}》的内容。\n\n有什么我可以帮助你的吗？比如：\n• 讨论情节发展\n• 分析人物性格\n• 解决写作困难\n• 提供创意建议`,
+            timestamp: new Date().toISOString()
+          };
+          setMessages([greeting]);
+          // Save the greeting to backend
+          await chatApi.saveMessage(work.id, chapter.id, 'assistant', greeting.content);
+        }
+      } catch (error) {
+        console.error('Failed to load chat history:', error);
+        // Fallback to greeting if loading fails
+        const greeting: ChatMessage = {
+          id: 'greeting',
+          role: 'assistant',
+          content: `你好！我是你的AI写作助手。我已经了解了你的作品《${work.title}》和当前章节《${chapter.title}》的内容。\n\n有什么我可以帮助你的吗？比如：\n• 讨论情节发展\n• 分析人物性格\n• 解决写作困难\n• 提供创意建议`,
+          timestamp: new Date().toISOString()
+        };
+        setMessages([greeting]);
+      }
+    };
+
+    if (messages.length === 0) {
+      loadChatHistory();
     }
-  }, [work, chapter, messages.length]);
+  }, [work?.id, chapter?.id]);
 
   return (
     <div className="h-full flex flex-col bg-dark-bg">
@@ -250,7 +322,13 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ work, chapter }) => {
                   : 'bg-dark-surface border border-dark-border text-dark-text'
               }`}
             >
-              <div className="whitespace-pre-wrap">{message.content}</div>
+              {message.role === 'assistant' ? (
+                <div className="prose prose-sm prose-invert max-w-none">
+                  <ReactMarkdown>{message.content}</ReactMarkdown>
+                </div>
+              ) : (
+                <div className="whitespace-pre-wrap">{message.content}</div>
+              )}
             </div>
             
             {/* Timestamp */}
@@ -282,8 +360,8 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ work, chapter }) => {
             
             {/* Streaming content */}
             <div className="w-full bg-dark-surface border border-dark-border rounded-lg p-3 mb-1">
-              <div className="whitespace-pre-wrap text-dark-text">
-                {streamingMessage}
+              <div className="prose prose-sm prose-invert max-w-none text-dark-text">
+                <ReactMarkdown>{streamingMessage}</ReactMarkdown>
                 <span className="inline-block w-2 h-4 bg-dark-primary animate-pulse ml-1" />
               </div>
             </div>

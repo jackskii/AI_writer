@@ -34,6 +34,37 @@ api.interceptors.request.use(
   }
 );
 
+// Add response interceptor to handle 401 errors
+api.interceptors.response.use(
+  (response) => {
+    return response;
+  },
+  (error) => {
+    if (error.response?.status === 401) {
+      // Clear auth state and redirect to login
+      const authStorage = localStorage.getItem('auth-storage');
+      if (authStorage) {
+        try {
+          const parsedStorage = JSON.parse(authStorage);
+          const logout = parsedStorage?.state?.logout;
+          if (logout) {
+            // Clear auth state
+            localStorage.removeItem('auth-storage');
+            // Redirect to login page
+            window.location.href = '/auth';
+          }
+        } catch (e) {
+          console.error('Failed to handle auth error:', e);
+          // Fallback: clear storage and redirect
+          localStorage.removeItem('auth-storage');
+          window.location.href = '/auth';
+        }
+      }
+    }
+    return Promise.reject(error);
+  }
+);
+
 // 作品相关 API
 export const worksApi = {
   list: () => api.get<{ results: Work[]; count: number; next?: string; previous?: string }>('/works/'),
@@ -93,6 +124,21 @@ export const notesApi = {
   create: (data: Partial<Note>) => api.post<Note>('/notes/', data),
   update: (id: number, data: Partial<Note>) => api.patch<Note>(`/notes/${id}/`, data),
   delete: (id: number) => api.delete(`/notes/${id}/`),
+};
+
+// 聊天历史相关 API
+export const chatApi = {
+  getHistory: (workId: number, chapterId: number) =>
+    api.get<{ session_id: string; messages: any[] }>(`/chat/${workId}/${chapterId}/`),
+  
+  saveMessage: (workId: number, chapterId: number, role: string, content: string) =>
+    api.post<{ id: string; role: string; content: string; timestamp: string }>(`/chat/${workId}/${chapterId}/save/`, {
+      role,
+      content,
+    }),
+  
+  clearHistory: (workId: number, chapterId: number) =>
+    api.delete(`/chat/${workId}/${chapterId}/clear/`),
 };
 
 // AI 服务相关 API
@@ -266,6 +312,20 @@ export const aiApi = {
       chapter_id: chapterId.toString(),
       message: message,
     });
+
+    // Add token for authentication since EventSource can't send headers
+    const authStorage = localStorage.getItem('auth-storage');
+    if (authStorage) {
+      try {
+        const parsedStorage = JSON.parse(authStorage);
+        const token = parsedStorage?.state?.token;
+        if (token) {
+          params.append('token', token);
+        }
+      } catch (e) {
+        console.error('Failed to parse auth storage:', e);
+      }
+    }
 
     const eventSource = new EventSource(`${API_BASE_URL}/ai/chat/stream/?${params.toString()}`, {
       withCredentials: true,

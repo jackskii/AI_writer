@@ -26,6 +26,7 @@ urlpatterns = [
     path('', include('apps.works.urls')),
     path('', include('apps.notes.urls')),
     path('', include('apps.ai_services.urls')),
+    path('', include('apps.chat.urls')),
     path('', include('apps.user_auth.urls')),
     
     # 用户认证 (Django REST Framework)
