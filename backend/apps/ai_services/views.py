@@ -329,17 +329,34 @@ def ai_continue_stream(request):
     """AI续写端点 - SSE流式响应"""
     if request.method != 'GET':
         return HttpResponse(
-            'data: {"type": "error", "message": "仅支持GET请求"}\n\n', 
+            'data: {"type": "error", "message": "仅支持GET请求"}\n\n',
             content_type='text/event-stream'
         )
-    
-    # Check authentication
-    if not request.user.is_authenticated:
+
+    # Check authentication via token query parameter for EventSource compatibility
+    user = None
+    token = request.GET.get('token')
+    if token:
+        from django.contrib.auth.models import AnonymousUser
+        from rest_framework.authtoken.models import Token
+        try:
+            token_obj = Token.objects.get(key=token)
+            user = token_obj.user
+            request.user = user
+        except Token.DoesNotExist:
+            return HttpResponse(
+                'data: {"type": "error", "message": "认证令牌无效"}\n\n',
+                content_type='text/event-stream',
+                status=401
+            )
+    elif not request.user.is_authenticated:
         return HttpResponse(
-            'data: {"type": "error", "message": "需要登录"}\n\n', 
+            'data: {"type": "error", "message": "需要登录"}\n\n',
             content_type='text/event-stream',
             status=401
         )
+    else:
+        user = request.user
         
     work_id = request.GET.get('work_id')
     chapter_id = request.GET.get('chapter_id')

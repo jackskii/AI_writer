@@ -174,24 +174,38 @@ export const aiApi = {
 
   // Streaming version of continue writing
   continueStream: (
-    workId: number, 
-    chapterId: number, 
+    workId: number,
+    chapterId: number,
     onChunk: (chunk: string) => void,
     onStart?: () => void,
     onEnd?: () => void,
     onError?: (error: string) => void,
-    guide?: string, 
-    content?: string, 
+    guide?: string,
+    content?: string,
     tokenCount?: number
   ) => {
     const params = new URLSearchParams({
       work_id: workId.toString(),
       chapter_id: chapterId.toString(),
     });
-    
+
     if (guide) params.append('guide', guide);
     if (content) params.append('content', content);
     if (tokenCount) params.append('token_count', tokenCount.toString());
+
+    // Add token for authentication since EventSource can't send headers
+    const authStorage = localStorage.getItem('auth-storage');
+    if (authStorage) {
+      try {
+        const parsedStorage = JSON.parse(authStorage);
+        const token = parsedStorage?.state?.token;
+        if (token) {
+          params.append('token', token);
+        }
+      } catch (e) {
+        console.error('Failed to parse auth storage:', e);
+      }
+    }
 
     const eventSource = new EventSource(`${API_BASE_URL}/ai/continue/stream/?${params.toString()}`, {
       withCredentials: true

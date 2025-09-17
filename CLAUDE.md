@@ -112,31 +112,69 @@ Four specialized AI assistants using DeepSeek API with different models and purp
 
 ### Critical Features & Implementation Details
 
-#### 1. Marker-Based Text Highlighting System
+#### 1. Monaco Editor-Based Text Highlighting System
 **Location**: `frontend/src/components/editor/EditorPanel.tsx`
 
-The system uses invisible Unicode characters to create unbreakable text markers:
+The system has been migrated from marker-based to Monaco Editor's native decoration API for better stability:
 
-```javascript
-const MARKER_BASE_CHARS = [
-  '\u200B', // Zero-width space
-  '\u200C', // Zero-width non-joiner
-  '\u200D', // Zero-width joiner
-  '\u2060', // Word joiner
-  '\uFEFF', // Zero-width no-break space
-];
+**Monaco Editor Integration:**
+```typescript
+// Position tracking using character offsets
+const offsetToPosition = (offset: number): { lineNumber: number; column: number } => {
+  const lines = content.slice(0, offset).split('\n');
+  return {
+    lineNumber: lines.length,
+    column: lines[lines.length - 1].length + 1
+  };
+};
+
+// Monaco decoration for highlights
+const addHighlight = (start: number, end: number, color: string) => {
+  const decoration = {
+    range: new monaco.Range(startPos.lineNumber, startPos.column, endPos.lineNumber, endPos.column),
+    options: {
+      inlineClassName: 'monaco-highlight',
+      stickiness: monaco.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges
+    }
+  };
+  currentDecorationsRef.current = editorRef.current.deltaDecorations(currentDecorationsRef.current, [decoration]);
+};
 ```
 
-**How it works:**
-- Notes are linked to text using start/end markers: `\u200B{encodedId}\u200C` and `\u200D{encodedId}\u2060`
-- Note IDs are encoded in base-5 using invisible characters
-- Markers are preserved in the database content but stripped for display
-- Special keyboard handling prevents accidental marker deletion
+**Key Features:**
+- Notes are linked to text using position-based tracking (start/end character offsets)
+- Monaco's native decoration API provides stable highlighting
+- Position tracking survives text edits through intelligent adjustment
+- Toggle behavior: click note to highlight, click again to unhighlight
+- Monaco options configured to disable unwanted highlighting features
 
-**Critical Issues:**
-- Markers can break when users type at text boundaries (end of highlighted words)
-- Restoration logic is complex and can fail in edge cases
-- The system requires careful cursor positioning to avoid marker corruption
+**Important Monaco Configuration:**
+```typescript
+options={{
+  // Disable unwanted highlighting features
+  matchBrackets: 'never',              // No bracket/quote matching
+  selectionHighlight: false,           // No selection occurrence highlighting
+  occurrencesHighlight: false,         // No text occurrence highlighting
+  unicodeHighlight: {                  // No special character highlighting
+    nonBasicASCII: false,
+    invisibleCharacters: false,
+    ambiguousCharacters: false
+  }
+}}
+```
+
+**Position Adjustment Logic:**
+- Tracks content changes to adjust note positions dynamically
+- Uses reference-based comparison to detect changes
+- Adjusts positions based on change location and length difference
+- Maintains note position map for efficient lookups
+
+**Critical Improvements Over Marker System:**
+- No invisible characters that can break or corrupt
+- Uses Monaco's battle-tested decoration system
+- Better performance and reliability
+- Proper handling of line/column positions
+- Toggle functionality for better UX
 
 #### 2. Streaming Authentication System
 **Location**: `backend/apps/ai_services/views.py`, `frontend/src/services/api.ts`
@@ -227,13 +265,18 @@ VITE_WS_HOST=localhost:8001                  # WebSocket host
 
 ### Common Issues & Solutions
 
-#### 1. Marker System Breaking
-**Problem**: Adding text at the end of highlighted words breaks markers
-**Root Cause**: Markers use invisible characters that can be split by text insertion
+#### 1. Monaco Editor Highlighting Issues
+**Problem**: Highlights not clearing properly or unwanted text highlighting
+**Root Cause**: Monaco's built-in highlighting features (bracket matching, selection highlighting)
 **Prevention**:
-- Always validate marker integrity after content changes
-- Use the protection mechanisms in `handleKeyDown`
-- Never manually edit content strings without considering markers
+- Ensure all highlighting features are disabled in Monaco options
+- Use proper click handlers that check highlight state
+- Implement toggle behavior for note highlights
+
+**Position Tracking Issues**:
+**Problem**: Note positions becoming incorrect after text edits
+**Root Cause**: Position offsets not being updated when content changes
+**Solution**: Use the position adjustment logic that tracks content changes
 
 #### 2. Streaming Authentication Failures
 **Problem**: 401 errors on streaming endpoints
@@ -257,8 +300,11 @@ VITE_WS_HOST=localhost:8001                  # WebSocket host
 1. **NEVER** remove the AI Continue Writing section
 2. **NEVER** remove the Update Link functionality for notes
 3. **NEVER** remove streaming functionality without explicit request
-4. Test marker functionality thoroughly after any editor changes
+4. Test Monaco Editor highlighting functionality after any changes
 5. Preserve the three-panel layout structure
+6. **CRITICAL**: Maintain Monaco Editor configuration that disables unwanted highlighting
+7. Ensure position tracking logic remains intact for note linking
+8. Test toggle behavior for note highlights
 
 #### When Working on AI Services:
 1. Always test both HTTP and streaming endpoints
