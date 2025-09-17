@@ -434,6 +434,29 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
     return textBeforePosition.split('\n').length;
   };
 
+  // Remove exact duplicate text from AI continuation
+  const removeDuplicateText = (existingContent: string, newContent: string): string => {
+    if (!existingContent || !newContent) return newContent;
+
+    // Get the last 50 characters from existing content (reasonable overlap window)
+    const lastChars = existingContent.slice(-50);
+
+    // Find the longest exact match from the end of existing content
+    // that appears at the start of new content
+    let maxOverlap = 0;
+    for (let i = 1; i <= Math.min(lastChars.length, newContent.length); i++) {
+      const endOfExisting = lastChars.slice(-i);
+      const startOfNew = newContent.slice(0, i);
+
+      if (endOfExisting === startOfNew) {
+        maxOverlap = i;
+      }
+    }
+
+    // Remove the duplicate part from the beginning of new content
+    return maxOverlap > 0 ? newContent.slice(maxOverlap) : newContent;
+  };
+
   // Handle note click to jump to linked position and highlight
   const handleNoteClick = (note: Note) => {
     console.log(`🎯 handleNoteClick called for note ${note.id}`);
@@ -508,6 +531,7 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
     try {
       setAIContinueLoading(true);
       let accumulatedContent = '';
+      let isFirstChunk = true;
       const startingContent = content;
 
       const eventSource = aiApi.continueStream(
@@ -516,8 +540,16 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
         // onChunk - called for each piece of text
         (chunk: string) => {
           accumulatedContent += chunk;
-          const newContent = startingContent + accumulatedContent;
 
+          // Apply duplicate removal only on the first chunk or complete accumulated content
+          let cleanedContent = accumulatedContent;
+          if (isFirstChunk) {
+            cleanedContent = removeDuplicateText(startingContent, accumulatedContent);
+            accumulatedContent = cleanedContent; // Update accumulated content with cleaned version
+            isFirstChunk = false;
+          }
+
+          const newContent = startingContent + cleanedContent;
           onChange(newContent);
 
           // Keep cursor at end during streaming
