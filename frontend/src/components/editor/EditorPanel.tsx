@@ -1,6 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Sparkles, Lightbulb, Zap, X, Plus, Edit3, Trash2, StickyNote, ExternalLink, Link, AlertTriangle } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import Editor from '@monaco-editor/react';
+import * as monaco from 'monaco-editor';
 import { Button } from '../ui/Button';
 import { Input, Textarea } from '../ui/Input';
 import { LoadingButton } from '../ui/Loading';
@@ -32,9 +34,10 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
   chapter
 }) => {
   // ALL HOOKS MUST BE CALLED BEFORE ANY EARLY RETURNS
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
   const previousContentRef = useRef(content);
   const highlightTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const currentDecorationsRef = useRef<string[]>([]);
 
   const [guideText, setGuideText] = useState('');
   const [selectedText, setSelectedText] = useState('');
@@ -229,6 +232,59 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
     }
     setHighlightedNoteId(undefined);
     setHighlightPosition(null);
+
+    // Clear Monaco decorations
+    if (editorRef.current && currentDecorationsRef.current.length > 0) {
+      currentDecorationsRef.current = editorRef.current.deltaDecorations(
+        currentDecorationsRef.current,
+        []
+      );
+    }
+  };
+
+  // Helper functions for Monaco Editor position conversion
+  const offsetToPosition = (offset: number): { lineNumber: number; column: number } => {
+    const lines = content.slice(0, offset).split('\n');
+    return {
+      lineNumber: lines.length,
+      column: lines[lines.length - 1].length + 1
+    };
+  };
+
+  const positionToOffset = (lineNumber: number, column: number): number => {
+    const lines = content.split('\n');
+    let offset = 0;
+    for (let i = 0; i < lineNumber - 1; i++) {
+      offset += lines[i].length + 1; // +1 for newline
+    }
+    return offset + column - 1;
+  };
+
+  // Add Monaco highlight decoration
+  const addHighlight = (start: number, end: number, color: string) => {
+    if (!editorRef.current) return;
+
+    const startPos = offsetToPosition(start);
+    const endPos = offsetToPosition(end);
+
+    const decoration = {
+      range: new monaco.Range(
+        startPos.lineNumber,
+        startPos.column,
+        endPos.lineNumber,
+        endPos.column
+      ),
+      options: {
+        inlineClassName: 'monaco-highlight',
+        stickiness: monaco.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges
+      }
+    };
+
+    // Clear previous decorations and add new one
+    currentDecorationsRef.current = editorRef.current.deltaDecorations(
+      currentDecorationsRef.current,
+      [decoration]
+    );
   };
 
   // Cancel streaming
@@ -245,26 +301,30 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
     });
   };
 
-  // Handle text selection for suggestions
-  const handleTextSelect = () => {
-    if (!textareaRef.current) return;
+  // Handle Monaco Editor text selection
+  const handleMonacoSelectionChange = (editor: monaco.editor.IStandaloneCodeEditor) => {
+    const selection = editor.getSelection();
+    if (!selection) return;
 
-    const start = textareaRef.current.selectionStart;
-    const end = textareaRef.current.selectionEnd;
+    const model = editor.getModel();
+    if (!model) return;
 
-    if (start !== end) {
-      const selected = content.slice(start, end);
+    const startOffset = model.getOffsetAt(selection.getStartPosition());
+    const endOffset = model.getOffsetAt(selection.getEndPosition());
 
-      console.log(`📝 Selected text: "${selected}" at positions ${start}-${end}`);
+    if (startOffset !== endOffset) {
+      const selectedText = model.getValueInRange(selection);
 
-      setSelectedText(selected);
-      setSelectionStart(start);
-      setSelectionEnd(end);
+      console.log(`📝 Selected text: "${selectedText}" at positions ${startOffset}-${endOffset}`);
+
+      setSelectedText(selectedText);
+      setSelectionStart(startOffset);
+      setSelectionEnd(endOffset);
 
       // Also set for note creation
-      setNoteSelectionStart(start);
-      setNoteSelectionEnd(end);
-      setSelectedTextForNote(selected);
+      setNoteSelectionStart(startOffset);
+      setNoteSelectionEnd(endOffset);
+      setSelectedTextForNote(selectedText);
     } else {
       setSelectedText('');
       setSelectedTextForNote('');
@@ -272,14 +332,11 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
   };
 
   // Handle clicks in the editor area to clear highlights
-  const handleEditorClick = (e: React.MouseEvent) => {
-    // Only clear highlight if we're not clicking on a note in the margin
-    // and if there's currently a highlight active
-    if (highlightPosition && e.target === textareaRef.current) {
+  const handleEditorClick = () => {
+    // Always clear highlights when clicking anywhere in the editor
+    if (highlightPosition || highlightedNoteId !== undefined) {
       clearHighlight();
     }
-    // Call the existing text selection handler
-    handleTextSelect();
   };
 
   // Note handling functions
@@ -381,7 +438,14 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
   const handleNoteClick = (note: Note) => {
     console.log(`🎯 handleNoteClick called for note ${note.id}`);
 
-    if (!textareaRef.current) return;
+    if (!editorRef.current) return;
+
+    // Check if this note is already highlighted - if so, clear the highlight
+    if (highlightedNoteId === note.id) {
+      console.log(`🔄 Toggling off highlight for note ${note.id}`);
+      clearHighlight();
+      return;
+    }
 
     // Get current position from our tracking map
     const position = notePositions.get(note.id);
@@ -394,7 +458,7 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
         clearTimeout(highlightTimeoutRef.current);
       }
 
-      // Set highlighting with note's color
+      // Set highlighting with note's color using Monaco decorations
       setHighlightedNoteId(note.id);
       setHighlightPosition({
         start: position.start,
@@ -402,17 +466,17 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
         color: note.color
       });
 
-      // Focus the textarea (but don't select text to avoid blue highlight)
-      textareaRef.current.focus();
+      // Add Monaco highlight decoration
+      addHighlight(position.start, position.end, note.color);
 
-      // Calculate scroll position
-      const textBeforePosition = content.slice(0, position.start);
-      const lines = textBeforePosition.split('\n');
-      const lineNumber = lines.length - 1;
-      const lineHeight = 30;
-      const scrollPosition = lineNumber * lineHeight;
+      // Focus and scroll to position in Monaco
+      if (editorRef.current) {
+        editorRef.current.focus();
 
-      textareaRef.current.scrollTop = Math.max(0, scrollPosition - 100);
+        const startPos = offsetToPosition(position.start);
+        editorRef.current.revealLineInCenter(startPos.lineNumber);
+        editorRef.current.setPosition(startPos);
+      }
 
       // Update selection state with current text at position (for other functionality)
       const currentText = content.slice(position.start, position.end);
@@ -431,7 +495,9 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
     } else {
       console.log(`❌ No valid position found for note ${note.id}`);
       // Just focus editor if no valid position
-      textareaRef.current.focus();
+      if (editorRef.current) {
+        editorRef.current.focus();
+      }
     }
   };
 
@@ -455,11 +521,15 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
           onChange(newContent);
 
           // Keep cursor at end during streaming
-          if (textareaRef.current) {
+          if (editorRef.current) {
             setTimeout(() => {
-              if (textareaRef.current) {
-                textareaRef.current.focus();
-                textareaRef.current.setSelectionRange(newContent.length, newContent.length);
+              if (editorRef.current) {
+                const model = editorRef.current.getModel();
+                if (model) {
+                  const endPosition = model.getPositionAt(newContent.length);
+                  editorRef.current.setPosition(endPosition);
+                  editorRef.current.focus();
+                }
               }
             }, 0);
           }
@@ -487,11 +557,15 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
 
           // Final cursor position
           const finalContent = startingContent + accumulatedContent;
-          if (textareaRef.current) {
+          if (editorRef.current) {
             setTimeout(() => {
-              if (textareaRef.current) {
-                textareaRef.current.focus();
-                textareaRef.current.setSelectionRange(finalContent.length, finalContent.length);
+              if (editorRef.current) {
+                const model = editorRef.current.getModel();
+                if (model) {
+                  const endPosition = model.getPositionAt(finalContent.length);
+                  editorRef.current.setPosition(endPosition);
+                  editorRef.current.focus();
+                }
               }
             }, 100);
           }
@@ -608,54 +682,117 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
   const totalChars = content.length;
 
   return (
-    <div className="h-full flex flex-col bg-dark-bg">
+    <>
+      {/* CSS for Monaco Editor highlights */}
+      <style>{`
+        .monaco-highlight {
+          background-color: ${highlightPosition?.color ? `${highlightPosition.color}40` : 'transparent'} !important;
+          border-radius: 3px !important;
+          color: inherit !important;
+        }
+
+        /* Hide Monaco's default decorations that might cause artifacts */
+        .monaco-editor .current-line,
+        .monaco-editor .current-line-exact {
+          background: transparent !important;
+        }
+
+        .monaco-editor .overlayWidgets {
+          display: none !important;
+        }
+      `}</style>
+
+      <div className="h-full flex flex-col bg-dark-bg">
       {/* Editor Area with Inline Notes */}
       <div className="flex-1 flex">
-        {/* Text Editor with Highlight Overlay */}
-        <div className="flex-1 p-6 relative">
-          {/* Highlight Overlay */}
-          {highlightPosition && (
-            <div
-              className="absolute inset-6 pointer-events-none z-10"
-              style={{
-                fontFamily: "'Source Han Serif CN', serif",
-                fontSize: '18px',
-                lineHeight: 1.8,
-                letterSpacing: '0.02em',
-                whiteSpace: 'pre-wrap',
-                wordWrap: 'break-word'
-              }}
-            >
-              <div className="absolute inset-0">
-                <span className="invisible">{content.slice(0, highlightPosition.start)}</span>
-                <span
-                  className="rounded px-1 opacity-30"
-                  style={{ backgroundColor: highlightPosition.color }}
-                >
-                  {content.slice(highlightPosition.start, highlightPosition.end)}
-                </span>
-              </div>
-            </div>
-          )}
-
-          {/* Main Textarea */}
-          <textarea
-            ref={textareaRef}
+        {/* Monaco Editor */}
+        <div className="flex-1 p-6">
+          <Editor
+            height="100%"
+            language="plaintext"
+            theme="vs-dark"
             value={content}
-            onChange={(e) => onChange(e.target.value)}
-            onSelect={handleTextSelect}
-            onClick={handleEditorClick}
-            placeholder="开始您的创作之旅..."
-            className="
-              w-full h-full resize-none bg-transparent border-none outline-none
-              text-dark-text chinese-text text-lg leading-relaxed
-              placeholder-dark-text-muted
-              focus:ring-0 relative z-20
-            "
-            style={{
+            onChange={(value) => onChange(value || '')}
+            onMount={(editor) => {
+              editorRef.current = editor;
+
+              // Set up selection change listener
+              editor.onDidChangeCursorSelection(() => {
+                handleMonacoSelectionChange(editor);
+              });
+
+              // Set up click listener for clearing highlights
+              editor.onMouseDown(() => {
+                handleEditorClick();
+              });
+            }}
+            options={{
+              // Appearance
               fontFamily: "'Source Han Serif CN', serif",
-              lineHeight: 1.8,
-              letterSpacing: '0.02em'
+              fontSize: 18,
+              lineHeight: 28.8,
+              letterSpacing: '0.02em',
+
+              // Editor behavior
+              wordWrap: 'on',
+              wordWrapColumn: 80,
+              automaticLayout: true,
+              scrollBeyondLastLine: false,
+
+              // UI elements
+              minimap: { enabled: false },
+              scrollbar: {
+                vertical: 'visible',
+                horizontal: 'visible',
+                verticalScrollbarSize: 10,
+                horizontalScrollbarSize: 10
+              },
+
+              // Remove unnecessary features
+              lineNumbers: 'off',
+              folding: false,
+              glyphMargin: false,
+              lineDecorationsWidth: 0,
+              lineNumbersMinChars: 0,
+              renderLineHighlight: 'none',
+              renderLineHighlightOnlyWhenFocus: false,
+
+              // Hide suggestions and other popups
+              quickSuggestions: false,
+              suggestOnTriggerCharacters: false,
+              acceptSuggestionOnEnter: 'off',
+              tabCompletion: 'off',
+              wordBasedSuggestions: false,
+
+              // Disable features we don't need
+              contextmenu: false,
+              find: {
+                seedSearchStringFromSelection: false,
+                autoFindInSelection: false
+              },
+
+              // Remove decorations that might cause artifacts
+              rulers: [],
+              renderWhitespace: 'none',
+              renderControlCharacters: false,
+              renderIndentGuides: false,
+              hideCursorInOverviewRuler: true,
+              overviewRulerBorder: false,
+              overviewRulerLanes: 0,
+
+              // Disable special character rendering that causes yellow boxes
+              unicodeHighlight: {
+                nonBasicASCII: false,
+                invisibleCharacters: false,
+                ambiguousCharacters: false
+              },
+
+              // Disable bracket/quote matching highlighting
+              matchBrackets: 'never',
+
+              // Disable selection and occurrence highlighting
+              selectionHighlight: false,
+              occurrencesHighlight: false
             }}
           />
         </div>
@@ -973,6 +1110,7 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
         onConfirm={handleConfirmDeleteNote}
         isDeleting={deleteNoteMutation.isLoading}
       />
-    </div>
+      </div>
+    </>
   );
 };
