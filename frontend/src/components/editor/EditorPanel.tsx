@@ -25,169 +25,24 @@ const NOTE_COLORS = [
   { value: '#f97316', label: '橙色' },
 ];
 
-// Marker utility functions for note anchoring
-// Using completely invisible Unicode characters for markers
-const MARKER_BASE_CHARS = [
-  '\u200B', // Zero-width space
-  '\u200C', // Zero-width non-joiner
-  '\u200D', // Zero-width joiner
-  '\u2060', // Word joiner (invisible)
-  '\uFEFF', // Zero-width no-break space
-];
-
-// Create unique invisible sequences for note IDs
-const createInvisibleSequence = (noteId: number): string => {
-  // Convert note ID to a unique combination of invisible characters
-  let sequence = '';
-  let id = noteId;
-  
-  // Use base-5 encoding with invisible characters
-  do {
-    sequence = MARKER_BASE_CHARS[id % 5] + sequence;
-    id = Math.floor(id / 5);
-  } while (id > 0);
-  
-  return sequence;
-};
-
-const MarkerUtils = {
-  // Encode note ID as invisible Unicode characters
-  encodeId: (noteId: number): string => {
-    const chars = ['\uFEFF', '\u200C', '\u200D', '\u2060', '\u180E']; // 5 invisible characters for base-5
-    let result = '';
-    let id = noteId;
-    if (id === 0) return chars[0];
-    
-    while (id > 0) {
-      result = chars[id % 5] + result;
-      id = Math.floor(id / 5);
-    }
-    return result;
-  },
-
-  // Create start marker for a note
-  createStartMarker: (noteId: number): string => {
-    const encoded = MarkerUtils.encodeId(noteId);
-    return `\u200B${encoded}\u200C`; // Zero-width space + encoded ID + Zero-width non-joiner
-  },
-
-  // Create end marker for a note  
-  createEndMarker: (noteId: number): string => {
-    const encoded = MarkerUtils.encodeId(noteId);
-    return `\u200D${encoded}\u2060`; // Zero-width joiner + encoded ID + Word joiner
-  },
-
-  // Simple text wrapping with markers - finds text and wraps it
-  wrapWithMarkers: (content: string, textToWrap: string, noteId: number): string => {
-    const index = content.indexOf(textToWrap);
-    if (index === -1) {
-      console.log(`❌ Could not find text "${textToWrap}" in content`);
-      return content;
-    }
-    
-    const startMarker = MarkerUtils.createStartMarker(noteId);
-    const endMarker = MarkerUtils.createEndMarker(noteId);
-    
-    console.log(`✅ Wrapping text "${textToWrap}" with markers for note ${noteId} at position ${index}`);
-    
-    return content.slice(0, index) + 
-           startMarker + 
-           textToWrap + 
-           endMarker + 
-           content.slice(index + textToWrap.length);
-  },
-
-  // Find marker positions by scanning through content
-  findMarkers: (content: string, noteId: number): { start: number; end: number } | null => {
-    const startMarker = MarkerUtils.createStartMarker(noteId);
-    const endMarker = MarkerUtils.createEndMarker(noteId);
-    
-    const startIdx = content.indexOf(startMarker);
-    const endIdx = content.indexOf(endMarker);
-    
-    if (startIdx === -1 || endIdx === -1) {
-      console.log(`❌ Markers not found for note ${noteId}`);
-      return null;
-    }
-    
-    // Return positions for textarea selection (after start marker, before end marker)
-    const start = startIdx + startMarker.length;
-    const end = endIdx;
-    
-    console.log(`✅ Found markers for note ${noteId}: positions ${start}-${end}`);
-    return { start, end };
-  },
-
-  // Get text between markers by scanning
-  getTextBetweenMarkers: (content: string, noteId: number): string | null => {
-    const positions = MarkerUtils.findMarkers(content, noteId);
-    if (!positions) return null;
-    
-    const textWithMarkers = content.slice(positions.start, positions.end);
-    return MarkerUtils.stripAllMarkers(textWithMarkers);
-  },
-
-  // Remove markers for a specific note by scanning and replacing
-  removeMarkers: (content: string, noteId: number): string => {
-    const startMarker = MarkerUtils.createStartMarker(noteId);
-    const endMarker = MarkerUtils.createEndMarker(noteId);
-    
-    return content.replace(startMarker, '').replace(endMarker, '');
-  },
-
-  // Strip all markers from text for clean display
-  stripAllMarkers: (text: string): string => {
-    // Remove invisible markers: start and end markers with encoded IDs
-    return text.replace(/\u200B[\uFEFF\u200C\u200D\u2060\u180E]+\u200C|\u200D[\uFEFF\u200C\u200D\u2060\u180E]+\u2060/g, '');
-  },
-
-  // Check if markers exist for a note (simple scanning)
-  hasMarkers: (content: string, noteId: number): boolean => {
-    return MarkerUtils.findMarkers(content, noteId) !== null;
-  },
-
-  // Adjust selection range to exclude any markers (keep existing functionality)
-  adjustSelectionToExcludeMarkers: (text: string, selectionStart: number, selectionEnd: number): { start: number; end: number; changed: boolean } => {
-    // Regex to detect invisible marker patterns: start and end markers
-    const markerRegex = /\u200B\d+\u200C|\u200D\d+\u2060/g;
-    let adjustedStart = selectionStart;
-    let adjustedEnd = selectionEnd;
-    let changed = false;
-
-    // Find any markers in the selection range and adjust
-    const selectedText = text.slice(selectionStart, selectionEnd);
-    if (markerRegex.test(selectedText)) {
-      // If selection contains markers, move to exclude them
-      // This is a simple approach - could be made more sophisticated
-      changed = true;
-    }
-
-    return { start: adjustedStart, end: adjustedEnd, changed };
-  }
-};
-
 export const EditorPanel: React.FC<EditorPanelProps> = ({
   content,
   onChange,
   work,
   chapter
 }) => {
-  // Early return if work or chapter is not loaded yet
-  if (!work || !chapter) {
-    return (
-      <div className="flex-1 flex items-center justify-center">
-        <div className="text-dark-text-muted">Loading editor...</div>
-      </div>
-    );
-  }
+  // ALL HOOKS MUST BE CALLED BEFORE ANY EARLY RETURNS
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const previousContentRef = useRef(content);
+  const highlightTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
   const [guideText, setGuideText] = useState('');
   const [selectedText, setSelectedText] = useState('');
   const [selectionStart, setSelectionStart] = useState(0);
   const [selectionEnd, setSelectionEnd] = useState(0);
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamEventSource, setStreamEventSource] = useState<EventSource | null>(null);
-  
+
   // Note-related states
   const [isCreatingNote, setIsCreatingNote] = useState(false);
   const [newNoteContent, setNewNoteContent] = useState('');
@@ -198,10 +53,14 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
   const [selectedTextForNote, setSelectedTextForNote] = useState('');
   const [noteToDelete, setNoteToDelete] = useState<Note | null>(null);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
-  
-  // Content with markers (stored in database)
-  const [contentWithMarkers, setContentWithMarkers] = useState('');
-  
+
+  // State for highlighting
+  const [highlightedNoteId, setHighlightedNoteId] = useState<number | undefined>(undefined);
+  const [highlightPosition, setHighlightPosition] = useState<{start: number, end: number, color: string} | null>(null);
+
+  // Track note positions dynamically
+  const [notePositions, setNotePositions] = useState<Map<number, {start: number, end: number}>>(new Map());
+
   const {
     isAIContinueLoading,
     setAIContinueLoading,
@@ -209,20 +68,6 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
     setAISuggestLoading,
     addNotification
   } = useUIStore();
-  
-  // Initialize contentWithMarkers from content prop (only when content changes from external source)
-  useEffect(() => {
-    if (contentWithMarkers === '' && content) {
-      console.log('🔄 Initializing contentWithMarkers from content:', content.substring(0, 100));
-      setContentWithMarkers(content);
-      previousContentRef.current = content;
-    }
-  }, [content, contentWithMarkers]);
-
-  // Sync previousContentRef when contentWithMarkers changes from external sources
-  useEffect(() => {
-    previousContentRef.current = contentWithMarkers;
-  }, [contentWithMarkers]);
 
   const queryClient = useQueryClient();
 
@@ -237,19 +82,57 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
     enabled: !!(work?.id && chapter?.id)
   });
 
-  // Note: No complex marker restoration needed with the new simple approach!
+  // Function to adjust positions when content changes
+  const adjustPositions = (oldContent: string, newContent: string) => {
+    if (oldContent === newContent) return;
+
+    // Find the change position
+    let changeStart = 0;
+    while (changeStart < Math.min(oldContent.length, newContent.length) &&
+           oldContent[changeStart] === newContent[changeStart]) {
+      changeStart++;
+    }
+
+    // Calculate the change in length
+    const oldAfterChange = oldContent.slice(changeStart);
+    const newAfterChange = newContent.slice(changeStart);
+    const lengthDiff = newAfterChange.length - oldAfterChange.length;
+
+    // Update positions for notes that come after the change
+    setNotePositions(prev => {
+      const updated = new Map(prev);
+      for (const [noteId, position] of updated) {
+        if (position.start > changeStart) {
+          updated.set(noteId, {
+            start: Math.max(changeStart, position.start + lengthDiff),
+            end: Math.max(changeStart, position.end + lengthDiff)
+          });
+        } else if (position.end > changeStart) {
+          // Note spans across the change point, adjust end position
+          updated.set(noteId, {
+            start: position.start,
+            end: Math.max(position.start, position.end + lengthDiff)
+          });
+        }
+      }
+      return updated;
+    });
+  };
 
   // Create note mutation
   const createNoteMutation = useMutation({
     mutationFn: (noteData: Partial<Note>) => notesApi.create(noteData),
     onSuccess: (response: any) => {
       const createdNote = response.data;
-      
-      // If note has linked text, wrap it with markers
-      if (selectedTextForNote) {
-        wrapTextWithMarkers(createdNote.id, selectedTextForNote);
+
+      // Add the new note position to our tracking map
+      if (selectedTextForNote && noteSelectionStart !== undefined && noteSelectionEnd !== undefined) {
+        setNotePositions(prev => new Map(prev.set(createdNote.id, {
+          start: noteSelectionStart,
+          end: noteSelectionEnd
+        })));
       }
-      
+
       queryClient.invalidateQueries({ queryKey: ['notes', work.id, chapter.id] });
       setNewNoteContent('');
       setIsCreatingNote(false);
@@ -269,7 +152,7 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
 
   // Update note mutation
   const updateNoteMutation = useMutation({
-    mutationFn: ({ id, data }: { id: number; data: Partial<Note> }) => 
+    mutationFn: ({ id, data }: { id: number; data: Partial<Note> }) =>
       notesApi.update(id, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['notes', work.id, chapter.id] });
@@ -284,15 +167,7 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
   // Delete note mutation
   const deleteNoteMutation = useMutation({
     mutationFn: (note: Note) => notesApi.delete(note.id),
-    onSuccess: (_, deletedNote) => {
-      // Remove markers from content if they exist
-      const newContentWithMarkers = MarkerUtils.removeMarkers(contentWithMarkers, deletedNote.id);
-      if (newContentWithMarkers !== contentWithMarkers) {
-        setContentWithMarkers(newContentWithMarkers);
-        onChange(newContentWithMarkers); // Save with markers
-        console.log(`✅ Removed markers for deleted note ${deletedNote.id}`);
-      }
-      
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['notes', work.id, chapter.id] });
       addNotification({
         type: 'success',
@@ -301,14 +176,60 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
     }
   });
 
+  // Initialize note positions from database
+  useEffect(() => {
+    if (notes.length > 0) {
+      const newPositions = new Map();
+      notes.forEach(note => {
+        if (note.text_start_position !== null && note.text_end_position !== null) {
+          newPositions.set(note.id, {
+            start: note.text_start_position,
+            end: note.text_end_position
+          });
+        }
+      });
+      setNotePositions(newPositions);
+    }
+  }, [notes]);
+
+  // Track content changes to adjust positions
+  useEffect(() => {
+    if (previousContentRef.current !== content) {
+      adjustPositions(previousContentRef.current, content);
+      previousContentRef.current = content;
+    }
+  }, [content]);
+
   // Cleanup on component unmount
   useEffect(() => {
     return () => {
       if (streamEventSource) {
         streamEventSource.close();
       }
+      if (highlightTimeoutRef.current) {
+        clearTimeout(highlightTimeoutRef.current);
+      }
     };
   }, [streamEventSource]);
+
+  // Early return AFTER all hooks are called
+  if (!work || !chapter) {
+    return (
+      <div className="flex-1 flex items-center justify-center">
+        <div className="text-dark-text-muted">Loading editor...</div>
+      </div>
+    );
+  }
+
+  // Clear highlight function
+  const clearHighlight = () => {
+    if (highlightTimeoutRef.current) {
+      clearTimeout(highlightTimeoutRef.current);
+      highlightTimeoutRef.current = null;
+    }
+    setHighlightedNoteId(undefined);
+    setHighlightPosition(null);
+  };
 
   // Cancel streaming
   const handleCancelStreaming = () => {
@@ -324,54 +245,41 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
     });
   };
 
-  // Handle text selection for suggestions with marker exclusion
+  // Handle text selection for suggestions
   const handleTextSelect = () => {
     if (!textareaRef.current) return;
-    
-    const rawStart = textareaRef.current.selectionStart;
-    const rawEnd = textareaRef.current.selectionEnd;
-    
-    if (rawStart !== rawEnd) {
-      // Adjust selection to exclude markers
-      const adjusted = MarkerUtils.adjustSelectionToExcludeMarkers(
-        contentWithMarkers || '',
-        rawStart,
-        rawEnd
-      );
-      
-      // If selection was adjusted, update the textarea selection
-      if (adjusted.changed) {
-        console.log(`🎯 Selection adjusted from ${rawStart}-${rawEnd} to ${adjusted.start}-${adjusted.end} to exclude markers`);
-        setTimeout(() => {
-          if (textareaRef.current) {
-            textareaRef.current.setSelectionRange(adjusted.start, adjusted.end);
-          }
-        }, 0);
-      }
-      
-      // Use clean content for getting the selected text (what user actually sees)
-      const cleanContent = MarkerUtils.stripAllMarkers(contentWithMarkers || '');
-      
-      // Map the adjusted positions to clean content positions
-      const cleanStart = MarkerUtils.stripAllMarkers((contentWithMarkers || '').slice(0, adjusted.start)).length;
-      const cleanEnd = cleanStart + MarkerUtils.stripAllMarkers((contentWithMarkers || '').slice(adjusted.start, adjusted.end)).length;
-      
-      const selected = cleanContent.slice(cleanStart, cleanEnd);
-      
-      console.log(`📝 Selected text: "${selected}" at clean positions ${cleanStart}-${cleanEnd}`);
-      
+
+    const start = textareaRef.current.selectionStart;
+    const end = textareaRef.current.selectionEnd;
+
+    if (start !== end) {
+      const selected = content.slice(start, end);
+
+      console.log(`📝 Selected text: "${selected}" at positions ${start}-${end}`);
+
       setSelectedText(selected);
-      setSelectionStart(cleanStart);
-      setSelectionEnd(cleanEnd);
-      
-      // Also set for note creation (using clean positions)
-      setNoteSelectionStart(cleanStart);
-      setNoteSelectionEnd(cleanEnd);
+      setSelectionStart(start);
+      setSelectionEnd(end);
+
+      // Also set for note creation
+      setNoteSelectionStart(start);
+      setNoteSelectionEnd(end);
       setSelectedTextForNote(selected);
     } else {
       setSelectedText('');
       setSelectedTextForNote('');
     }
+  };
+
+  // Handle clicks in the editor area to clear highlights
+  const handleEditorClick = (e: React.MouseEvent) => {
+    // Only clear highlight if we're not clicking on a note in the margin
+    // and if there's currently a highlight active
+    if (highlightPosition && e.target === textareaRef.current) {
+      clearHighlight();
+    }
+    // Call the existing text selection handler
+    handleTextSelect();
   };
 
   // Note handling functions
@@ -406,7 +314,7 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
 
   const handleConfirmDeleteNote = () => {
     if (noteToDelete) {
-      deleteNoteMutation.mutate(noteToDelete); // Pass the whole note object
+      deleteNoteMutation.mutate(noteToDelete);
       setIsDeleteDialogOpen(false);
       setNoteToDelete(null);
     }
@@ -427,26 +335,9 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
       return;
     }
 
-    // Remove old markers and wrap new text with markers
-    const contentWithoutOldMarkers = MarkerUtils.removeMarkers(contentWithMarkers, note.id);
-    
-    // Update content without old markers first
-    setContentWithMarkers(contentWithoutOldMarkers);
-    
-    // Then wrap the new selected text with markers
-    const newContentWithMarkers = MarkerUtils.wrapWithMarkers(
-      contentWithoutOldMarkers,
-      selectedText,
-      note.id
-    );
-    
-    // Update both content states
-    setContentWithMarkers(newContentWithMarkers);
-    onChange(newContentWithMarkers); // Save with markers
-    
-    console.log(`🔗 Relinked note ${note.id} to new text: "${selectedText}"`);
+    console.log(`🔗 Updating note ${note.id} link to new text: "${selectedText}"`);
 
-    // Step 3: Update the note in database with new link information
+    // Update the note in database with new link information
     updateNoteMutation.mutate({
       id: note.id,
       data: {
@@ -461,131 +352,6 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
       type: 'success',
       message: '笔记链接已更新'
     });
-  };
-
-  // Simple function to wrap text with markers
-  const wrapTextWithMarkers = (noteId: number, linkedText: string) => {
-    console.log(`📌 Wrapping text with markers for note ${noteId}:`, linkedText);
-    
-    // Use the simple wrapping function from MarkerUtils
-    const newContentWithMarkers = MarkerUtils.wrapWithMarkers(
-      contentWithMarkers,
-      linkedText,
-      noteId
-    );
-    
-    // Update content states
-    setContentWithMarkers(newContentWithMarkers);
-    onChange(newContentWithMarkers); // Save with markers
-    
-    return newContentWithMarkers;
-  };
-
-  // Store previous content for marker restoration
-  const previousContentRef = useRef(contentWithMarkers);
-
-  // Handle keydown to prevent marker deletion
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Backspace' || e.key === 'Delete') {
-      const textarea = e.currentTarget;
-      const cursorPos = textarea.selectionStart;
-      const cursorEnd = textarea.selectionEnd;
-      const text = contentWithMarkers || '';
-      
-      // If there's a selection, check if it contains markers
-      if (cursorPos !== cursorEnd) {
-        const selectedText = text.slice(cursorPos, cursorEnd);
-        const markerRegex = /\u200B[\uFEFF\u200C\u200D\u2060\u180E]+\u200C|\u200D[\uFEFF\u200C\u200D\u2060\u180E]+\u2060/g;
-        if (markerRegex.test(selectedText)) {
-          console.log('🚫 Preventing deletion of selection containing markers');
-          e.preventDefault();
-          // Move cursor to start of selection
-          setTimeout(() => {
-            textarea.setSelectionRange(cursorPos, cursorPos);
-          }, 0);
-          return;
-        }
-      } else {
-        // Single cursor position - check if we're about to delete part of a marker
-        const markerRegex = /\u200B[\uFEFF\u200C\u200D\u2060\u180E]+\u200C|\u200D[\uFEFF\u200C\u200D\u2060\u180E]+\u2060/g;
-        let posToCheck = cursorPos;
-        if (e.key === 'Backspace' && cursorPos > 0) {
-          posToCheck = cursorPos - 1;
-        }
-        
-        // Check a wider range around the cursor for markers
-        const startCheck = Math.max(0, posToCheck - 20);
-        const endCheck = Math.min(text.length, posToCheck + 20);
-        const surroundingText = text.slice(startCheck, endCheck);
-        const matches = [...surroundingText.matchAll(/\[START_\d+\]|\[END_\d+\]/g)];
-        
-        for (const match of matches) {
-          const markerStart = startCheck + match.index!;
-          const markerEnd = markerStart + match[0].length;
-          
-          // Check if deletion would affect this marker
-          if (e.key === 'Backspace' && cursorPos > markerStart && cursorPos <= markerEnd) {
-            console.log(`🚫 Backspacing over marker: ${match[0]}, moving cursor and deleting before marker`);
-            e.preventDefault();
-            
-            // Move cursor to before marker AND delete the character before it
-            if (markerStart > 0) {
-              const newContent = text.slice(0, markerStart - 1) + text.slice(markerStart);
-              setContentWithMarkers(newContent);
-              onChange(newContent); // Save with markers
-              
-              // Position cursor at the deletion point
-              setTimeout(() => {
-                if (textareaRef.current) {
-                  textareaRef.current.setSelectionRange(markerStart - 1, markerStart - 1);
-                }
-              }, 0);
-            } else {
-              // Just move cursor if at beginning
-              setTimeout(() => {
-                textarea.setSelectionRange(markerStart, markerStart);
-              }, 0);
-            }
-            return;
-          } else if (e.key === 'Delete' && cursorPos >= markerStart && cursorPos < markerEnd) {
-            console.log(`🚫 Deleting over marker: ${match[0]}, moving cursor and deleting after marker`);
-            e.preventDefault();
-            
-            // Move cursor to after marker AND delete the character after it
-            if (markerEnd < text.length) {
-              const newContent = text.slice(0, markerEnd) + text.slice(markerEnd + 1);
-              setContentWithMarkers(newContent);
-              onChange(newContent); // Save with markers
-              
-              // Position cursor after the marker (which is now at the same position due to deletion)
-              setTimeout(() => {
-                if (textareaRef.current) {
-                  textareaRef.current.setSelectionRange(markerEnd, markerEnd);
-                }
-              }, 0);
-            } else {
-              // Just move cursor if at end
-              setTimeout(() => {
-                textarea.setSelectionRange(markerEnd, markerEnd);
-              }, 0);
-            }
-            return;
-          }
-        }
-      }
-    }
-  };
-
-  // Simple textarea content change handler - markers should never be deleted
-  const handleTextareaChange = (newContentWithMarkers: string) => {
-    console.log('🔥 handleTextareaChange called - no restoration needed');
-    
-    // Just pass through - markers should be protected by keydown handler
-    setContentWithMarkers(newContentWithMarkers);
-    onChange(newContentWithMarkers); // Save with markers
-    
-    // Update previous content reference
-    previousContentRef.current = newContentWithMarkers;
   };
 
   const handleStartCreateNote = () => {
@@ -611,44 +377,60 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
     return textBeforePosition.split('\n').length;
   };
 
-  // Handle note click to jump to linked text
+  // Handle note click to jump to linked position and highlight
   const handleNoteClick = (note: Note) => {
     console.log(`🎯 handleNoteClick called for note ${note.id}`);
-    
+
     if (!textareaRef.current) return;
 
-    console.log('📝 ContentWithMarkers for note click:', contentWithMarkers?.substring(0, 200));
-    console.log('🏷️ Looking for markers for note:', note.id);
+    // Get current position from our tracking map
+    const position = notePositions.get(note.id);
 
-    // Try to find markers for this note by scanning
-    const markerPositions = MarkerUtils.findMarkers(contentWithMarkers, note.id);
-    console.log('📍 Marker positions found:', markerPositions);
-    
-    if (markerPositions) {
-      console.log(`✅ Markers found! Highlighting positions ${markerPositions.start}-${markerPositions.end}`);
-      
-      // Markers found - highlight the text between them
+    if (position && position.start <= content.length && position.end <= content.length) {
+      console.log(`✅ Found note position: ${position.start}-${position.end}`);
+
+      // Clear any existing highlight timeout
+      if (highlightTimeoutRef.current) {
+        clearTimeout(highlightTimeoutRef.current);
+      }
+
+      // Set highlighting with note's color
+      setHighlightedNoteId(note.id);
+      setHighlightPosition({
+        start: position.start,
+        end: position.end,
+        color: note.color
+      });
+
+      // Focus the textarea (but don't select text to avoid blue highlight)
       textareaRef.current.focus();
-      textareaRef.current.setSelectionRange(markerPositions.start, markerPositions.end);
-      
-      // Calculate scroll position using contentWithMarkers (not clean content)
-      const textBeforePosition = contentWithMarkers.slice(0, markerPositions.start);
+
+      // Calculate scroll position
+      const textBeforePosition = content.slice(0, position.start);
       const lines = textBeforePosition.split('\n');
       const lineNumber = lines.length - 1;
       const lineHeight = 30;
       const scrollPosition = lineNumber * lineHeight;
-      
+
       textareaRef.current.scrollTop = Math.max(0, scrollPosition - 100);
-      
-      // Update selection state
-      const linkedText = MarkerUtils.getTextBetweenMarkers(contentWithMarkers, note.id) || '';
-      console.log('🔗 Linked text:', linkedText);
-      setSelectedText(linkedText);
-      setSelectionStart(markerPositions.start);
-      setSelectionEnd(markerPositions.end);
+
+      // Update selection state with current text at position (for other functionality)
+      const currentText = content.slice(position.start, position.end);
+      setSelectedText(currentText);
+      setSelectionStart(position.start);
+      setSelectionEnd(position.end);
+
+      console.log(`📝 Highlighting text: "${currentText}" at positions ${position.start}-${position.end}`);
+
+      // Clear highlight after 10 seconds
+      highlightTimeoutRef.current = setTimeout(() => {
+        setHighlightedNoteId(undefined);
+        setHighlightPosition(null);
+        highlightTimeoutRef.current = null;
+      }, 10000);
     } else {
-      console.log(`❌ No markers found for note ${note.id}`);
-      // No markers found - note has no link or it was deleted, just focus editor
+      console.log(`❌ No valid position found for note ${note.id}`);
+      // Just focus editor if no valid position
       textareaRef.current.focus();
     }
   };
@@ -660,23 +442,18 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
     try {
       setAIContinueLoading(true);
       let accumulatedContent = '';
-      const startingContentWithMarkers = contentWithMarkers || content;
       const startingContent = content;
-      
+
       const eventSource = aiApi.continueStream(
-        work.id, 
+        work.id,
         chapter.id,
         // onChunk - called for each piece of text
         (chunk: string) => {
           accumulatedContent += chunk;
           const newContent = startingContent + accumulatedContent;
-          
-          // Update contentWithMarkers during streaming by appending to initial state
-          const newContentWithMarkers = startingContentWithMarkers + accumulatedContent;
-            
-          setContentWithMarkers(newContentWithMarkers);
-          onChange(newContentWithMarkers);
-          
+
+          onChange(newContent);
+
           // Keep cursor at end during streaming
           if (textareaRef.current) {
             setTimeout(() => {
@@ -707,7 +484,7 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
             type: 'success',
             message: 'AI续写完成'
           });
-          
+
           // Final cursor position
           const finalContent = startingContent + accumulatedContent;
           if (textareaRef.current) {
@@ -734,10 +511,10 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
         content,
         160
       );
-      
+
       // Store eventSource reference so we can clean it up if needed
       setStreamEventSource(eventSource);
-      
+
     } catch (error) {
       console.error('AI continue error:', error);
       setAIContinueLoading(false);
@@ -754,17 +531,17 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
 
     try {
       setAISuggestLoading(true);
-      
+
       const response = await aiApi.suggest(work.id, chapter.id, selectedText);
       const suggestions = response.data.suggestions;
-      
+
       if (suggestions && suggestions.length > 0) {
-        // Create AI-generated notes from suggestions using shared marker system
+        // Create AI-generated notes from suggestions
         let createdCount = 0;
-        
+
         for (const suggestion of suggestions) {
           try {
-            const response = await notesApi.create({
+            await notesApi.create({
               work: work.id,
               chapter: chapter.id,
               content: suggestion.content || suggestion,
@@ -775,18 +552,13 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
               text_end_position: noteSelectionEnd,
               linked_text: selectedText
             });
-            
-            // Wrap the selected text with markers for the AI suggestion
-            if (selectedText) {
-              wrapTextWithMarkers(response.data.id, selectedText);
-            }
-            
+
             createdCount++;
           } catch (error) {
             console.error('Failed to create suggestion note:', error);
           }
         }
-        
+
         if (createdCount > 0) {
           // Refresh notes list
           queryClient.invalidateQueries({ queryKey: ['notes', work.id, chapter.id] });
@@ -806,7 +578,7 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
           message: '暂无建议生成'
         });
       }
-      
+
     } catch (error) {
       console.error('AI suggest error:', error);
       addNotification({
@@ -821,17 +593,17 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
   // Calculate word count (Chinese + English mixed)
   const calculateWordCount = (text: string) => {
     if (!text) return 0;
-    
+
     // Count Chinese characters (each character is one word)
     const chineseChars = (text.match(/[\u4e00-\u9fff]/g) || []).length;
-    
+
     // Count English words (space-separated, excluding Chinese characters)
     const englishText = text.replace(/[\u4e00-\u9fff]/g, ' ');
     const englishWords = englishText.split(/\s+/).filter(word => word.trim()).length;
-    
+
     return chineseChars + englishWords;
   };
-  
+
   const wordCount = calculateWordCount(content);
   const totalChars = content.length;
 
@@ -839,20 +611,46 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
     <div className="h-full flex flex-col bg-dark-bg">
       {/* Editor Area with Inline Notes */}
       <div className="flex-1 flex">
-        {/* Text Editor */}
-        <div className="flex-1 p-6">
+        {/* Text Editor with Highlight Overlay */}
+        <div className="flex-1 p-6 relative">
+          {/* Highlight Overlay */}
+          {highlightPosition && (
+            <div
+              className="absolute inset-6 pointer-events-none z-10"
+              style={{
+                fontFamily: "'Source Han Serif CN', serif",
+                fontSize: '18px',
+                lineHeight: 1.8,
+                letterSpacing: '0.02em',
+                whiteSpace: 'pre-wrap',
+                wordWrap: 'break-word'
+              }}
+            >
+              <div className="absolute inset-0">
+                <span className="invisible">{content.slice(0, highlightPosition.start)}</span>
+                <span
+                  className="rounded px-1 opacity-30"
+                  style={{ backgroundColor: highlightPosition.color }}
+                >
+                  {content.slice(highlightPosition.start, highlightPosition.end)}
+                </span>
+              </div>
+            </div>
+          )}
+
+          {/* Main Textarea */}
           <textarea
             ref={textareaRef}
-            value={contentWithMarkers || content}
-            onChange={(e) => handleTextareaChange(e.target.value)}
-            onKeyDown={handleKeyDown}
+            value={content}
+            onChange={(e) => onChange(e.target.value)}
             onSelect={handleTextSelect}
+            onClick={handleEditorClick}
             placeholder="开始您的创作之旅..."
             className="
               w-full h-full resize-none bg-transparent border-none outline-none
               text-dark-text chinese-text text-lg leading-relaxed
               placeholder-dark-text-muted
-              focus:ring-0
+              focus:ring-0 relative z-20
             "
             style={{
               fontFamily: "'Source Han Serif CN', serif",
@@ -1145,7 +943,7 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
                   </>
                 )}
               </LoadingButton>
-              
+
               {isStreaming && (
                 <Button
                   onClick={handleCancelStreaming}
@@ -1158,7 +956,7 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
               )}
             </div>
           </div>
-          
+
           {guideText && (
             <div className="mt-2 text-xs text-dark-text-muted">
               AI将根据您的指导「{guideText.slice(0, 50)}{guideText.length > 50 ? '...' : ''}」进行续写
@@ -1166,7 +964,7 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
           )}
         </div>
       </div>
-      
+
       {/* Delete Note Confirmation Dialog */}
       <DeleteNoteConfirmDialog
         note={noteToDelete}
