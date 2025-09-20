@@ -732,105 +732,31 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
         .monaco-editor .overlayWidgets {
           display: none !important;
         }
+
+        /* Remove Monaco Editor borders and ensure full fill */
+        .monaco-editor {
+          border: none !important;
+          outline: none !important;
+        }
+
+        .monaco-editor .monaco-editor-background {
+          border: none !important;
+          background-color: #000000 !important;
+        }
+
+        /* Force black background for all Monaco editor elements */
+        .monaco-editor,
+        .monaco-editor-background,
+        .monaco-editor .inputarea.ime-input {
+          background-color: #000000 !important;
+        }
       `}</style>
 
       <div className="h-full flex flex-col bg-dark-bg">
       {/* Editor Area with Inline Notes */}
       <div className="flex-1 flex">
-        {/* Monaco Editor */}
-        <div className="flex-1 p-6">
-          <Editor
-            height="100%"
-            language="plaintext"
-            theme="vs-dark"
-            value={content}
-            onChange={(value) => onChange(value || '')}
-            onMount={(editor) => {
-              editorRef.current = editor;
-
-              // Set up selection change listener
-              editor.onDidChangeCursorSelection(() => {
-                handleMonacoSelectionChange(editor);
-              });
-
-              // Set up click listener for clearing highlights
-              editor.onMouseDown(() => {
-                handleEditorClick();
-              });
-            }}
-            options={{
-              // Appearance
-              fontFamily: "'Source Han Serif CN', serif",
-              fontSize: 18,
-              lineHeight: 28.8,
-              letterSpacing: '0.02em',
-
-              // Editor behavior
-              wordWrap: 'on',
-              wordWrapColumn: 80,
-              automaticLayout: true,
-              scrollBeyondLastLine: false,
-
-              // UI elements
-              minimap: { enabled: false },
-              scrollbar: {
-                vertical: 'visible',
-                horizontal: 'visible',
-                verticalScrollbarSize: 10,
-                horizontalScrollbarSize: 10
-              },
-
-              // Remove unnecessary features
-              lineNumbers: 'off',
-              folding: false,
-              glyphMargin: false,
-              lineDecorationsWidth: 0,
-              lineNumbersMinChars: 0,
-              renderLineHighlight: 'none',
-              renderLineHighlightOnlyWhenFocus: false,
-
-              // Hide suggestions and other popups
-              quickSuggestions: false,
-              suggestOnTriggerCharacters: false,
-              acceptSuggestionOnEnter: 'off',
-              tabCompletion: 'off',
-              wordBasedSuggestions: false,
-
-              // Disable features we don't need
-              contextmenu: false,
-              find: {
-                seedSearchStringFromSelection: false,
-                autoFindInSelection: false
-              },
-
-              // Remove decorations that might cause artifacts
-              rulers: [],
-              renderWhitespace: 'none',
-              renderControlCharacters: false,
-              renderIndentGuides: false,
-              hideCursorInOverviewRuler: true,
-              overviewRulerBorder: false,
-              overviewRulerLanes: 0,
-
-              // Disable special character rendering that causes yellow boxes
-              unicodeHighlight: {
-                nonBasicASCII: false,
-                invisibleCharacters: false,
-                ambiguousCharacters: false
-              },
-
-              // Disable bracket/quote matching highlighting
-              matchBrackets: 'never',
-
-              // Disable selection and occurrence highlighting
-              selectionHighlight: false,
-              occurrencesHighlight: false
-            }}
-          />
-        </div>
-
         {/* Notes Margin */}
-        <div className="w-80 border-l border-gray-300 bg-gray-50 dark:bg-dark-surface dark:border-dark-border">
+        <div className="w-80 border-r border-gray-300 bg-gray-50 dark:bg-dark-surface dark:border-dark-border">
           {/* Notes Header */}
           <div className="sticky top-0 bg-gray-50 dark:bg-dark-surface border-b border-gray-200 dark:border-dark-border p-3">
             <div className="flex items-center justify-between">
@@ -1039,6 +965,103 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
               </div>
             )}
           </div>
+        </div>
+
+        {/* Monaco Editor - Middle Panel */}
+        <div className="flex-1 bg-black">
+          <Editor
+            height="100%"
+            language="plaintext"
+            theme="vs-dark"
+            value={content}
+            onChange={(value) => onChange(value || '')}
+            onMount={(editor) => {
+              editorRef.current = editor;
+
+              // Set up selection change listener
+              editor.onDidChangeCursorSelection(() => {
+                handleMonacoSelectionChange(editor);
+              });
+
+              // Set up click listener for clearing highlights
+              editor.onMouseDown(() => {
+                handleEditorClick();
+              });
+
+              // Update note positions when content changes
+              editor.onDidChangeModelContent(() => {
+                updateNotePositions();
+              });
+            }}
+            options={{
+              // Appearance
+              fontFamily: "'Source Han Serif CN', serif",
+              fontSize: 18,
+              lineHeight: 28.8,
+              letterSpacing: '0.02em',
+
+              // Editor behavior
+              wordWrap: 'on',
+              wordWrapColumn: 80,
+              automaticLayout: true,
+              scrollBeyondLastLine: false,
+
+              // UI elements
+              minimap: { enabled: false },
+              scrollbar: {
+                vertical: 'visible',
+                horizontal: 'visible',
+                verticalScrollbarSize: 10,
+                horizontalScrollbarSize: 10
+              },
+
+              // Remove unnecessary features
+              lineNumbers: 'off',
+              folding: false,
+              glyphMargin: false,
+              lineDecorationsWidth: 0,
+              lineNumbersMinChars: 0,
+              renderLineHighlight: 'none',
+              renderLineHighlightOnlyWhenFocus: false,
+
+              // Hide suggestions and other popups
+              quickSuggestions: false,
+              suggestOnTriggerCharacters: false,
+              acceptSuggestionOnEnter: 'off',
+              tabCompletion: 'off',
+              wordBasedSuggestions: false,
+
+              // Disable features we don't need
+              contextmenu: false,
+              find: {
+                seedSearchStringFromSelection: false,
+                autoFindInSelection: false
+              },
+
+              // Remove decorations that might cause artifacts
+              rulers: [],
+              renderWhitespace: 'none',
+              renderControlCharacters: false,
+              renderIndentGuides: false,
+              hideCursorInOverviewRuler: true,
+              overviewRulerBorder: false,
+              overviewRulerLanes: 0,
+
+              // Disable special character rendering that causes yellow boxes
+              unicodeHighlight: {
+                nonBasicASCII: false,
+                invisibleCharacters: false,
+                ambiguousCharacters: false
+              },
+
+              // Disable bracket/quote matching highlighting
+              matchBrackets: 'never',
+
+              // Disable selection and occurrence highlighting
+              selectionHighlight: false,
+              occurrencesHighlight: false
+            }}
+          />
         </div>
       </div>
 
