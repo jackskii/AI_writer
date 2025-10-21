@@ -1,6 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Sparkles, Lightbulb, Zap, X, Plus, Edit3, Trash2, StickyNote, ExternalLink, Link, AlertTriangle } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import Editor from '@monaco-editor/react';
+import * as monaco from 'monaco-editor';
 import { Button } from '../ui/Button';
 import { Input, Textarea } from '../ui/Input';
 import { LoadingButton } from '../ui/Loading';
@@ -32,9 +34,10 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
   chapter
 }) => {
   // ALL HOOKS MUST BE CALLED BEFORE ANY EARLY RETURNS
-  const editorRef = useRef<HTMLTextAreaElement | null>(null);
+  const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
   const previousContentRef = useRef(content);
   const highlightTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const currentDecorationsRef = useRef<string[]>([]);
 
   const [guideText, setGuideText] = useState('');
   const [selectedText, setSelectedText] = useState('');
@@ -230,15 +233,58 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
     setHighlightedNoteId(undefined);
     setHighlightPosition(null);
 
+    // Clear Monaco decorations
+    if (editorRef.current && currentDecorationsRef.current.length > 0) {
+      currentDecorationsRef.current = editorRef.current.deltaDecorations(
+        currentDecorationsRef.current,
+        []
+      );
+    }
   };
 
-  // Highlight text in textarea using native selection
-  const highlightText = (start: number, end: number) => {
+  // Helper functions for Monaco Editor position conversion
+  const offsetToPosition = (offset: number): { lineNumber: number; column: number } => {
+    const lines = content.slice(0, offset).split('\n');
+    return {
+      lineNumber: lines.length,
+      column: lines[lines.length - 1].length + 1
+    };
+  };
+
+  const positionToOffset = (lineNumber: number, column: number): number => {
+    const lines = content.split('\n');
+    let offset = 0;
+    for (let i = 0; i < lineNumber - 1; i++) {
+      offset += lines[i].length + 1; // +1 for newline
+    }
+    return offset + column - 1;
+  };
+
+  // Add Monaco highlight decoration
+  const addHighlight = (start: number, end: number, color: string) => {
     if (!editorRef.current) return;
 
-    // Set selection range to highlight the text
-    editorRef.current.setSelectionRange(start, end);
-    editorRef.current.focus();
+    const startPos = offsetToPosition(start);
+    const endPos = offsetToPosition(end);
+
+    const decoration = {
+      range: new monaco.Range(
+        startPos.lineNumber,
+        startPos.column,
+        endPos.lineNumber,
+        endPos.column
+      ),
+      options: {
+        inlineClassName: 'monaco-highlight',
+        stickiness: monaco.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges
+      }
+    };
+
+    // Clear previous decorations and add new one
+    currentDecorationsRef.current = editorRef.current.deltaDecorations(
+      currentDecorationsRef.current,
+      [decoration]
+    );
   };
 
   // Cancel streaming
@@ -255,6 +301,35 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
     });
   };
 
+  // Handle Monaco Editor text selection
+  const handleMonacoSelectionChange = (editor: monaco.editor.IStandaloneCodeEditor) => {
+    const selection = editor.getSelection();
+    if (!selection) return;
+
+    const model = editor.getModel();
+    if (!model) return;
+
+    const startOffset = model.getOffsetAt(selection.getStartPosition());
+    const endOffset = model.getOffsetAt(selection.getEndPosition());
+
+    if (startOffset !== endOffset) {
+      const selectedText = model.getValueInRange(selection);
+
+      console.log(`📝 Selected text: "${selectedText}" at positions ${startOffset}-${endOffset}`);
+
+      setSelectedText(selectedText);
+      setSelectionStart(startOffset);
+      setSelectionEnd(endOffset);
+
+      // Also set for note creation
+      setNoteSelectionStart(startOffset);
+      setNoteSelectionEnd(endOffset);
+      setSelectedTextForNote(selectedText);
+    } else {
+      setSelectedText('');
+      setSelectedTextForNote('');
+    }
+  };
 
   // Handle clicks in the editor area to clear highlights
   const handleEditorClick = () => {
@@ -406,7 +481,7 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
         clearTimeout(highlightTimeoutRef.current);
       }
 
-      // Set highlighting with note's color
+      // Set highlighting with note's color using Monaco decorations
       setHighlightedNoteId(note.id);
       setHighlightPosition({
         start: position.start,
@@ -414,8 +489,17 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
         color: note.color
       });
 
-      // Highlight text using native textarea selection
-      highlightText(position.start, position.end);
+      // Add Monaco highlight decoration
+      addHighlight(position.start, position.end, note.color);
+
+      // Focus and scroll to position in Monaco
+      if (editorRef.current) {
+        editorRef.current.focus();
+
+        const startPos = offsetToPosition(position.start);
+        editorRef.current.revealLineInCenter(startPos.lineNumber);
+        editorRef.current.setPosition(startPos);
+      }
 
       // Update selection state with current text at position (for other functionality)
       const currentText = content.slice(position.start, position.end);
@@ -631,16 +715,40 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
 
   return (
     <>
-      {/* CSS for textarea highlighting */}
+      {/* CSS for Monaco Editor highlights */}
       <style>{`
-        .writing-textarea::selection {
-          background-color: ${highlightPosition?.color ? `${highlightPosition.color}60` : '#3b82f680'} !important;
+        .monaco-highlight {
+          background-color: ${highlightPosition?.color ? `${highlightPosition.color}40` : 'transparent'} !important;
+          border-radius: 3px !important;
           color: inherit !important;
         }
 
-        .writing-textarea::-moz-selection {
-          background-color: ${highlightPosition?.color ? `${highlightPosition.color}60` : '#3b82f680'} !important;
-          color: inherit !important;
+        /* Hide Monaco's default decorations that might cause artifacts */
+        .monaco-editor .current-line,
+        .monaco-editor .current-line-exact {
+          background: transparent !important;
+        }
+
+        .monaco-editor .overlayWidgets {
+          display: none !important;
+        }
+
+        /* Remove Monaco Editor borders and ensure full fill */
+        .monaco-editor {
+          border: none !important;
+          outline: none !important;
+        }
+
+        .monaco-editor .monaco-editor-background {
+          border: none !important;
+          background-color: #000000 !important;
+        }
+
+        /* Force black background for all Monaco editor elements */
+        .monaco-editor,
+        .monaco-editor-background,
+        .monaco-editor .inputarea.ime-input {
+          background-color: #000000 !important;
         }
       `}</style>
 
@@ -859,47 +967,100 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
           </div>
         </div>
 
-        {/* Text Editor - Middle Panel */}
-        <div className="flex-1 bg-black p-4">
-          <textarea
-            ref={(el) => {
-              editorRef.current = el as any; // Type assertion for compatibility
-            }}
+        {/* Monaco Editor - Middle Panel */}
+        <div className="flex-1 bg-black">
+          <Editor
+            height="100%"
+            language="plaintext"
+            theme="vs-dark"
             value={content}
-            onChange={(e) => {
-              onChange(e.target.value);
-              updateNotePositions();
-            }}
-            onSelect={(e) => {
-              const target = e.target as HTMLTextAreaElement;
-              const start = target.selectionStart;
-              const end = target.selectionEnd;
+            onChange={(value) => onChange(value || '')}
+            onMount={(editor) => {
+              editorRef.current = editor;
 
-              if (start !== end) {
-                const selectedText = target.value.slice(start, end);
-                setSelectedText(selectedText);
-                setSelectionStart(start);
-                setSelectionEnd(end);
-                setNoteSelectionStart(start);
-                setNoteSelectionEnd(end);
-                setSelectedTextForNote(selectedText);
-              } else {
-                setSelectedText('');
-                setSelectedTextForNote('');
-              }
+              // Set up selection change listener
+              editor.onDidChangeCursorSelection(() => {
+                handleMonacoSelectionChange(editor);
+              });
+
+              // Set up click listener for clearing highlights
+              editor.onMouseDown(() => {
+                handleEditorClick();
+              });
+
+              // Update note positions when content changes
+              editor.onDidChangeModelContent(() => {
+                updateNotePositions();
+              });
             }}
-            onClick={handleEditorClick}
-            className="w-full h-full bg-black text-white border-none outline-none resize-none writing-textarea"
-            style={{
+            options={{
+              // Appearance
               fontFamily: "'Source Han Serif CN', serif",
-              fontSize: '18px',
-              lineHeight: '28.8px',
+              fontSize: 18,
+              lineHeight: 28.8,
               letterSpacing: '0.02em',
-              padding: '16px',
-              whiteSpace: 'pre-wrap',
-              wordWrap: 'break-word',
+
+              // Editor behavior
+              wordWrap: 'on',
+              wordWrapColumn: 80,
+              automaticLayout: true,
+              scrollBeyondLastLine: false,
+
+              // UI elements
+              minimap: { enabled: false },
+              scrollbar: {
+                vertical: 'visible',
+                horizontal: 'visible',
+                verticalScrollbarSize: 10,
+                horizontalScrollbarSize: 10
+              },
+
+              // Remove unnecessary features
+              lineNumbers: 'off',
+              folding: false,
+              glyphMargin: false,
+              lineDecorationsWidth: 0,
+              lineNumbersMinChars: 0,
+              renderLineHighlight: 'none',
+              renderLineHighlightOnlyWhenFocus: false,
+
+              // Hide suggestions and other popups
+              quickSuggestions: false,
+              suggestOnTriggerCharacters: false,
+              acceptSuggestionOnEnter: 'off',
+              tabCompletion: 'off',
+              wordBasedSuggestions: false,
+
+              // Disable features we don't need
+              contextmenu: false,
+              find: {
+                seedSearchStringFromSelection: false,
+                autoFindInSelection: false
+              },
+
+              // Remove decorations that might cause artifacts
+              rulers: [],
+              renderWhitespace: 'none',
+              renderControlCharacters: false,
+              renderIndentGuides: false,
+              hideCursorInOverviewRuler: true,
+              overviewRulerBorder: false,
+              overviewRulerLanes: 0,
+
+              // Disable special character rendering that causes yellow boxes
+              unicodeHighlight: {
+                nonBasicASCII: false,
+                invisibleCharacters: false,
+                ambiguousCharacters: false
+              },
+
+              // Disable bracket/quote matching highlighting
+              matchBrackets: 'never',
+
+              // Disable selection and occurrence highlighting
+              selectionHighlight: false,
+              occurrencesHighlight: false
             }}
-            placeholder="开始写作..."
           />
         </div>
       </div>
