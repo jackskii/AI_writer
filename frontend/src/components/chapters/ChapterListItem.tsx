@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
-import { Trash2, FileText } from 'lucide-react';
+import { Trash2, FileText, GripVertical } from 'lucide-react';
+import { useSortable } from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import { Button } from '../ui/Button';
 import type { Chapter } from '../../types';
 
@@ -17,6 +19,21 @@ export const ChapterListItem: React.FC<ChapterListItemProps> = ({
   onSummary
 }) => {
   const [isHovered, setIsHovered] = useState(false);
+
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: chapter.id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+  };
 
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
@@ -38,19 +55,31 @@ export const ChapterListItem: React.FC<ChapterListItemProps> = ({
 
   return (
     <div
+      ref={setNodeRef}
+      style={style}
       className={`
-        group flex items-center justify-between py-2 px-3 rounded-lg cursor-pointer transition-all duration-200
+        group flex items-center justify-between py-2 px-3 rounded-lg transition-all duration-200
         hover:bg-dark-surface/50 border-l-2 border-transparent hover:border-dark-primary/30
         ${isHovered ? 'bg-dark-surface/30' : ''}
+        ${isDragging ? 'z-50 shadow-lg' : ''}
       `}
-      onClick={onClick}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
     >
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-3">
+          {/* Drag handle */}
+          <div
+            {...attributes}
+            {...listeners}
+            className="cursor-grab active:cursor-grabbing text-dark-text-muted hover:text-dark-text transition-colors"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <GripVertical size={16} />
+          </div>
+
           {/* Chapter number and title */}
-          <div className="flex-1 min-w-0">
+          <div className="flex-1 min-w-0 cursor-pointer" onClick={onClick}>
             <span className="text-sm font-medium text-dark-text">
               {chapter.chapter_number}. {chapter.title}
             </span>

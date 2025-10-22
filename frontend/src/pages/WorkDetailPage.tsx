@@ -112,6 +112,14 @@ export const WorkDetailPage: React.FC = () => {
     }
   });
 
+  const reorderChaptersMutation = useMutation({
+    mutationFn: ({ actId, chapterIds }: { actId: number; chapterIds: number[] }) =>
+      chaptersApi.reorder(workIdNum, actId, chapterIds),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['chapters', workIdNum] });
+    }
+  });
+
   // Fetch work details
   const { data: work, isLoading: workLoading } = useQuery({
     queryKey: ['work', workIdNum],
@@ -336,11 +344,15 @@ export const WorkDetailPage: React.FC = () => {
     // Find the highest act order to create the next act
     const currentOrders = (actsData && Array.isArray(actsData)) ? actsData.map(act => act.order) : [0];
     const nextOrder = Math.max(...currentOrders, 0) + 1;
-    
+
     createActMutation.mutate({
       name: `第${nextOrder}卷`,
       order: nextOrder
     });
+  };
+
+  const handleReorderChapters = (actId: number, chapterIds: number[]) => {
+    reorderChaptersMutation.mutate({ actId, chapterIds });
   };
 
   const tabs = [
@@ -468,7 +480,7 @@ export const WorkDetailPage: React.FC = () => {
                     onKeyDown={handleSynopsisKeyDown}
                     placeholder="请输入作品大纲、背景设定、人物关系等..."
                     rows={12}
-                    className="resize-none"
+                    className="resize-none min-h-[200px] max-h-[500px]"
                     autoFocus
                   />
                   <div className="flex items-center gap-2 justify-end text-sm text-dark-text-muted">
@@ -477,15 +489,15 @@ export const WorkDetailPage: React.FC = () => {
                 </div>
               ) : (
                 work.synopsis ? (
-                  <div 
-                    className="chinese-text text-dark-text whitespace-pre-wrap leading-relaxed hover:bg-dark-surface/30 rounded p-3 cursor-pointer transition-colors min-h-[200px]"
+                  <div
+                    className="chinese-text text-dark-text whitespace-pre-wrap leading-relaxed hover:bg-dark-surface/30 rounded p-3 cursor-pointer transition-colors min-h-[200px] max-h-[500px] overflow-y-auto"
                     onClick={handleEditSynopsis}
                     title="点击编辑大纲"
                   >
                     {work.synopsis}
                   </div>
                 ) : (
-                  <div 
+                  <div
                     className="text-center py-8 text-dark-text-muted hover:bg-dark-surface/30 rounded cursor-pointer transition-colors min-h-[200px] flex flex-col justify-center"
                     onClick={handleEditSynopsis}
                     title="点击添加大纲"
@@ -534,6 +546,7 @@ export const WorkDetailPage: React.FC = () => {
                           onCreateChapter={(actId) => handleCreateChapterInAct(actId)}
                           onEditActName={handleEditActName}
                           onDeleteAct={handleDeleteAct}
+                          onReorderChapters={handleReorderChapters}
                         />
                       );
                     })

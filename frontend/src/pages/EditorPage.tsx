@@ -292,6 +292,7 @@ export const EditorPage: React.FC = () => {
             onChange={handleContentChange}
             work={currentWorkData}
             chapter={currentChapterData}
+            onSave={handleManualSave}
           />
         </div>
 

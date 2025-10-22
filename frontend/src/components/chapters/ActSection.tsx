@@ -1,5 +1,20 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { ChevronDown, ChevronRight, BookOpen, Plus, Edit2, Trash2 } from 'lucide-react';
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core';
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
 import { Button } from '../ui/Button';
 import { ChapterListItem } from './ChapterListItem';
 import type { Chapter } from '../../types';
@@ -14,6 +29,7 @@ interface ActSectionProps {
   onCreateChapter: (actId: number) => void;
   onEditActName: (actId: number, currentName?: string) => void;
   onDeleteAct: (actId: number) => void;
+  onReorderChapters: (actId: number, chapterIds: number[]) => void;
 }
 
 export const ActSection: React.FC<ActSectionProps> = ({
@@ -25,15 +41,45 @@ export const ActSection: React.FC<ActSectionProps> = ({
   onChapterSummary,
   onCreateChapter,
   onEditActName,
-  onDeleteAct
+  onDeleteAct,
+  onReorderChapters
 }) => {
   const [isCollapsed, setIsCollapsed] = useState(false);
+  const [localChapters, setLocalChapters] = useState(chapters);
+
+  // Update local chapters when props change
+  React.useEffect(() => {
+    setLocalChapters(chapters);
+  }, [chapters]);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  );
 
   const toggleCollapsed = () => {
     setIsCollapsed(prev => !prev);
   };
 
-  const totalWords = chapters.reduce((sum, chapter) => sum + chapter.word_count, 0);
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+
+    if (over && active.id !== over.id) {
+      const oldIndex = localChapters.findIndex((c) => c.id === active.id);
+      const newIndex = localChapters.findIndex((c) => c.id === over.id);
+
+      const newChapters = arrayMove(localChapters, oldIndex, newIndex);
+      setLocalChapters(newChapters);
+
+      // Call API to reorder
+      const chapterIds = newChapters.map(c => c.id);
+      onReorderChapters(act, chapterIds);
+    }
+  };
+
+  const totalWords = localChapters.reduce((sum, chapter) => sum + chapter.word_count, 0);
   const displayName = actName || `第${act}卷`;
 
   return (
@@ -111,21 +157,32 @@ export const ActSection: React.FC<ActSectionProps> = ({
       {/* Chapters List */}
       {!isCollapsed && (
         <div className="ml-4 space-y-0.5 border-l border-dark-border/20 pl-3">
-          {chapters.length === 0 ? (
+          {localChapters.length === 0 ? (
             <div className="py-6 text-center text-dark-text-muted">
               <BookOpen size={32} className="mx-auto mb-2 opacity-50" />
               <p className="text-sm">此卷暂无章节</p>
             </div>
           ) : (
-            chapters.map((chapter) => (
-              <ChapterListItem
-                key={chapter.id}
-                chapter={chapter}
-                onClick={() => onChapterClick(chapter)}
-                onDelete={() => onChapterDelete(chapter)}
-                onSummary={() => onChapterSummary(chapter)}
-              />
-            ))
+            <DndContext
+              sensors={sensors}
+              collisionDetection={closestCenter}
+              onDragEnd={handleDragEnd}
+            >
+              <SortableContext
+                items={localChapters.map(c => c.id)}
+                strategy={verticalListSortingStrategy}
+              >
+                {localChapters.map((chapter) => (
+                  <ChapterListItem
+                    key={chapter.id}
+                    chapter={chapter}
+                    onClick={() => onChapterClick(chapter)}
+                    onDelete={() => onChapterDelete(chapter)}
+                    onSummary={() => onChapterSummary(chapter)}
+                  />
+                ))}
+              </SortableContext>
+            </DndContext>
           )}
         </div>
       )}

@@ -78,15 +78,20 @@ export const worksApi = {
 export const chaptersApi = {
   list: (workId: number) => api.get<Chapter[]>(`/works/${workId}/chapters/`),
   get: (workId: number, id: number) => api.get<Chapter>(`/works/${workId}/chapters/${id}/`),
-  create: (workId: number, data: Partial<Chapter>) => 
+  create: (workId: number, data: Partial<Chapter>) =>
     api.post<Chapter>(`/works/${workId}/chapters/`, data),
-  update: (workId: number, id: number, data: Partial<Chapter>) => 
+  update: (workId: number, id: number, data: Partial<Chapter>) =>
     api.patch<Chapter>(`/works/${workId}/chapters/${id}/`, data),
   delete: (workId: number, id: number) => api.delete(`/works/${workId}/chapters/${id}/`),
   autoSave: (workId: number, id: number, content: string) =>
     api.patch(`/works/${workId}/chapters/${id}/autosave/`, { content }),
   generateSummary: (workId: number, id: number) =>
     api.post<{ summary: string }>(`/works/${workId}/chapters/${id}/summary/`),
+  reorder: (workId: number, actId: number, chapterIds: number[]) =>
+    api.post<{ status: string; updated: number }>(`/works/${workId}/chapters/reorder/`, {
+      act_id: actId,
+      chapter_ids: chapterIds,
+    }),
 };
 
 // 卷相关 API
@@ -250,8 +255,8 @@ export const aiApi = {
 
   // Streaming version of summarize
   summarizeStream: (
-    workId: number, 
-    chapterId: number, 
+    workId: number,
+    chapterId: number,
     onChunk: (chunk: string) => void,
     onStart?: () => void,
     onEnd?: (summary: string) => void,
@@ -261,6 +266,20 @@ export const aiApi = {
       work_id: workId.toString(),
       chapter_id: chapterId.toString(),
     });
+
+    // Add token for authentication since EventSource can't send headers
+    const authStorage = localStorage.getItem('auth-storage');
+    if (authStorage) {
+      try {
+        const parsedStorage = JSON.parse(authStorage);
+        const token = parsedStorage?.state?.token;
+        if (token) {
+          params.append('token', token);
+        }
+      } catch (e) {
+        console.error('Failed to parse auth storage:', e);
+      }
+    }
 
     const url = `${API_BASE_URL}/ai/summarize/stream/?${params.toString()}`;
     console.log('Summary streaming URL:', url);

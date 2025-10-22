@@ -4,7 +4,7 @@ import { useMutation } from '@tanstack/react-query';
 import ReactMarkdown from 'react-markdown';
 import { aiApi, chatApi, ChatWebSocket } from '../../services/api';
 import { Button } from '../ui/Button';
-import { Input } from '../ui/Input';
+import { Textarea } from '../ui/Input';
 import { LoadingSpinner } from '../ui/Loading';
 import type { Work, Chapter, ChatMessage } from '../../types';
 
@@ -19,7 +19,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ work, chapter }) => {
   const [isConnected, setIsConnected] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   const chatWebSocket = useRef<ChatWebSocket | null>(null);
   const typingTimer = useRef<NodeJS.Timeout | null>(null);
 
@@ -98,7 +98,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ work, chapter }) => {
   const handleSendMessage = async () => {
     const message = inputMessage.trim();
     if (!message || isStreamingChat || chatMutation.isPending) return;
-    
+
     // Check if work and chapter are available
     if (!work?.id || !chapter?.id) {
       console.error('Work or chapter not available for chat');
@@ -106,6 +106,10 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ work, chapter }) => {
     }
 
     setInputMessage('');
+    // Reset textarea height
+    if (inputRef.current) {
+      inputRef.current.style.height = 'auto';
+    }
 
     // Add user message immediately
     const userMessage: ChatMessage = {
@@ -188,18 +192,18 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ work, chapter }) => {
     }
   };
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setInputMessage(e.target.value);
-    
+
     // Send typing indicator via WebSocket
     if (isConnected && chatWebSocket.current) {
       chatWebSocket.current.sendTypingIndicator(true);
-      
+
       // Clear previous timer
       if (typingTimer.current) {
         clearTimeout(typingTimer.current);
       }
-      
+
       // Stop typing indicator after 2 seconds of inactivity
       typingTimer.current = setTimeout(() => {
         if (chatWebSocket.current) {
@@ -224,6 +228,14 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ work, chapter }) => {
     }
   };
 
+  // Auto-resize textarea for chat input
+  useEffect(() => {
+    if (inputRef.current) {
+      inputRef.current.style.height = 'auto';
+      inputRef.current.style.height = inputRef.current.scrollHeight + 'px';
+    }
+  }, [inputMessage]);
+
   // Load chat history and show initial greeting if empty
   useEffect(() => {
     const loadChatHistory = async () => {
@@ -232,7 +244,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ work, chapter }) => {
       try {
         const response = await chatApi.getHistory(work.id, chapter.id);
         const history = response.data.messages;
-        
+
         if (history.length > 0) {
           setMessages(history);
         } else {
@@ -430,17 +442,18 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ work, chapter }) => {
       <div className="flex-shrink-0 border-t border-dark-border bg-dark-surface p-4">
         <div className="flex items-end gap-3">
           <div className="flex-1">
-            <Input
+            <Textarea
               ref={inputRef}
               value={inputMessage}
               onChange={handleInputChange}
-              onKeyPress={handleKeyPress}
-              placeholder="与AI助手聊天..."
-              className="bg-dark-bg border-dark-border text-sm"
+              onKeyDown={handleKeyPress}
+              placeholder="与AI助手聊天... (Enter发送, Shift+Enter换行)"
+              className="bg-dark-bg border-dark-border text-sm resize-none overflow-hidden min-h-[40px] max-h-[200px]"
+              rows={1}
               disabled={isStreamingChat || chatMutation.isPending}
             />
           </div>
-          
+
           <Button
             onClick={handleSendMessage}
             disabled={!inputMessage.trim() || isStreamingChat || chatMutation.isPending}

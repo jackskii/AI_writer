@@ -52,10 +52,18 @@ class ChapterViewSet(viewsets.ModelViewSet):
         work = get_object_or_404(Work, id=work_id, author=self.request.user)
         return Chapter.objects.filter(work=work)
 
+    def _renumber_chapters_in_act(self, act):
+        """重新编号指定act中的所有章节"""
+        chapters = act.chapters.all().order_by('chapter_number')
+        for index, chapter in enumerate(chapters):
+            if chapter.chapter_number != index + 1:
+                chapter.chapter_number = index + 1
+                chapter.save(update_fields=['chapter_number'])
+
     def perform_create(self, serializer):
         work_id = self.kwargs.get('work_pk')
         work = get_object_or_404(Work, id=work_id, author=self.request.user)
-        
+
         # Get the act from the serializer data - it should be an Act instance now
         act = serializer.validated_data.get('act')
         if not act:
@@ -69,14 +77,21 @@ class ChapterViewSet(viewsets.ModelViewSet):
             if act.work != work:
                 from rest_framework.exceptions import ValidationError
                 raise ValidationError(f"Act {act.id} does not belong to work {work.id}")
-        
+
         # Auto-set order to the next available number globally (across all acts)
         next_order = work.chapters.count() + 1
-        
+
         # Calculate chapter_number within the act
         chapter_number = act.chapters.count() + 1
-        
+
         serializer.save(work=work, act=act, order=next_order, chapter_number=chapter_number)
+
+    def perform_destroy(self, instance):
+        """删除章节后重新编号该act中的其他章节"""
+        act = instance.act
+        super().perform_destroy(instance)
+        # 重新编号该act中的所有章节
+        self._renumber_chapters_in_act(act)
 
     @action(detail=True, methods=['patch'])
     def autosave(self, request, work_pk=None, pk=None):
@@ -99,24 +114,58 @@ class ChapterViewSet(viewsets.ModelViewSet):
     def summary(self, request, work_pk=None, pk=None):
         """生成章节摘要"""
         chapter = self.get_object()
-        
+
         try:
             from apps.ai_services.services import AIService, run_async_ai_task
             ai_service = AIService()
             summary = run_async_ai_task(
                 ai_service.generate_summary(chapter)
             )
-            
+
             # 保存摘要到章节
             chapter.summary = summary
             chapter.save(update_fields=['summary'])
-            
+
             return Response({'summary': summary})
         except Exception as e:
             return Response(
-                {'error': str(e)}, 
+                {'error': str(e)},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+
+    @action(detail=False, methods=['post'])
+    def reorder(self, request, work_pk=None):
+        """重新排序章节并自动更新章节号"""
+        work_id = self.kwargs.get('work_pk')
+        work = get_object_or_404(Work, id=work_id, author=self.request.user)
+
+        # 期望请求格式: { "act_id": 123, "chapter_ids": [1, 2, 3, ...] }
+        act_id = request.data.get('act_id')
+        chapter_ids = request.data.get('chapter_ids', [])
+
+        if not act_id or not chapter_ids:
+            return Response(
+                {'error': 'act_id and chapter_ids are required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        act = get_object_or_404(Act, id=act_id, work=work)
+
+        # 验证所有章节都属于这个act和work
+        chapters = Chapter.objects.filter(id__in=chapter_ids, work=work, act=act)
+        if len(chapters) != len(chapter_ids):
+            return Response(
+                {'error': 'Some chapters not found or do not belong to this act'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # 更新章节号（在该act内的顺序）
+        for index, chapter_id in enumerate(chapter_ids):
+            chapter = chapters.get(id=chapter_id)
+            chapter.chapter_number = index + 1
+            chapter.save(update_fields=['chapter_number'])
+
+        return Response({'status': 'success', 'updated': len(chapter_ids)})
 
 
 

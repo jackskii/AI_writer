@@ -40,12 +40,12 @@ interface TextareaProps extends React.TextareaHTMLAttributes<HTMLTextAreaElement
   error?: string;
 }
 
-export const Textarea: React.FC<TextareaProps> = ({
+export const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(({
   label,
   error,
   className = '',
   ...props
-}) => {
+}, ref) => {
   return (
     <div className="flex flex-col">
       {label && (
@@ -54,6 +54,7 @@ export const Textarea: React.FC<TextareaProps> = ({
         </label>
       )}
       <textarea
+        ref={ref}
         className={`
           w-full px-3 py-2 bg-dark-surface border border-dark-border rounded-lg
           text-dark-text placeholder-dark-text-muted
@@ -69,4 +70,6 @@ export const Textarea: React.FC<TextareaProps> = ({
       )}
     </div>
   );
-};
+});
+
+Textarea.displayName = 'Textarea';

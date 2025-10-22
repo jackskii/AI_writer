@@ -14,15 +14,18 @@ urlpatterns = [
         'get': 'list',
         'post': 'create'
     }), name='work-chapters-list'),
+    # Reorder must come before detail URLs to avoid matching 'reorder' as a pk
+    path('api/works/<int:work_pk>/chapters/reorder/',
+         ChapterViewSet.as_view({'post': 'reorder'}), name='chapter-reorder'),
     path('api/works/<int:work_pk>/chapters/<int:pk>/', ChapterViewSet.as_view({
         'get': 'retrieve',
         'put': 'update',
         'patch': 'partial_update',
         'delete': 'destroy'
     }), name='work-chapters-detail'),
-    path('api/works/<int:work_pk>/chapters/<int:pk>/autosave/', 
+    path('api/works/<int:work_pk>/chapters/<int:pk>/autosave/',
          ChapterViewSet.as_view({'patch': 'autosave'}), name='chapter-autosave'),
-    path('api/works/<int:work_pk>/chapters/<int:pk>/summary/', 
+    path('api/works/<int:work_pk>/chapters/<int:pk>/summary/',
          ChapterViewSet.as_view({'post': 'summary'}), name='chapter-summary'),
     
     

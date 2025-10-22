@@ -21,33 +21,41 @@ def ai_chat(request):
     work_id = request.data.get('work_id')
     chapter_id = request.data.get('chapter_id')
     message = request.data.get('message')
-    
+
     if not all([work_id, chapter_id, message]):
         return Response(
-            {'error': '缺少必要参数'}, 
+            {'error': '缺少必要参数'},
             status=status.HTTP_400_BAD_REQUEST
         )
-    
+
     # 获取作品和章节
     work = get_object_or_404(Work, id=work_id, author=request.user)
     chapter = get_object_or_404(Chapter, id=chapter_id, work=work)
-    
+
     try:
         # Build context in sync environment to avoid async issues
         from .services import ContextBuilder
+        from . import prompts
         context = ContextBuilder.build_context(chapter)
-        
+
         ai_service = AIService()
         response_content = run_async_ai_task(
             ai_service.chat_with_ai(context, message, chapter.id)
         )
-        
+
         return Response({'response': response_content})
-    
+
+    except ValueError as e:
+        # API key missing
+        logger.error(f"AI configuration error: {str(e)}")
+        return Response(
+            {'error': str(e)},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE
+        )
     except Exception as e:
         logger.error(f"AI chat error: {str(e)}")
         return Response(
-            {'error': f'AI聊天出错：{str(e)}'}, 
+            {'error': f'AI聊天出错：{str(e)}'},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
 
@@ -471,17 +479,34 @@ def ai_summarize_stream(request):
     """AI摘要端点 - SSE流式响应"""
     if request.method != 'GET':
         return HttpResponse(
-            'data: {"type": "error", "message": "仅支持GET请求"}\n\n', 
+            'data: {"type": "error", "message": "仅支持GET请求"}\n\n',
             content_type='text/event-stream'
         )
-    
-    # Check authentication
-    if not request.user.is_authenticated:
+
+    # Check authentication via token query parameter for EventSource compatibility
+    user = None
+    token = request.GET.get('token')
+    if token:
+        from django.contrib.auth.models import AnonymousUser
+        from rest_framework.authtoken.models import Token
+        try:
+            token_obj = Token.objects.get(key=token)
+            user = token_obj.user
+            request.user = user
+        except Token.DoesNotExist:
+            return HttpResponse(
+                'data: {"type": "error", "message": "认证令牌无效"}\n\n',
+                content_type='text/event-stream',
+                status=401
+            )
+    elif not request.user.is_authenticated:
         return HttpResponse(
-            'data: {"type": "error", "message": "需要登录"}\n\n', 
+            'data: {"type": "error", "message": "需要登录"}\n\n',
             content_type='text/event-stream',
             status=401
         )
+    else:
+        user = request.user
         
     work_id = request.GET.get('work_id')
     chapter_id = request.GET.get('chapter_id')
