@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, Plus, Edit3, Settings, BookOpen, Layers, Save, X, Edit, Trash2, MoreVertical } from 'lucide-react';
+import { ArrowLeft, Plus, Edit3, Settings, BookOpen, Layers, Edit, Trash2 } from 'lucide-react';
 import { worksApi, actsApi, chaptersApi, loreApi } from '../services/api';
 import { useWorkStore } from '../stores/useWorkStore';
 import { Button } from '../components/ui/Button';
@@ -17,6 +17,7 @@ import { DeleteLoreConfirmDialog } from '../components/modals/DeleteLoreConfirmD
 import { EditActNameModal } from '../components/modals/EditActNameModal';
 import { DeleteActConfirmDialog } from '../components/modals/DeleteActConfirmDialog';
 import { ActSection } from '../components/chapters/ActSection';
+import { WorkChatPanel } from '../components/work/WorkChatPanel';
 import type { Work, Act, Chapter, LoreEntry } from '../types';
 
 export const WorkDetailPage: React.FC = () => {
@@ -25,10 +26,7 @@ export const WorkDetailPage: React.FC = () => {
   const { 
     setCurrentWork, 
     setChapters, 
-    setLoreEntries, 
-    removeChapter,
-    chapters, 
-    loreEntries 
+    setLoreEntries 
   } = useWorkStore();
   
   const [activeTab, setActiveTab] = useState<'synopsis' | 'chapters' | 'lore'>('chapters');
@@ -223,7 +221,7 @@ export const WorkDetailPage: React.FC = () => {
     const title = `第${nextChapterNumber}章`;
     
     try {
-      const response = await chaptersApi.create(workIdNum, {
+      await chaptersApi.create(workIdNum, {
         title,
         act: actId
       });
@@ -250,7 +248,7 @@ export const WorkDetailPage: React.FC = () => {
     }
   };
 
-  const handleSummaryUpdated = (summary: string) => {
+  const handleSummaryUpdated = () => {
     setSummaryModalChapter(null);
     queryClient.invalidateQueries({ queryKey: ['chapters', workIdNum] });
   };
@@ -466,50 +464,55 @@ export const WorkDetailPage: React.FC = () => {
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-6 py-8">
         {activeTab === 'synopsis' && (
-          <Card>
-            <CardHeader>
-              <h3 className="text-lg font-semibold">作品大纲</h3>
-            </CardHeader>
-            <CardContent>
-              {isEditingSynopsis ? (
-                <div className="space-y-4">
-                  <Textarea
-                    value={synopsisContent}
-                    onChange={(e) => setSynopsisContent(e.target.value)}
-                    onBlur={handleSaveSynopsis}
-                    onKeyDown={handleSynopsisKeyDown}
-                    placeholder="请输入作品大纲、背景设定、人物关系等..."
-                    rows={12}
-                    className="resize-none min-h-[200px] max-h-[500px]"
-                    autoFocus
-                  />
-                  <div className="flex items-center gap-2 justify-end text-sm text-dark-text-muted">
-                    <span>按 Esc 取消编辑，点击其他地方自动保存</span>
-                  </div>
-                </div>
-              ) : (
-                work.synopsis ? (
-                  <div
-                    className="chinese-text text-dark-text whitespace-pre-wrap leading-relaxed hover:bg-dark-surface/30 rounded p-3 cursor-pointer transition-colors min-h-[200px] max-h-[500px] overflow-y-auto"
-                    onClick={handleEditSynopsis}
-                    title="点击编辑大纲"
-                  >
-                    {work.synopsis}
+          <div className="grid gap-6 xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+            <Card className="flex flex-col h-[670px] overflow-hidden">
+              <CardHeader className="flex-shrink-0">
+                <h3 className="text-lg font-semibold">作品大纲</h3>
+              </CardHeader>
+              <CardContent className="flex-1 overflow-hidden">
+                {isEditingSynopsis ? (
+                  <div className="flex h-full flex-col space-y-4">
+                    <Textarea
+                      value={synopsisContent}
+                      onChange={(e) => setSynopsisContent(e.target.value)}
+                      onBlur={handleSaveSynopsis}
+                      onKeyDown={handleSynopsisKeyDown}
+                      placeholder="请输入作品大纲、背景设定、人物关系等..."
+                      rows={22}
+                      className="resize-none h-[570px] min-h-[570px] max-h-[570px] overflow-y-auto"
+                      autoFocus
+                    />
+                    <div className="flex items-center gap-2 justify-end text-sm text-dark-text-muted">
+                      <span>按 Esc 取消编辑，点击其他地方自动保存</span>
+                    </div>
                   </div>
                 ) : (
-                  <div
-                    className="text-center py-8 text-dark-text-muted hover:bg-dark-surface/30 rounded cursor-pointer transition-colors min-h-[200px] flex flex-col justify-center"
-                    onClick={handleEditSynopsis}
-                    title="点击添加大纲"
-                  >
-                    <Edit3 size={48} className="mx-auto mb-4 opacity-50" />
-                    <p>暂无大纲内容</p>
-                    <p className="text-xs mt-2 opacity-70">点击此处添加大纲</p>
-                  </div>
-                )
-              )}
-            </CardContent>
-          </Card>
+                  work.synopsis ? (
+                    <div
+                      className="chinese-text text-dark-text whitespace-pre-wrap leading-relaxed hover:bg-dark-surface/30 rounded p-3 cursor-pointer transition-colors h-[570px] overflow-y-auto"
+                      onClick={handleEditSynopsis}
+                      title="点击编辑大纲"
+                    >
+                      {work.synopsis}
+                    </div>
+                  ) : (
+                    <div
+                      className="text-center py-8 text-dark-text-muted hover:bg-dark-surface/30 rounded cursor-pointer transition-colors h-[570px] flex flex-col justify-center"
+                      onClick={handleEditSynopsis}
+                      title="点击添加大纲"
+                    >
+                      <Edit3 size={48} className="mx-auto mb-4 opacity-50" />
+                      <p>暂无大纲内容</p>
+                      <p className="text-xs mt-2 opacity-70">点击此处添加大纲</p>
+                    </div>
+                  )
+                )}
+              </CardContent>
+            </Card>
+            <div className="h-[670px]">
+              <WorkChatPanel work={work} />
+            </div>
+          </div>
         )}
 
         {activeTab === 'chapters' && (

@@ -3,14 +3,13 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Trash2, Edit3 } from 'lucide-react';
 import { notesApi } from '../../services/api';
 import { Button } from '../ui/Button';
-import { Input, Textarea } from '../ui/Input';
+import { Textarea } from '../ui/Input';
 import { useUIStore } from '../../stores/useUIStore';
 import type { Work, Chapter, Note } from '../../types';
 
 interface NotesPanelProps {
   work: Work;
   chapter: Chapter;
-  editorContent: string;
 }
 
 const NOTE_COLORS = [
@@ -24,8 +23,7 @@ const NOTE_COLORS = [
 
 export const NotesPanel: React.FC<NotesPanelProps> = ({
   work,
-  chapter,
-  editorContent
+  chapter
 }) => {
   const [isCreating, setIsCreating] = useState(false);
   const [newNoteContent, setNewNoteContent] = useState('');
@@ -40,7 +38,11 @@ export const NotesPanel: React.FC<NotesPanelProps> = ({
     queryKey: ['notes', work.id, chapter.id],
     queryFn: async () => {
       const response = await notesApi.list(work.id, chapter.id);
-      return response.data.results || response.data;
+      const data = response.data;
+      if (Array.isArray(data)) {
+        return data;
+      }
+      return data.results ?? [];
     }
   });
 

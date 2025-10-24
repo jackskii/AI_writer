@@ -10,6 +10,7 @@ from .models import Suggestion
 import logging
 import json
 import asyncio
+import uuid
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +55,46 @@ def ai_chat(request):
         )
     except Exception as e:
         logger.error(f"AI chat error: {str(e)}")
+        return Response(
+            {'error': f'AI聊天出错：{str(e)}'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def ai_work_chat(request):
+    """作品总览AI聊天端点"""
+    work_id = request.data.get('work_id')
+    message = request.data.get('message')
+
+    if not all([work_id, message]):
+        return Response(
+            {'error': '缺少必要参数'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    work = get_object_or_404(Work, id=work_id, author=request.user)
+
+    try:
+        from .services import ContextBuilder
+        context = ContextBuilder.build_work_overview_context(work)
+
+        ai_service = AIService()
+        response_content = run_async_ai_task(
+            ai_service.chat_with_ai(context, message)
+        )
+
+        return Response({'response': response_content})
+
+    except ValueError as e:
+        logger.error(f"AI configuration error: {str(e)}")
+        return Response(
+            {'error': str(e)},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE
+        )
+    except Exception as e:
+        logger.error(f"AI work chat error: {str(e)}")
         return Response(
             {'error': f'AI聊天出错：{str(e)}'},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
@@ -329,6 +370,142 @@ def ai_chat_stream(request):
     response['Cache-Control'] = 'no-cache'
     response['X-Accel-Buffering'] = 'no'  # Disable nginx buffering
     response['Access-Control-Allow-Origin'] = '*'  # CORS for SSE
+    return response
+
+
+@csrf_exempt
+def ai_work_chat_stream(request):
+    """作品总览AI聊天端点 - SSE流式响应"""
+    if request.method != 'GET':
+        return HttpResponse(
+            'data: {"type": "error", "message": "仅支持GET请求"}\n\n',
+            content_type='text/event-stream'
+        )
+
+    user = None
+    token = request.GET.get('token')
+    if token:
+        from django.contrib.auth.models import AnonymousUser
+        from rest_framework.authtoken.models import Token
+        try:
+            token_obj = Token.objects.get(key=token)
+            user = token_obj.user
+            request.user = user
+        except Token.DoesNotExist:
+            return HttpResponse(
+                'data: {"type": "error", "message": "认证令牌无效"}\n\n',
+                content_type='text/event-stream',
+                status=401
+            )
+    elif not request.user.is_authenticated:
+        return HttpResponse(
+            'data: {"type": "error", "message": "需要登录"}\n\n',
+            content_type='text/event-stream',
+            status=401
+        )
+    else:
+        user = request.user
+
+    work_id = request.GET.get('work_id')
+    message = request.GET.get('message')
+
+    if not all([work_id, message]):
+        return HttpResponse(
+            'data: {"type": "error", "message": "缺少必要参数"}\n\n',
+            content_type='text/event-stream'
+        )
+
+    work = get_object_or_404(Work, id=work_id)
+
+    def generate_stream():
+        """生成SSE数据流"""
+        try:
+            from apps.chat.models import WorkChatSession, WorkChatMessage
+            session, _ = WorkChatSession.objects.get_or_create(
+                work=work,
+                user=user,
+                defaults={'session_id': str(uuid.uuid4())}
+            )
+
+            recent_messages = WorkChatMessage.objects.filter(
+                session=session
+            ).order_by('-created_at')[:10]
+            chat_history = [
+                {
+                    'role': msg.role,
+                    'content': msg.content
+                }
+                for msg in reversed(list(recent_messages))
+            ]
+
+            from .services import ContextBuilder
+            context = ContextBuilder.build_work_overview_context(work)
+
+            ai_service = AIService()
+
+            import asyncio
+            import threading
+            from queue import Queue
+
+            chunk_queue = Queue()
+            error_queue = Queue()
+
+            def run_in_thread():
+                try:
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+
+                    async def collect_chunks():
+                        async for chunk in ai_service.chat_with_ai_stream(context, message, chat_history):
+                            chunk_queue.put(chunk)
+                        chunk_queue.put(None)
+
+                    loop.run_until_complete(collect_chunks())
+                except Exception as e:
+                    error_queue.put(str(e))
+                    chunk_queue.put(None)
+                finally:
+                    loop.close()
+
+            thread = threading.Thread(target=run_in_thread)
+            thread.start()
+
+            yield f'data: {json.dumps({"type": "start", "message": "AI作品聊天开始"})}\n\n'
+
+            accumulated_response = ''
+            while True:
+                if not error_queue.empty():
+                    error = error_queue.get()
+                    yield f'data: {json.dumps({"type": "error", "message": f"AI聊天失败: {error}"})}\n\n'
+                    break
+
+                try:
+                    chunk = chunk_queue.get(timeout=1)
+                    if chunk is None:
+                        yield f'data: {json.dumps({"type": "end", "message": "AI聊天完成", "full_response": accumulated_response})}\n\n'
+                        break
+
+                    accumulated_response += chunk
+                    yield f'data: {json.dumps({"type": "chunk", "content": chunk})}\n\n'
+
+                except:
+                    if not thread.is_alive():
+                        yield f'data: {json.dumps({"type": "end", "message": "AI聊天完成", "full_response": accumulated_response})}\n\n'
+                        break
+
+            thread.join(timeout=5)
+
+        except Exception as e:
+            logger.error(f"Work chat stream error: {str(e)}")
+            yield f'data: {json.dumps({"type": "error", "message": f"AI聊天失败: {str(e)}"})}\n\n'
+
+    response = StreamingHttpResponse(
+        generate_stream(),
+        content_type='text/event-stream'
+    )
+    response['Cache-Control'] = 'no-cache'
+    response['X-Accel-Buffering'] = 'no'
+    response['Access-Control-Allow-Origin'] = '*'
     return response
 
 

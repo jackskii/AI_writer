@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Eye, EyeOff, User, Lock, Mail, UserPlus } from 'lucide-react';
+import { Eye, EyeOff, User, Lock, Mail } from 'lucide-react';
 import { useMutation } from '@tanstack/react-query';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';

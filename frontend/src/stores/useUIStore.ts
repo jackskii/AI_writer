@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import type { LoreEntry } from '../types';
 
 interface UIState {
   // Editor state
@@ -20,7 +21,7 @@ interface UIState {
   isCreateWorkModalOpen: boolean;
   isCreateChapterModalOpen: boolean;
   isLoreEntryModalOpen: boolean;
-  selectedLoreEntry: any | null;
+  selectedLoreEntry: LoreEntry | null;
   
   // Notifications
   notifications: Array<{
@@ -44,7 +45,7 @@ interface UIState {
   
   setCreateWorkModalOpen: (open: boolean) => void;
   setCreateChapterModalOpen: (open: boolean) => void;
-  setLoreEntryModalOpen: (open: boolean, entry?: any) => void;
+  setLoreEntryModalOpen: (open: boolean, entry?: LoreEntry) => void;
   
   addNotification: (notification: Omit<UIState['notifications'][0], 'id' | 'timestamp'>) => void;
   removeNotification: (id: string) => void;

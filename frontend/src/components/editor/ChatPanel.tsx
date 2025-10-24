@@ -1,8 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Bot, User, Wifi, WifiOff } from 'lucide-react';
+import { Send, Bot, User } from 'lucide-react';
 import { useMutation } from '@tanstack/react-query';
 import ReactMarkdown from 'react-markdown';
-import { aiApi, chatApi, ChatWebSocket } from '../../services/api';
+import { aiApi, chatApi } from '../../services/api';
 import { Button } from '../ui/Button';
 import { Textarea } from '../ui/Input';
 import { LoadingSpinner } from '../ui/Loading';
@@ -16,12 +16,9 @@ interface ChatPanelProps {
 export const ChatPanel: React.FC<ChatPanelProps> = ({ work, chapter }) => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputMessage, setInputMessage] = useState('');
-  const [isConnected, setIsConnected] = useState(false);
-  const [isTyping, setIsTyping] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  const chatWebSocket = useRef<ChatWebSocket | null>(null);
-  const typingTimer = useRef<NodeJS.Timeout | null>(null);
+  const streamEventSourceRef = useRef<EventSource | null>(null);
 
   // Auto-scroll to bottom when new messages are added
   const scrollToBottom = () => {
@@ -30,40 +27,30 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ work, chapter }) => {
 
   useEffect(() => {
     scrollToBottom();
-  }, [messages]);
+  }, [messages, streamingMessage]);
 
-  // Disable WebSocket for now, use HTTP API only
+  // Close active stream when unmounting
   useEffect(() => {
-    if (!work || !chapter) return;
-
-    // Skip WebSocket connection, use HTTP fallback
-    setIsConnected(false);
-
     return () => {
-      if (typingTimer.current) {
-        clearTimeout(typingTimer.current);
-      }
-      if (streamEventSource) {
-        streamEventSource.close();
-        setStreamEventSource(null);
+      if (streamEventSourceRef.current) {
+        streamEventSourceRef.current.close();
+        streamEventSourceRef.current = null;
       }
     };
-  }, [work?.id, chapter?.id]);
+  }, []);
 
   // State for streaming
   const [isStreamingChat, setIsStreamingChat] = useState(false);
   const [streamingMessage, setStreamingMessage] = useState('');
-  const [streamEventSource, setStreamEventSource] = useState<EventSource | null>(null);
-
   // Fallback chat mutation for when streaming fails
   const chatMutation = useMutation({
-    mutationFn: (message: string) => {
+    mutationFn: (pendingMessage: string) => {
       if (!work?.id || !chapter?.id) {
         throw new Error('Work or chapter not available');
       }
-      return aiApi.chat(work.id, chapter.id, message);
+      return aiApi.chat(work.id, chapter.id, pendingMessage);
     },
-    onSuccess: async (response, message) => {
+    onSuccess: async (response) => {
       const aiResponse: ChatMessage = {
         id: Date.now().toString() + '_ai',
         role: 'assistant',
@@ -156,7 +143,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ work, chapter }) => {
           setMessages(prev => [...prev, aiResponse]);
           setIsStreamingChat(false);
           setStreamingMessage('');
-          setStreamEventSource(null);
+          streamEventSourceRef.current = null;
           
           // Save AI response to backend
           try {
@@ -170,14 +157,14 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ work, chapter }) => {
           console.error('Streaming chat error:', error);
           setIsStreamingChat(false);
           setStreamingMessage('');
-          setStreamEventSource(null);
+          streamEventSourceRef.current = null;
           
           // Fallback to regular API
           chatMutation.mutate(message);
         }
       );
       
-      setStreamEventSource(eventSource);
+      streamEventSourceRef.current = eventSource;
     } catch (error) {
       console.error('Failed to start streaming:', error);
       setIsStreamingChat(false);
@@ -194,23 +181,6 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ work, chapter }) => {
 
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setInputMessage(e.target.value);
-
-    // Send typing indicator via WebSocket
-    if (isConnected && chatWebSocket.current) {
-      chatWebSocket.current.sendTypingIndicator(true);
-
-      // Clear previous timer
-      if (typingTimer.current) {
-        clearTimeout(typingTimer.current);
-      }
-
-      // Stop typing indicator after 2 seconds of inactivity
-      typingTimer.current = setTimeout(() => {
-        if (chatWebSocket.current) {
-          chatWebSocket.current.sendTypingIndicator(false);
-        }
-      }, 2000);
-    }
   };
 
   const handleClearChat = async () => {
@@ -275,27 +245,13 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ work, chapter }) => {
     if (messages.length === 0) {
       loadChatHistory();
     }
-  }, [work?.id, chapter?.id]);
+  }, [work?.id, chapter?.id, work?.title, chapter?.title, messages.length]);
 
   return (
     <div className="h-full flex flex-col bg-dark-bg">
       {/* Connection Status */}
-      <div className="flex-shrink-0 px-4 py-2 bg-dark-surface border-b border-dark-border">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-blue-500'}`} />
-            <span className="text-xs text-dark-text-muted">
-              {isConnected ? 'WebSocket已连接' : '使用HTTP模式'}
-            </span>
-          </div>
-          <div className="flex items-center gap-1 text-dark-text-muted">
-            {isConnected ? (
-              <Wifi size={14} className="text-green-500" />
-            ) : (
-              <WifiOff size={14} className="text-blue-500" />
-            )}
-          </div>
-        </div>
+      <div className="flex-shrink-0 px-4 py-2 bg-dark-surface border-b border-dark-border text-xs text-dark-text-muted">
+        使用HTTP模式
       </div>
 
       {/* Chat Messages */}
@@ -408,33 +364,6 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ work, chapter }) => {
           </div>
         )}
 
-        {/* Typing indicator for WebSocket */}
-        {isTyping && isConnected && (
-          <div className="w-full">
-            {/* Avatar on top */}
-            <div className="flex items-center mb-2 justify-start">
-              <div className="flex items-center gap-2">
-                <div className="flex-shrink-0 w-6 h-6 bg-dark-primary rounded-full flex items-center justify-center">
-                  <Bot size={12} className="text-white" />
-                </div>
-                <span className="text-xs text-dark-text-muted">AI助手</span>
-              </div>
-            </div>
-            
-            {/* Full width typing bubble */}
-            <div className="w-full bg-dark-surface border border-dark-border rounded-lg p-3">
-              <div className="flex items-center gap-2 text-dark-text-muted">
-                <div className="flex gap-1">
-                  <div className="w-2 h-2 bg-dark-text-muted rounded-full animate-bounce" style={{animationDelay: '0ms'}} />
-                  <div className="w-2 h-2 bg-dark-text-muted rounded-full animate-bounce" style={{animationDelay: '150ms'}} />
-                  <div className="w-2 h-2 bg-dark-text-muted rounded-full animate-bounce" style={{animationDelay: '300ms'}} />
-                </div>
-                <span className="text-sm">AI正在输入...</span>
-              </div>
-            </div>
-          </div>
-        )}
-        
         <div ref={messagesEndRef} />
       </div>
 

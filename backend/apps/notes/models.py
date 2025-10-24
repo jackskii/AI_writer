@@ -78,3 +78,77 @@ class Note(models.Model):
         if self.chapter and not self.work:
             self.work = self.chapter.work
         super().save(*args, **kwargs)
+
+
+class AutoEdit(models.Model):
+    """自动编辑模型 - 跟踪文本的编辑历史"""
+
+    id = models.BigIntegerField(primary_key=True, default=generate_large_id)
+    work = models.ForeignKey(
+        Work,
+        on_delete=models.CASCADE,
+        related_name='auto_edits',
+        verbose_name='所属作品'
+    )
+    chapter = models.ForeignKey(
+        Chapter,
+        on_delete=models.CASCADE,
+        related_name='auto_edits',
+        verbose_name='所属章节'
+    )
+
+    # 文本位置信息
+    text_start_position = models.PositiveIntegerField('文本开始位置')
+    text_end_position = models.PositiveIntegerField('文本结束位置')
+
+    # 原始文本
+    original_text = models.TextField('原始文本')
+
+    # 当前激活的版本索引 (0 = 原始文本, 1+ = 编辑版本)
+    active_version_index = models.IntegerField('当前版本索引', default=0)
+
+    created_at = models.DateTimeField('创建时间', auto_now_add=True)
+    updated_at = models.DateTimeField('更新时间', auto_now=True)
+
+    class Meta:
+        verbose_name = '自动编辑'
+        verbose_name_plural = '自动编辑'
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f'{self.chapter.title} - 自动编辑 ({self.original_text[:20]}...)'
+
+    @property
+    def current_text(self):
+        """返回当前激活版本的文本"""
+        if self.active_version_index == 0:
+            return self.original_text
+        else:
+            version = self.versions.filter(version_number=self.active_version_index).first()
+            return version.edited_text if version else self.original_text
+
+
+class AutoEditVersion(models.Model):
+    """自动编辑版本 - 存储每次编辑的结果"""
+
+    id = models.BigIntegerField(primary_key=True, default=generate_large_id)
+    auto_edit = models.ForeignKey(
+        AutoEdit,
+        on_delete=models.CASCADE,
+        related_name='versions',
+        verbose_name='所属自动编辑'
+    )
+
+    version_number = models.IntegerField('版本号')  # 1, 2, 3...
+    edited_text = models.TextField('编辑后文本')
+
+    created_at = models.DateTimeField('创建时间', auto_now_add=True)
+
+    class Meta:
+        verbose_name = '自动编辑版本'
+        verbose_name_plural = '自动编辑版本'
+        ordering = ['version_number']
+        unique_together = ['auto_edit', 'version_number']
+
+    def __str__(self):
+        return f'版本 {self.version_number} - {self.edited_text[:20]}...'

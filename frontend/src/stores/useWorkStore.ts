@@ -44,7 +44,7 @@ interface WorkState {
   clearAll: () => void;
 }
 
-export const useWorkStore = create<WorkState>()((set, get) => ({
+export const useWorkStore = create<WorkState>()((set) => ({
       // Initial state
       currentWork: null,
       currentChapter: null,

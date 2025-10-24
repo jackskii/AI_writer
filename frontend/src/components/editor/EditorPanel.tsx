@@ -1,13 +1,14 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Sparkles, Lightbulb, Zap, X, Plus, Edit3, Trash2, StickyNote, ExternalLink, Link, Settings } from 'lucide-react';
+import { isAxiosError, type AxiosResponse } from 'axios';
+import { Sparkles, Lightbulb, Zap, X, Plus, Edit3, Trash2, StickyNote, ExternalLink, Link, Settings, Wand2 } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Button } from '../ui/Button';
 import { Input, Textarea } from '../ui/Input';
 import { LoadingButton } from '../ui/Loading';
 import { useUIStore } from '../../stores/useUIStore';
-import { aiApi, notesApi } from '../../services/api';
+import { aiApi, notesApi, autoEditApi } from '../../services/api';
 import { DeleteNoteConfirmDialog } from '../modals/DeleteNoteConfirmDialog';
-import type { Work, Chapter, Note } from '../../types';
+import type { Work, Chapter, Note, AutoEdit } from '../../types';
 
 interface EditorPanelProps {
   content: string;
@@ -37,6 +38,7 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
   const editorRef = useRef<HTMLTextAreaElement | null>(null);
   const previousContentRef = useRef(content);
   const highlightTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const isManualUpdateRef = useRef(false); // Flag to prevent double-adjustment during version switching
 
   const [guideText, setGuideText] = useState('');
   const [selectedText, setSelectedText] = useState('');
@@ -67,6 +69,14 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
   // Track note positions dynamically
   const [notePositions, setNotePositions] = useState<Map<number, {start: number, end: number}>>(new Map());
 
+  // Auto-edit related states
+  const [isAutoEditLoading, setIsAutoEditLoading] = useState(false);
+  const [autoEdits, setAutoEdits] = useState<Map<number, AutoEdit>>(new Map()); // Track auto-edits by id
+  const [autoEditPositions, setAutoEditPositions] = useState<Map<number, {start: number, end: number}>>(new Map());
+  const [selectedAutoEdit, setSelectedAutoEdit] = useState<AutoEdit | null>(null);
+  const [showVersionPopup, setShowVersionPopup] = useState(false);
+  const [versionPopupPosition, setVersionPopupPosition] = useState<{x: number, y: number} | null>(null);
+
   const {
     isAIContinueLoading,
     setAIContinueLoading,
@@ -78,14 +88,29 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
   const queryClient = useQueryClient();
 
   // Fetch notes for current chapter
-  const { data: notes = [] } = useQuery({
+  const { data: notes = [] } = useQuery<Note[]>({
     queryKey: ['notes', work?.id, chapter?.id],
     queryFn: async () => {
       if (!work?.id || !chapter?.id) return [];
       const response = await notesApi.list(work.id, chapter.id);
-      return response.data.results || response.data;
+      const data = response.data;
+      if (Array.isArray(data)) {
+        return data;
+      }
+      return data.results ?? [];
     },
     enabled: !!(work?.id && chapter?.id)
+  });
+
+  // Fetch auto-edits for current chapter
+  const { data: fetchedAutoEdits = [] } = useQuery({
+    queryKey: ['autoEdits', chapter?.id],
+    queryFn: async () => {
+      if (!chapter?.id) return [];
+      const response = await autoEditApi.list(chapter.id);
+      return response.data;
+    },
+    enabled: !!chapter?.id
   });
 
   // Function to adjust positions when content changes
@@ -123,12 +148,32 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
       }
       return updated;
     });
+
+    // Update positions for auto-edits that come after the change
+    setAutoEditPositions(prev => {
+      const updated = new Map(prev);
+      for (const [autoEditId, position] of updated) {
+        if (position.start > changeStart) {
+          updated.set(autoEditId, {
+            start: Math.max(changeStart, position.start + lengthDiff),
+            end: Math.max(changeStart, position.end + lengthDiff)
+          });
+        } else if (position.end > changeStart) {
+          // Auto-edit spans across the change point, adjust end position
+          updated.set(autoEditId, {
+            start: position.start,
+            end: Math.max(position.start, position.end + lengthDiff)
+          });
+        }
+      }
+      return updated;
+    });
   };
 
   // Create note mutation
-  const createNoteMutation = useMutation({
+  const createNoteMutation = useMutation<AxiosResponse<Note>, unknown, Partial<Note>>({
     mutationFn: (noteData: Partial<Note>) => notesApi.create(noteData),
-    onSuccess: (response: any) => {
+    onSuccess: (response) => {
       const createdNote = response.data;
 
       // Add the new note position to our tracking map
@@ -186,7 +231,7 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
   useEffect(() => {
     if (notes.length > 0) {
       const newPositions = new Map();
-      notes.forEach(note => {
+      notes.forEach((note: Note) => {
         if (note.text_start_position !== null && note.text_end_position !== null) {
           newPositions.set(note.id, {
             start: note.text_start_position,
@@ -198,10 +243,33 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
     }
   }, [notes]);
 
-  // Track content changes to adjust positions
+  // Initialize auto-edit positions and data from database
+  useEffect(() => {
+    if (fetchedAutoEdits.length > 0) {
+      const newAutoEdits = new Map();
+      const newPositions = new Map();
+      fetchedAutoEdits.forEach((autoEdit: AutoEdit) => {
+        newAutoEdits.set(autoEdit.id, autoEdit);
+        newPositions.set(autoEdit.id, {
+          start: autoEdit.text_start_position,
+          end: autoEdit.text_end_position
+        });
+      });
+      setAutoEdits(newAutoEdits);
+      setAutoEditPositions(newPositions);
+    }
+  }, [fetchedAutoEdits]);
+
+  // Track content changes and adjust positions
   useEffect(() => {
     if (previousContentRef.current !== content) {
-      adjustPositions(previousContentRef.current, content);
+      // Skip auto-adjustment if this is a manual update (version switch, auto-edit, etc.)
+      if (!isManualUpdateRef.current) {
+        adjustPositions(previousContentRef.current, content);
+      } else {
+        // Reset the flag after skipping
+        isManualUpdateRef.current = false;
+      }
       previousContentRef.current = content;
     }
   }, [content]);
@@ -284,14 +352,53 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
     });
   };
 
+
   // Function to update note positions (stub for compatibility)
   const updateNotePositions = () => {
     // Note positions are updated automatically via the useEffect that watches content changes
   };
 
-  // Handle clicks in the editor area to clear highlights
-  const handleEditorClick = () => {
-    // Always clear highlights when clicking anywhere in the editor
+  // Handle clicks in the editor area
+  const handleEditorClick = (e: React.MouseEvent<HTMLTextAreaElement>) => {
+    // Get cursor position
+    const target = e.target as HTMLTextAreaElement;
+    const cursorPos = target.selectionStart;
+
+    console.log('Editor clicked at position:', cursorPos);
+
+    // Check if click is in an auto-edited region
+    let clickedAutoEdit: AutoEdit | null = null;
+
+    for (const [autoEditId, position] of autoEditPositions) {
+      if (cursorPos >= position.start && cursorPos <= position.end) {
+        clickedAutoEdit = autoEdits.get(autoEditId) || null;
+        console.log('Clicked in auto-edit region:', autoEditId, position);
+        break;
+      }
+    }
+
+    if (clickedAutoEdit) {
+      // Show version popup
+      setSelectedAutoEdit(clickedAutoEdit);
+      setShowVersionPopup(true);
+
+      // Position popup in the left note section
+      // Calculate position to ensure bottom is visible
+      const viewportHeight = window.innerHeight;
+      const popupHeight = 600; // Max height of popup
+      const topPosition = Math.min(e.clientY, viewportHeight - popupHeight - 20);
+
+      setVersionPopupPosition({
+        x: 20, // 20px from left edge (in the notes section)
+        y: Math.max(20, topPosition) // At least 20px from top
+      });
+    } else {
+      // Close popup if clicking outside auto-edit regions
+      setShowVersionPopup(false);
+      setSelectedAutoEdit(null);
+    }
+
+    // Clear note highlights when clicking anywhere in the editor
     if (highlightPosition || highlightedNoteId !== undefined) {
       clearHighlight();
     }
@@ -635,6 +742,587 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
     }
   };
 
+  // AI Auto-Edit for selected text
+  const handleAutoEdit = async () => {
+    if (isAutoEditLoading || !selectedText) return;
+
+    // Check if any auto-edit already exists in this chapter
+    if (autoEdits.size > 0) {
+      addNotification({
+        type: 'info',
+        message: '当前章节已有自动编辑，请先确认或还原现有编辑'
+      });
+      return;
+    }
+
+    try {
+      setIsAutoEditLoading(true);
+      let accumulatedEdit = '';
+
+      console.log('Starting auto-edit for text:', selectedText.slice(0, 50));
+
+      aiApi.autoEditStream(
+        selectedText,
+        work.id,
+        chapter.id,
+        // onChunk
+        (chunk: string) => {
+          accumulatedEdit += chunk;
+          console.log('Received chunk, total length:', accumulatedEdit.length);
+        },
+        // onStart
+        () => {
+          console.log('Auto-edit streaming started');
+          addNotification({
+            type: 'info',
+            message: 'AI自动编辑开始...'
+          });
+        },
+        // onEnd
+        async (editedText: string) => {
+          console.log('Auto-edit streaming completed');
+          setIsAutoEditLoading(false);
+
+          const finalEditedText = editedText || accumulatedEdit;
+
+          // Create AutoEdit record in backend (without versions first)
+          try {
+            console.log('Creating AutoEdit record...');
+
+            // Step 1: Create the AutoEdit record
+            const createResponse = await autoEditApi.create({
+              work: work.id,
+              chapter: chapter.id,
+              text_start_position: selectionStart,
+              text_end_position: selectionEnd,
+              original_text: selectedText,
+              active_version_index: 0, // Start with original (version 0)
+            });
+
+            console.log('AutoEdit created:', createResponse.data);
+            const createdAutoEdit = createResponse.data;
+
+            // Step 2: Add the first edited version
+            console.log('Adding version with text length:', finalEditedText.length);
+            const versionResponse = await autoEditApi.addVersion(
+              createdAutoEdit.id,
+              finalEditedText
+            );
+
+            console.log('Version added:', versionResponse.data);
+            const updatedAutoEdit = versionResponse.data;
+
+            // Step 3: Update the AutoEdit's end position to match the edited text length
+            // (Since we switched to version 1 which has a different length than original)
+            const newEndPosition = selectionStart + finalEditedText.length;
+            console.log('Updating end position from', selectionEnd, 'to', newEndPosition);
+
+            await autoEditApi.update(updatedAutoEdit.id, {
+              text_end_position: newEndPosition
+            });
+
+            // Set flag to prevent auto-adjustment
+            isManualUpdateRef.current = true;
+
+            // Replace text in editor
+            const newContent = content.slice(0, selectionStart) + finalEditedText + content.slice(selectionEnd);
+            onChange(newContent);
+
+            console.log('Replaced text with auto-edit:', updatedAutoEdit.id);
+
+            // Track the auto-edit with updated position
+            setAutoEdits(prev => new Map(prev).set(updatedAutoEdit.id, updatedAutoEdit));
+            setAutoEditPositions(prev => new Map(prev).set(updatedAutoEdit.id, {
+              start: selectionStart,
+              end: newEndPosition
+            }));
+
+            // Invalidate queries to refresh data
+            queryClient.invalidateQueries({ queryKey: ['autoEdits', chapter.id] });
+
+            addNotification({
+              type: 'success',
+              message: 'AI自动编辑完成'
+            });
+
+          } catch (error: unknown) {
+            console.error('Failed to save auto-edit:', error);
+            if (isAxiosError(error) && error.response?.data) {
+              console.error('Error response:', error.response.data);
+            }
+            addNotification({
+              type: 'error',
+              message: `保存编辑失败: ${
+                isAxiosError(error)
+                  ? error.response?.data?.detail || error.message
+                  : '未知错误'
+              }`
+            });
+          }
+        },
+        // onError
+        (error: string) => {
+          console.error('Auto-edit streaming error:', error);
+          setIsAutoEditLoading(false);
+          addNotification({
+            type: 'error',
+            message: `AI自动编辑失败: ${error}`
+          });
+        }
+      );
+
+    } catch (error) {
+      console.error('Auto-edit error:', error);
+      setIsAutoEditLoading(false);
+      addNotification({
+        type: 'error',
+        message: 'AI自动编辑连接失败，请稍后重试'
+      });
+    }
+  };
+
+  // Handle version switching
+  const handleSwitchVersion = async (autoEdit: AutoEdit, versionIndex: number) => {
+    try {
+      console.log('Switching to version:', versionIndex);
+
+      // Call API to switch version
+      const response = await autoEditApi.switchVersion(autoEdit.id, versionIndex);
+      const updatedAutoEdit = response.data;
+
+      // Get the text for the selected version
+      let versionText: string;
+      if (versionIndex === 0) {
+        versionText = updatedAutoEdit.original_text;
+      } else {
+        const version = updatedAutoEdit.versions.find(v => v.version_number === versionIndex);
+        versionText = version?.edited_text || updatedAutoEdit.original_text;
+      }
+
+      // Get current position of this auto-edit
+      const position = autoEditPositions.get(autoEdit.id);
+      if (!position) return;
+
+      // Calculate new end position
+      const newEndPosition = position.start + versionText.length;
+      const lengthDiff = newEndPosition - position.end;
+
+      console.log('Version switch - positions:', {
+        start: position.start,
+        oldEnd: position.end,
+        newEnd: newEndPosition,
+        lengthDiff
+      });
+
+      // Update the backend with the new end position
+      await autoEditApi.update(updatedAutoEdit.id, {
+        text_end_position: newEndPosition
+      });
+
+      console.log('Updated backend position from', position.end, 'to', newEndPosition);
+
+      // Set flag to prevent auto-adjustment
+      isManualUpdateRef.current = true;
+
+      // Replace text in editor
+      const newContent = content.slice(0, position.start) + versionText + content.slice(position.end);
+      onChange(newContent);
+
+      console.log('Switched version for auto-edit:', autoEdit.id);
+
+      // Update the auto-edit position in local state FIRST
+      setAutoEditPositions(prev => {
+        const updated = new Map(prev);
+        updated.set(updatedAutoEdit.id, {
+          start: position.start,
+          end: newEndPosition
+        });
+
+        // Adjust positions of all auto-edits that come after this one
+        for (const [otherAutoEditId, otherPosition] of prev) {
+          if (otherAutoEditId !== autoEdit.id && otherPosition.start >= position.end) {
+            const newOtherStart = otherPosition.start + lengthDiff;
+            const newOtherEnd = otherPosition.end + lengthDiff;
+
+            updated.set(otherAutoEditId, {
+              start: newOtherStart,
+              end: newOtherEnd
+            });
+
+            // Also update backend for these auto-edits
+            const otherAutoEdit = autoEdits.get(otherAutoEditId);
+            if (otherAutoEdit) {
+              autoEditApi.update(otherAutoEditId, {
+                text_start_position: newOtherStart,
+                text_end_position: newOtherEnd
+              }).catch(err => {
+                console.error('Failed to update position for auto-edit', otherAutoEditId, err);
+              });
+            }
+          }
+        }
+        return updated;
+      });
+
+      // Adjust note positions that come after
+      setNotePositions(prev => {
+        const updated = new Map(prev);
+        for (const [noteId, notePosition] of prev) {
+          if (notePosition.start >= position.end) {
+            const newNoteStart = notePosition.start + lengthDiff;
+            const newNoteEnd = notePosition.end + lengthDiff;
+
+            updated.set(noteId, {
+              start: newNoteStart,
+              end: newNoteEnd
+            });
+
+            // Also update backend for these notes
+            const note = notes.find((n: Note) => n.id === noteId);
+            if (note) {
+              notesApi.update(noteId, {
+                text_start_position: newNoteStart,
+                text_end_position: newNoteEnd
+              }).catch(err => {
+                console.error('Failed to update position for note', noteId, err);
+              });
+            }
+          }
+        }
+        return updated;
+      });
+
+      // Update the auto-edit in state with new position
+      const updatedAutoEditWithPosition = {
+        ...updatedAutoEdit,
+        text_end_position: newEndPosition
+      };
+      setAutoEdits(prev => new Map(prev).set(updatedAutoEditWithPosition.id, updatedAutoEditWithPosition));
+
+      // Update selected auto-edit
+      setSelectedAutoEdit(updatedAutoEditWithPosition);
+
+      // Invalidate queries to ensure data consistency
+      queryClient.invalidateQueries({ queryKey: ['autoEdits', chapter.id] });
+      queryClient.invalidateQueries({ queryKey: ['notes', work.id, chapter.id] });
+
+      addNotification({
+        type: 'success',
+        message: versionIndex === 0 ? '已切换到原始文本' : `已切换到版本 ${versionIndex}`
+      });
+
+    } catch (error) {
+      console.error('Failed to switch version:', error);
+      addNotification({
+        type: 'error',
+        message: '切换版本失败'
+      });
+    }
+  };
+
+  // Handle confirming auto-edit (accept current version as plain text)
+  const handleConfirmAutoEdit = async (autoEdit: AutoEdit) => {
+    try {
+      console.log('Confirming auto-edit:', autoEdit.id);
+
+      // Delete the AutoEdit record from backend
+      await autoEditApi.delete(autoEdit.id);
+
+      // Remove from local state
+      setAutoEdits(prev => {
+        const updated = new Map(prev);
+        updated.delete(autoEdit.id);
+        return updated;
+      });
+
+      setAutoEditPositions(prev => {
+        const updated = new Map(prev);
+        updated.delete(autoEdit.id);
+        return updated;
+      });
+
+      // Close popup
+      setShowVersionPopup(false);
+      setSelectedAutoEdit(null);
+
+      // Invalidate queries
+      queryClient.invalidateQueries({ queryKey: ['autoEdits', chapter.id] });
+
+      addNotification({
+        type: 'success',
+        message: '已确认编辑，文本已转为普通文本'
+      });
+
+    } catch (error) {
+      console.error('Failed to confirm auto-edit:', error);
+      addNotification({
+        type: 'error',
+        message: '确认编辑失败'
+      });
+    }
+  };
+
+  // Handle reverting auto-edit (revert to original then remove)
+  const handleRevertAutoEdit = async (autoEdit: AutoEdit) => {
+    try {
+      console.log('Reverting auto-edit:', autoEdit.id);
+
+      // Get current position
+      const position = autoEditPositions.get(autoEdit.id);
+      if (!position) return;
+
+      // Calculate length difference between current version and original
+      const currentText = content.slice(position.start, position.end);
+      const originalText = autoEdit.original_text;
+      const lengthDiff = originalText.length - currentText.length;
+
+      // Set flag to prevent auto-adjustment
+      isManualUpdateRef.current = true;
+
+      // Replace with original text
+      const newContent = content.slice(0, position.start) + originalText + content.slice(position.end);
+      onChange(newContent);
+
+      // Adjust positions of auto-edits and notes that come after
+      setAutoEditPositions(prev => {
+        const updated = new Map(prev);
+        for (const [otherAutoEditId, otherPosition] of prev) {
+          if (otherAutoEditId !== autoEdit.id && otherPosition.start >= position.end) {
+            updated.set(otherAutoEditId, {
+              start: otherPosition.start + lengthDiff,
+              end: otherPosition.end + lengthDiff
+            });
+          }
+        }
+        // Remove this auto-edit
+        updated.delete(autoEdit.id);
+        return updated;
+      });
+
+      setNotePositions(prev => {
+        const updated = new Map(prev);
+        for (const [noteId, notePosition] of prev) {
+          if (notePosition.start >= position.end) {
+            updated.set(noteId, {
+              start: notePosition.start + lengthDiff,
+              end: notePosition.end + lengthDiff
+            });
+          }
+        }
+        return updated;
+      });
+
+      // Delete the AutoEdit record from backend
+      await autoEditApi.delete(autoEdit.id);
+
+      // Remove from local state
+      setAutoEdits(prev => {
+        const updated = new Map(prev);
+        updated.delete(autoEdit.id);
+        return updated;
+      });
+
+      // Close popup
+      setShowVersionPopup(false);
+      setSelectedAutoEdit(null);
+
+      // Invalidate queries
+      queryClient.invalidateQueries({ queryKey: ['autoEdits', chapter.id] });
+
+      addNotification({
+        type: 'success',
+        message: '已还原到原始文本'
+      });
+
+    } catch (error) {
+      console.error('Failed to revert auto-edit:', error);
+      addNotification({
+        type: 'error',
+        message: '还原失败'
+      });
+    }
+  };
+
+  // Handle creating new edit from original
+  const handleCreateNewEditFromOriginal = async (autoEdit: AutoEdit) => {
+    try {
+      console.log('Creating new edit from original for:', autoEdit.id);
+
+      setIsAutoEditLoading(true);
+      setShowVersionPopup(false);
+
+      let accumulatedEdit = '';
+
+      aiApi.autoEditStream(
+        autoEdit.original_text,
+        work.id,
+        chapter.id,
+        // onChunk
+        (chunk: string) => {
+          accumulatedEdit += chunk;
+        },
+        // onStart
+        () => {
+          console.log('New auto-edit streaming started');
+          addNotification({
+            type: 'info',
+            message: '正在生成新版本...'
+          });
+        },
+        // onEnd
+        async (editedText: string) => {
+          console.log('New auto-edit streaming completed');
+          setIsAutoEditLoading(false);
+
+          const finalEditedText = editedText || accumulatedEdit;
+
+          try {
+            // Add new version to existing AutoEdit
+            const versionResponse = await autoEditApi.addVersion(
+              autoEdit.id,
+              finalEditedText
+            );
+
+            const updatedAutoEdit: AutoEdit = versionResponse.data;
+
+            // Get current position
+            const position = autoEditPositions.get(autoEdit.id);
+            if (!position) return;
+
+            // Calculate length difference
+            const oldLength = position.end - position.start;
+            const newLength = finalEditedText.length;
+            const lengthDiff = newLength - oldLength;
+
+            // Calculate new end position
+            const newEndPosition = position.start + newLength;
+
+            // Update backend position
+            await autoEditApi.update(autoEdit.id, {
+              text_end_position: newEndPosition
+            });
+
+            console.log('Updated backend position after new version from', position.end, 'to', newEndPosition);
+
+            // Set flag to prevent auto-adjustment
+            isManualUpdateRef.current = true;
+
+            // Replace text in editor
+            const newContent = content.slice(0, position.start) + finalEditedText + content.slice(position.end);
+            onChange(newContent);
+
+            console.log('Created new version for auto-edit:', autoEdit.id);
+
+            // Update the auto-edit in state with new position
+            const updatedAutoEditWithPosition: AutoEdit = {
+              ...updatedAutoEdit,
+              text_end_position: newEndPosition
+            };
+            setAutoEdits(prev => new Map(prev).set(updatedAutoEditWithPosition.id, updatedAutoEditWithPosition));
+
+            // Update position immediately in local state
+            setAutoEditPositions(prev => {
+              const updated = new Map(prev);
+              updated.set(autoEdit.id, {
+                start: position.start,
+                end: newEndPosition
+              });
+
+              // Adjust positions of all auto-edits that come after this one
+              for (const [otherAutoEditId, otherPosition] of prev) {
+                if (otherAutoEditId !== autoEdit.id && otherPosition.start > position.end) {
+                  const newOtherStart = otherPosition.start + lengthDiff;
+                  const newOtherEnd = otherPosition.end + lengthDiff;
+
+                  updated.set(otherAutoEditId, {
+                    start: newOtherStart,
+                    end: newOtherEnd
+                  });
+
+                  // Also update backend for these auto-edits
+                  const otherAutoEdit = autoEdits.get(otherAutoEditId);
+                  if (otherAutoEdit) {
+                    autoEditApi.update(otherAutoEditId, {
+                      text_start_position: newOtherStart,
+                      text_end_position: newOtherEnd
+                    }).catch(err => {
+                      console.error('Failed to update position for auto-edit', otherAutoEditId, err);
+                    });
+                  }
+                }
+              }
+              return updated;
+            });
+
+            // Also adjust note positions that come after
+            setNotePositions(prev => {
+              const updated = new Map(prev);
+              for (const [noteId, notePosition] of prev) {
+                if (notePosition.start > position.end) {
+                  const newNoteStart = notePosition.start + lengthDiff;
+                  const newNoteEnd = notePosition.end + lengthDiff;
+
+                  updated.set(noteId, {
+                    start: newNoteStart,
+                    end: newNoteEnd
+                  });
+
+                  // Also update backend for these notes
+                  const note = notes.find((n: Note) => n.id === noteId);
+                  if (note) {
+                    notesApi.update(noteId, {
+                      text_start_position: newNoteStart,
+                      text_end_position: newNoteEnd
+                    }).catch(err => {
+                      console.error('Failed to update position for note', noteId, err);
+                    });
+                  }
+                }
+              }
+              return updated;
+            });
+
+            queryClient.invalidateQueries({ queryKey: ['autoEdits', chapter.id] });
+            queryClient.invalidateQueries({ queryKey: ['notes', work.id, chapter.id] });
+
+            addNotification({
+              type: 'success',
+              message: '新版本生成完成'
+            });
+
+          } catch (error: unknown) {
+            console.error('Failed to save new version:', error);
+            addNotification({
+              type: 'error',
+              message: `保存新版本失败: ${
+                isAxiosError(error)
+                  ? error.response?.data?.detail || error.message
+                  : '未知错误'
+              }`
+            });
+          }
+        },
+        // onError
+        (error: string) => {
+          console.error('New auto-edit streaming error:', error);
+          setIsAutoEditLoading(false);
+          addNotification({
+            type: 'error',
+            message: `生成新版本失败: ${error}`
+          });
+        }
+      );
+
+    } catch (error) {
+      console.error('Create new edit error:', error);
+      setIsAutoEditLoading(false);
+      addNotification({
+        type: 'error',
+        message: '生成新版本失败'
+      });
+    }
+  };
+
   // Calculate word count (Chinese + English mixed)
   const calculateWordCount = (text: string) => {
     if (!text) return 0;
@@ -706,7 +1394,7 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
                 <p className="text-xs mt-1">选择文本后添加笔记</p>
               </div>
             ) : (
-              notes.map((note) => (
+              notes.map((note: Note) => (
                 <div
                   key={note.id}
                   className={`p-3 rounded-lg border-l-4 bg-white dark:bg-dark-bg shadow-sm ${
@@ -720,8 +1408,8 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
                   {editingNote?.id === note.id ? (
                     <div className="space-y-2">
                       <Textarea
-                        value={editingNote.content}
-                        onChange={(e) => setEditingNote({
+                        value={editingNote?.content || ''}
+                        onChange={(e) => editingNote && setEditingNote({
                           ...editingNote,
                           content: e.target.value
                         })}
@@ -734,12 +1422,12 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
                             <button
                               key={color.value}
                               className={`w-4 h-4 rounded-full border-2 ${
-                                editingNote.color === color.value
+                                editingNote?.color === color.value
                                   ? 'border-dark-primary'
                                   : 'border-dark-border'
                               }`}
                               style={{ backgroundColor: color.value }}
-                              onClick={() => setEditingNote({
+                              onClick={() => editingNote && setEditingNote({
                                 ...editingNote,
                                 color: color.value
                               })}
@@ -773,7 +1461,9 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
                         </div>
                         <div className="flex flex-col gap-1 flex-shrink-0">
                           {note.linked_text && (
-                            <ExternalLink size={14} className="text-dark-text-muted mt-0.5" title="点击跳转到关联文本" />
+                            <div title="点击跳转到关联文本">
+                              <ExternalLink size={14} className="text-dark-text-muted mt-0.5" />
+                            </div>
                           )}
                         </div>
                       </div>
@@ -972,6 +1662,16 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
                     <Lightbulb size={14} />
                     获取建议
                   </LoadingButton>
+                  <LoadingButton
+                    isLoading={isAutoEditLoading}
+                    onClick={handleAutoEdit}
+                    disabled={autoEdits.size > 0}
+                    className="flex items-center gap-1 px-3 py-1 text-xs"
+                  >
+                    <Wand2 size={14} />
+                    自动编辑
+                    {autoEdits.size > 0 && <span className="text-xs">(已有编辑)</span>}
+                  </LoadingButton>
                 </>
               )}
             </div>
@@ -1095,8 +1795,113 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
         isOpen={isDeleteDialogOpen}
         onClose={handleCancelDeleteNote}
         onConfirm={handleConfirmDeleteNote}
-        isDeleting={deleteNoteMutation.isLoading}
+        isDeleting={deleteNoteMutation.isPending}
       />
+
+      {/* Version Selection Popup */}
+      {showVersionPopup && selectedAutoEdit && versionPopupPosition && (
+        <div
+          className="fixed z-50 bg-dark-surface border border-dark-border rounded-lg shadow-xl p-4 w-[280px]"
+          style={{
+            left: `${versionPopupPosition.x}px`,
+            top: `${versionPopupPosition.y}px`,
+            maxHeight: '600px',
+            display: 'flex',
+            flexDirection: 'column'
+          }}
+        >
+          {/* Header - Fixed */}
+          <div className="flex items-center justify-between mb-3 flex-shrink-0">
+            <h3 className="text-sm font-medium text-dark-text">选择版本</h3>
+            <button
+              onClick={() => setShowVersionPopup(false)}
+              className="text-dark-text-muted hover:text-dark-text"
+            >
+              <X size={16} />
+            </button>
+          </div>
+
+          {/* Versions List - Scrollable */}
+          <div className="space-y-2 overflow-y-auto flex-1 mb-3" style={{ maxHeight: '300px' }}>
+            {/* Original Version */}
+            <button
+              onClick={() => handleSwitchVersion(selectedAutoEdit, 0)}
+              className={`w-full text-left p-3 rounded border transition-colors ${
+                selectedAutoEdit.active_version_index === 0
+                  ? 'bg-dark-primary/20 border-dark-primary text-dark-text'
+                  : 'bg-dark-bg border-dark-border text-dark-text-muted hover:border-dark-primary'
+              }`}
+            >
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-xs font-medium">原始文本</span>
+                {selectedAutoEdit.active_version_index === 0 && (
+                  <span className="text-xs text-dark-primary">当前</span>
+                )}
+              </div>
+              <div className="text-xs max-h-[60px] overflow-y-auto text-left whitespace-pre-wrap break-words">
+                {selectedAutoEdit.original_text}
+              </div>
+            </button>
+
+            {/* Edited Versions */}
+            {selectedAutoEdit.versions
+              .sort((a, b) => a.version_number - b.version_number)
+              .map((version) => (
+                <button
+                  key={version.id}
+                  onClick={() => handleSwitchVersion(selectedAutoEdit, version.version_number)}
+                  className={`w-full text-left p-3 rounded border transition-colors ${
+                    selectedAutoEdit.active_version_index === version.version_number
+                      ? 'bg-dark-primary/20 border-dark-primary text-dark-text'
+                      : 'bg-dark-bg border-dark-border text-dark-text-muted hover:border-dark-primary'
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-xs font-medium">版本 {version.version_number}</span>
+                    {selectedAutoEdit.active_version_index === version.version_number && (
+                      <span className="text-xs text-dark-primary">当前</span>
+                    )}
+                  </div>
+                  <div className="text-xs max-h-[60px] overflow-y-auto text-left whitespace-pre-wrap break-words">
+                    {version.edited_text}
+                  </div>
+                </button>
+              ))}
+          </div>
+
+          {/* Action Buttons - Fixed at bottom */}
+          <div className="pt-3 border-t border-dark-border flex-shrink-0">
+            <LoadingButton
+              isLoading={isAutoEditLoading}
+              onClick={() => handleCreateNewEditFromOriginal(selectedAutoEdit)}
+              className="w-full flex items-center justify-center gap-2 px-3 py-2 text-sm mb-2"
+              variant="outline"
+            >
+              <Wand2 size={14} />
+              从原文生成新版本
+            </LoadingButton>
+
+            {/* Confirm and Revert Actions */}
+            <div className="flex gap-2">
+              <Button
+                onClick={() => handleConfirmAutoEdit(selectedAutoEdit)}
+                className="flex-1 flex items-center justify-center gap-1 px-3 py-2 text-sm bg-green-600 hover:bg-green-700 text-white"
+              >
+                <span>✓</span>
+                确认编辑
+              </Button>
+              <Button
+                onClick={() => handleRevertAutoEdit(selectedAutoEdit)}
+                variant="outline"
+                className="flex-1 flex items-center justify-center gap-1 px-3 py-2 text-sm border-red-500 text-red-500 hover:bg-red-500 hover:text-white"
+              >
+                <span>↺</span>
+                还原原文
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
       </div>
     </>
   );

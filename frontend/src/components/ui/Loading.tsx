@@ -40,18 +40,26 @@ interface LoadingButtonProps {
   children: React.ReactNode;
   className?: string;
   onClick?: () => void;
+  disabled?: boolean;
+  variant?: 'primary' | 'outline';
 }
 
 export const LoadingButton: React.FC<LoadingButtonProps> = ({
   isLoading,
   children,
   className = '',
-  onClick
+  onClick,
+  disabled = false,
+  variant = 'primary'
 }) => {
+  const variantClasses = variant === 'outline'
+    ? 'bg-transparent border border-dark-border text-dark-text hover:bg-dark-surface'
+    : 'bg-dark-primary text-white hover:bg-blue-600';
+
   return (
     <button
-      className={`inline-flex items-center justify-center px-4 py-2 bg-dark-primary text-white rounded-lg hover:bg-blue-600 focus-ring disabled:opacity-50 ${className}`}
-      disabled={isLoading}
+      className={`inline-flex items-center justify-center px-4 py-2 rounded-lg focus-ring disabled:opacity-50 ${variantClasses} ${className}`}
+      disabled={isLoading || disabled}
       onClick={onClick}
     >
       {isLoading && <LoadingSpinner size="sm" className="mr-2" />}

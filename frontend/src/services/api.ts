@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { Work, Act, Chapter, LoreEntry, Note, ChatMessage, AIContext } from '../types';
+import type { Work, Act, Chapter, LoreEntry, Note, ChatMessage, AutoEdit, Suggestion } from '../types';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8001/api';
 
@@ -124,26 +124,62 @@ export const notesApi = {
     if (workId) params.append('work', workId.toString());
     if (chapterId) params.append('chapter', chapterId.toString());
     if (params.toString()) url += `?${params.toString()}`;
-    return api.get<Note[]>(url);
+    return api.get<Note[] | { results: Note[] }>(url);
   },
   create: (data: Partial<Note>) => api.post<Note>('/notes/', data),
   update: (id: number, data: Partial<Note>) => api.patch<Note>(`/notes/${id}/`, data),
   delete: (id: number) => api.delete(`/notes/${id}/`),
 };
 
+// AutoEdit 相关 API
+export const autoEditApi = {
+  list: (chapterId?: number) => {
+    let url = '/auto-edits/';
+    if (chapterId) url += `?chapter=${chapterId}`;
+    return api.get<AutoEdit[]>(url);
+  },
+
+  get: (id: number) => api.get<AutoEdit>(`/auto-edits/${id}/`),
+
+  create: (data: Partial<AutoEdit>) => api.post<AutoEdit>('/auto-edits/', data),
+
+  update: (id: number, data: Partial<AutoEdit>) =>
+    api.patch<AutoEdit>(`/auto-edits/${id}/`, data),
+
+  delete: (id: number) => api.delete(`/auto-edits/${id}/`),
+
+  addVersion: (id: number, editedText: string) =>
+    api.post<AutoEdit>(`/auto-edits/${id}/add_version/`, { edited_text: editedText }),
+
+  switchVersion: (id: number, versionIndex: number) =>
+    api.patch<AutoEdit>(`/auto-edits/${id}/switch_version/`, { version_index: versionIndex }),
+};
+
 // 聊天历史相关 API
 export const chatApi = {
   getHistory: (workId: number, chapterId: number) =>
-    api.get<{ session_id: string; messages: any[] }>(`/chat/${workId}/${chapterId}/`),
+    api.get<{ session_id: string; messages: ChatMessage[] }>(`/chat/${workId}/${chapterId}/`),
   
   saveMessage: (workId: number, chapterId: number, role: string, content: string) =>
-    api.post<{ id: string; role: string; content: string; timestamp: string }>(`/chat/${workId}/${chapterId}/save/`, {
+    api.post<ChatMessage>(`/chat/${workId}/${chapterId}/save/`, {
       role,
       content,
     }),
   
   clearHistory: (workId: number, chapterId: number) =>
     api.delete(`/chat/${workId}/${chapterId}/clear/`),
+
+  getWorkHistory: (workId: number) =>
+    api.get<{ session_id: string; messages: ChatMessage[] }>(`/chat/work/${workId}/`),
+
+  saveWorkMessage: (workId: number, role: string, content: string) =>
+    api.post<ChatMessage>(`/chat/work/${workId}/save/`, {
+      role,
+      content,
+    }),
+
+  clearWorkHistory: (workId: number) =>
+    api.delete(`/chat/work/${workId}/clear/`),
 };
 
 // AI 服务相关 API
@@ -154,7 +190,7 @@ export const aiApi = {
       chapter_id: chapterId,
       message,
     }),
-  
+
   continue: (workId: number, chapterId: number, guide?: string, content?: string, tokenCount?: number) =>
     api.post<{ content: string }>('/ai/continue/', {
       work_id: workId,
@@ -165,7 +201,7 @@ export const aiApi = {
     }),
   
   suggest: (workId: number, chapterId: number, targetText?: string) =>
-    api.post<{ suggestions: any[] }>('/ai/suggest/', {
+    api.post<{ suggestions: Suggestion[] }>('/ai/suggest/', {
       work_id: workId,
       chapter_id: chapterId,
       target_text: targetText,
@@ -330,10 +366,86 @@ export const aiApi = {
     return eventSource;
   },
 
+  // Streaming version of auto-edit
+  autoEditStream: (
+    selectedText: string,
+    workId: number,
+    chapterId: number,
+    onChunk: (chunk: string) => void,
+    onStart?: () => void,
+    onEnd?: (editedText: string) => void,
+    onError?: (error: string) => void
+  ) => {
+    const params = new URLSearchParams({
+      selected_text: selectedText,
+      work_id: workId.toString(),
+      chapter_id: chapterId.toString(),
+    });
+
+    // Add token for authentication since EventSource can't send headers
+    const authStorage = localStorage.getItem('auth-storage');
+    if (authStorage) {
+      try {
+        const parsedStorage = JSON.parse(authStorage);
+        const token = parsedStorage?.state?.token;
+        if (token) {
+          params.append('token', token);
+        }
+      } catch (e) {
+        console.error('Failed to parse auth storage:', e);
+      }
+    }
+
+    const eventSource = new EventSource(`${API_BASE_URL}/ai/auto-edit/stream/?${params.toString()}`, {
+      withCredentials: true,
+    });
+
+    let fullEdit = '';
+
+    eventSource.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+
+        switch (data.type) {
+          case 'start':
+            console.log('Auto-edit streaming started');
+            onStart?.();
+            break;
+          case 'chunk':
+            fullEdit += data.content;
+            onChunk(data.content);
+            break;
+          case 'end':
+            console.log('Auto-edit streaming completed');
+            onEnd?.(data.edited_text || fullEdit);
+            eventSource.close();
+            break;
+          case 'error':
+            onError?.(data.message);
+            eventSource.close();
+            break;
+        }
+      } catch (error) {
+        console.error('Error parsing auto-edit SSE data:', error);
+        onError?.('Error parsing server response');
+        eventSource.close();
+      }
+    };
+
+    eventSource.onerror = (error) => {
+      console.error('Auto-edit EventSource error:', error);
+      onError?.('Connection error occurred');
+      eventSource.close();
+    };
+
+    // Return the EventSource so it can be closed manually if needed
+    return eventSource;
+  },
+
   // Streaming version of chat
   chatStream: (
-    workId: number, 
-    chapterId: number, 
+    workId: number,
+    chapterId: number,
     message: string,
     onChunk: (chunk: string) => void,
     onStart?: () => void,
@@ -405,6 +517,75 @@ export const aiApi = {
     // Return the EventSource so it can be closed manually if needed
     return eventSource;
   },
+
+  workChatStream: (
+    workId: number,
+    message: string,
+    onChunk: (chunk: string) => void,
+    onStart?: () => void,
+    onEnd?: (fullResponse: string) => void,
+    onError?: (error: string) => void
+  ) => {
+    const params = new URLSearchParams({
+      work_id: workId.toString(),
+      message: message,
+    });
+
+    const authStorage = localStorage.getItem('auth-storage');
+    if (authStorage) {
+      try {
+        const parsedStorage = JSON.parse(authStorage);
+        const token = parsedStorage?.state?.token;
+        if (token) {
+          params.append('token', token);
+        }
+      } catch (e) {
+        console.error('Failed to parse auth storage:', e);
+      }
+    }
+
+    const eventSource = new EventSource(`${API_BASE_URL}/ai/work/chat/stream/?${params.toString()}`, {
+      withCredentials: true,
+    });
+
+    let fullResponse = '';
+
+    eventSource.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+
+        switch (data.type) {
+          case 'start':
+            onStart?.();
+            break;
+          case 'chunk':
+            fullResponse += data.content;
+            onChunk(data.content);
+            break;
+          case 'end':
+            onEnd?.(data.full_response || fullResponse);
+            eventSource.close();
+            break;
+          case 'error':
+            onError?.(data.message);
+            eventSource.close();
+            break;
+        }
+      } catch (error) {
+        console.error('Error parsing work chat SSE data:', error);
+        onError?.('Error parsing server response');
+        eventSource.close();
+      }
+    };
+
+    eventSource.onerror = (error) => {
+      console.error('Work chat EventSource error:', error);
+      onError?.('Connection error occurred');
+      eventSource.close();
+    };
+
+    return eventSource;
+  },
 };
 
 // WebSocket 连接管理
@@ -421,7 +602,7 @@ export class ChatWebSocket {
     this.url = `${wsProtocol}//${wsHost}/ws/chat/${workId}/${chapterId}/`;
   }
   
-  connect(onMessage: (message: any) => void, onError?: (error: any) => void) {
+  connect(onMessage: (message: unknown) => void, onError?: (error: Event) => void) {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       return;
     }
@@ -433,7 +614,7 @@ export class ChatWebSocket {
       this.reconnectAttempts = 0;
     };
     
-    this.ws.onmessage = (event) => {
+      this.ws.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
         onMessage(data);
@@ -442,20 +623,20 @@ export class ChatWebSocket {
       }
     };
     
-    this.ws.onerror = (error) => {
+      this.ws.onerror = (error) => {
       console.error('WebSocket错误:', error);
       if (onError) {
         onError(error);
       }
     };
     
-    this.ws.onclose = (event) => {
+      this.ws.onclose = (event) => {
       console.log('WebSocket连接已关闭', event.code, event.reason);
       this.attemptReconnect(onMessage, onError);
     };
   }
   
-  private attemptReconnect(onMessage: (message: any) => void, onError?: (error: any) => void) {
+  private attemptReconnect(onMessage: (message: unknown) => void, onError?: (error: Event) => void) {
     if (this.reconnectAttempts < this.maxReconnectAttempts) {
       this.reconnectAttempts++;
       console.log(`尝试重连 (${this.reconnectAttempts}/${this.maxReconnectAttempts})...`);
@@ -468,7 +649,7 @@ export class ChatWebSocket {
     }
   }
   
-  send(message: any) {
+  send(message: unknown) {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(message));
     } else {
@@ -516,7 +697,7 @@ export class NotificationWebSocket {
     this.url = `${wsProtocol}//${wsHost}/ws/notifications/${workId}/`;
   }
   
-  connect(onNotification: (notification: any) => void) {
+  connect(onNotification: (notification: unknown) => void) {
     this.ws = new WebSocket(this.url);
     
     this.ws.onopen = () => {

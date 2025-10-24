@@ -63,6 +63,27 @@ export interface Note {
   updated_at: string;
 }
 
+export interface AutoEditVersion {
+  id: number;
+  version_number: number;
+  edited_text: string;
+  created_at: string;
+}
+
+export interface AutoEdit {
+  id: number;
+  work: number;
+  chapter: number;
+  text_start_position: number;
+  text_end_position: number;
+  original_text: string;
+  active_version_index: number;
+  versions: AutoEditVersion[];
+  current_text: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant';

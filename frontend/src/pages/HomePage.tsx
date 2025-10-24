@@ -1,12 +1,12 @@
 import React, { useState } from 'react';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { Plus, BookOpen, Calendar, FileText, Trash2, MoreVertical } from 'lucide-react';
+import { Plus, BookOpen, Calendar, FileText, Trash2 } from 'lucide-react';
 import { worksApi } from '../services/api';
 import { useWorkStore } from '../stores/useWorkStore';
 import { Button } from '../components/ui/Button';
 import { Card, CardContent, CardFooter, CardHeader } from '../components/ui/Card';
-import { LoadingScreen, LoadingSpinner } from '../components/ui/Loading';
+import { LoadingScreen } from '../components/ui/Loading';
 import { UserMenu } from '../components/ui/UserMenu';
 import { CreateWorkModal } from '../components/modals/CreateWorkModal';
 import type { Work } from '../types';

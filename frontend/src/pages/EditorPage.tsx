@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, Save, Sparkles, MessageCircle } from 'lucide-react';
+import { ArrowLeft, Save, MessageCircle } from 'lucide-react';
 import { worksApi, chaptersApi } from '../services/api';
 import { useWorkStore } from '../stores/useWorkStore';
 import { useUIStore } from '../stores/useUIStore';
@@ -11,7 +11,7 @@ import { UserMenu } from '../components/ui/UserMenu';
 import { EditorPanel } from '../components/editor/EditorPanel';
 import { ChatPanel } from '../components/editor/ChatPanel';
 import { AutoSaveIndicator } from '../components/editor/AutoSaveIndicator';
-import type { Work, Chapter } from '../types';
+import type { Work } from '../types';
 
 export const EditorPage: React.FC = () => {
   const { workId, chapterId } = useParams<{ workId: string; chapterId: string }>();

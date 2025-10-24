@@ -155,6 +155,43 @@ class ContextBuilder:
         return context
 
     @staticmethod
+    def build_work_overview_context(work: Work) -> Dict:
+        """Build context for work-level discussions"""
+        context = {
+            "context_scope": "work_overview",
+            "work_title": work.title,
+            "synopsis": work.synopsis,
+            "lore_entries": [
+                {
+                    "name": entry.name,
+                    "description": entry.description,
+                    "triggers": entry.all_triggers
+                }
+                for entry in work.lore_entries.all().order_by('name')
+            ]
+        }
+
+        chapter_summaries = []
+        chapters = work.chapters.all().order_by('order')
+        for chapter in chapters:
+            if chapter.summary:
+                summary_text = chapter.summary.strip()
+            else:
+                content_preview = (chapter.content or '').strip()
+                if content_preview:
+                    summary_text = content_preview[:200]
+                    if len(content_preview) > 200:
+                        summary_text += '...'
+                else:
+                    summary_text = '暂无摘要'
+            chapter_summaries.append(
+                f"第{chapter.chapter_number}章《{chapter.title}》: {summary_text}"
+            )
+
+        context["chapter_summaries"] = chapter_summaries
+        return context
+
+    @staticmethod
     def _get_triggered_lore_entries(chapter: Chapter) -> List[LoreEntry]:
         """Get triggered lore entries"""
         content = f"{chapter.work.synopsis} {chapter.content}".lower()
@@ -225,9 +262,10 @@ class AIService:
             if lore_info:
                 formatted_parts.append(lore_info)
 
-        # Recent chapter summaries
-        if context.get('recent_chapter_summaries'):
-            summaries = prompts.format_chapter_summaries(context['recent_chapter_summaries'])
+        # Chapter summaries (recent or full list)
+        summaries_list = context.get('recent_chapter_summaries') or context.get('chapter_summaries')
+        if summaries_list:
+            summaries = prompts.format_chapter_summaries(summaries_list)
             if summaries:
                 formatted_parts.append(summaries)
 
@@ -255,9 +293,10 @@ class AIService:
             if lore_info:
                 historic_parts.append(lore_info)
 
-        # Recent chapter summaries
-        if context.get('recent_chapter_summaries'):
-            summaries = prompts.format_chapter_summaries(context['recent_chapter_summaries'])
+        # Chapter summaries (recent or full list)
+        summaries_list = context.get('recent_chapter_summaries') or context.get('chapter_summaries')
+        if summaries_list:
+            summaries = prompts.format_chapter_summaries(summaries_list)
             if summaries:
                 historic_parts.append(summaries)
 
@@ -265,14 +304,15 @@ class AIService:
 
     async def chat_with_ai(self, context: Dict, user_message: str, chapter_id: int = None) -> str:
         """AI chat function"""
-        logger.debug(f"Starting AI chat for chapter {chapter_id}: {user_message[:50]}...")
+        scope = context.get('context_scope', 'chapter')
+        logger.debug(f"Starting AI chat for scope {scope} (chapter {chapter_id}): {user_message[:50]}...")
 
         try:
             logger.debug(f"Using provided context with {len(context.get('lore_entries', []))} lore entries")
 
             # Format context and user message with instructions
             formatted_context = self._format_context_for_user(context)
-            user_content = f"{prompts.CHAT_SYSTEM_PROMPT}\n\n{formatted_context}\n\n用户问题：{user_message}"
+            user_content = f"{prompts.CHAT_STREAM_SYSTEM_PROMPT}\n\n{formatted_context}\n\n用户问题：{user_message}"
 
             messages = [
                 {"role": "user", "content": user_content}
@@ -477,7 +517,8 @@ class AIService:
         chapter_id: int = None
     ) -> AsyncGenerator[str, None]:
         """AI chat function - streaming version with chat history support"""
-        logger.debug(f"Starting AI chat stream for chapter {chapter_id}: {user_message[:50]}...")
+        scope = context.get('context_scope', 'chapter')
+        logger.debug(f"Starting AI chat stream for scope {scope} (chapter {chapter_id}): {user_message[:50]}...")
 
         try:
             logger.debug(f"Using provided context with {len(context.get('lore_entries', []))} lore entries")

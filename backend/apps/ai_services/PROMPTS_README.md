@@ -13,8 +13,7 @@ This file is organized into the following sections:
 #### 1. System Prompts
 These control the overall behavior of each AI assistant:
 
-- **`CHAT_SYSTEM_PROMPT`** - Controls the general chat assistant behavior
-- **`CHAT_STREAM_SYSTEM_PROMPT`** - Shorter version for streaming chat (limits responses to ~100 characters)
+- **`CHAT_STREAM_SYSTEM_PROMPT`** - Unified system prompt used for both chapter and work chats (streaming)
 - **`get_continue_prompt(token_count)`** - Controls story continuation behavior (configurable token count)
 - **`SUGGEST_SYSTEM_PROMPT`** - Controls writing suggestion behavior
 - **`SUGGEST_JSON_PROMPT`** - JSON-formatted suggestion prompt
@@ -57,14 +56,10 @@ User-facing error messages in Chinese:
 
 ### Example 1: Change Chat Assistant Behavior
 
-To make the chat assistant more concise:
+To make the chat assistant more concise, edit `CHAT_STREAM_SYSTEM_PROMPT`:
 
 ```python
-# In prompts.py, change:
-CHAT_SYSTEM_PROMPT = """你是一个专业的中文小说写作助手。请根据用户提供的上下文信息，帮助用户解答写作相关的问题，提供创意建议，讨论情节发展，或协助解决写作困难。你的回答应该专业、有建设性，并且符合中文小说的写作习惯。"""
-
-# To:
-CHAT_SYSTEM_PROMPT = """你是一个专业的中文小说写作助手。请简洁回答问题，每次回答不超过50字。你的回答应该专业、有建设性，并且符合中文小说的写作习惯。"""
+CHAT_STREAM_SYSTEM_PROMPT = """你是中文小说创作顾问。请将回答控制在80字以内，并包含明确的下一步建议。"""
 ```
 
 ### Example 2: Adjust Continuation Token Count
