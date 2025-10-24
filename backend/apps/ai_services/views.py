@@ -596,11 +596,145 @@ def ai_summarize_stream(request):
                         break
             
             thread.join(timeout=5)  # 最多等待5秒
-            
+
         except Exception as e:
             logger.error(f"Stream AI summarize error: {str(e)}")
             yield f"data: {json.dumps({'type': 'error', 'message': f'AI摘要生成失败: {str(e)}'})}\n\n"
-    
+
+    response = StreamingHttpResponse(
+        generate_stream(),
+        content_type='text/event-stream'
+    )
+    response['Cache-Control'] = 'no-cache'
+    response['X-Accel-Buffering'] = 'no'  # Disable nginx buffering
+    response['Access-Control-Allow-Origin'] = '*'  # CORS for SSE
+    return response
+
+
+@csrf_exempt
+def ai_auto_edit_stream(request):
+    """AI自动编辑端点 - SSE流式响应"""
+    if request.method != 'GET':
+        return HttpResponse(
+            'data: {"type": "error", "message": "仅支持GET请求"}\n\n',
+            content_type='text/event-stream'
+        )
+
+    # Check authentication via token query parameter for EventSource compatibility
+    user = None
+    token = request.GET.get('token')
+    if token:
+        from django.contrib.auth.models import AnonymousUser
+        from rest_framework.authtoken.models import Token
+        try:
+            token_obj = Token.objects.get(key=token)
+            user = token_obj.user
+            request.user = user
+        except Token.DoesNotExist:
+            return HttpResponse(
+                'data: {"type": "error", "message": "认证令牌无效"}\n\n',
+                content_type='text/event-stream',
+                status=401
+            )
+    elif not request.user.is_authenticated:
+        return HttpResponse(
+            'data: {"type": "error", "message": "需要登录"}\n\n',
+            content_type='text/event-stream',
+            status=401
+        )
+    else:
+        user = request.user
+
+    selected_text = request.GET.get('selected_text')
+    work_id = request.GET.get('work_id')
+    chapter_id = request.GET.get('chapter_id')
+
+    if not all([selected_text, work_id, chapter_id]):
+        return HttpResponse(
+            'data: {"type": "error", "message": "缺少必要参数"}\n\n',
+            content_type='text/event-stream'
+        )
+
+    # 获取作品和章节
+    work = get_object_or_404(Work, id=work_id)
+    chapter = get_object_or_404(Chapter, id=chapter_id, work=work)
+
+    def generate_stream():
+        """生成SSE数据流"""
+        try:
+            # Build context in sync environment
+            from .services import ContextBuilder
+            context = ContextBuilder.build_context(chapter)
+
+            # 创建AI服务实例并开始流式生成
+            ai_service = AIService()
+
+            # 运行异步生成器
+            import asyncio
+            import threading
+            from queue import Queue
+
+            chunk_queue = Queue()
+            error_queue = Queue()
+
+            def run_in_thread():
+                try:
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+
+                    async def collect_chunks():
+                        async for chunk in ai_service.auto_edit_stream(selected_text, context):
+                            chunk_queue.put(chunk)
+                        chunk_queue.put(None)  # 结束标记
+
+                    loop.run_until_complete(collect_chunks())
+                except Exception as e:
+                    error_queue.put(str(e))
+                    chunk_queue.put(None)
+                finally:
+                    loop.close()
+
+            # 启动线程
+            thread = threading.Thread(target=run_in_thread)
+            thread.start()
+
+            # 发送初始事件
+            yield f"data: {json.dumps({'type': 'start', 'message': 'AI自动编辑开始'})}\n\n"
+
+            # 流式发送chunks
+            accumulated_edit = ''
+            while True:
+                # 检查错误
+                if not error_queue.empty():
+                    error = error_queue.get()
+                    yield f"data: {json.dumps({'type': 'error', 'message': f'AI自动编辑失败: {error}'})}\n\n"
+                    break
+
+                # 获取chunk
+                try:
+                    chunk = chunk_queue.get(timeout=1)
+                    if chunk is None:  # 结束标记
+                        yield f"data: {json.dumps({'type': 'end', 'message': 'AI自动编辑完成', 'edited_text': accumulated_edit})}\n\n"
+                        break
+
+                    # 累积编辑内容
+                    accumulated_edit += chunk
+
+                    # 发送chunk
+                    yield f"data: {json.dumps({'type': 'chunk', 'content': chunk})}\n\n"
+
+                except:
+                    # 检查线程是否还活着
+                    if not thread.is_alive():
+                        yield f"data: {json.dumps({'type': 'end', 'message': 'AI自动编辑完成', 'edited_text': accumulated_edit})}\n\n"
+                        break
+
+            thread.join(timeout=5)  # 最多等待5秒
+
+        except Exception as e:
+            logger.error(f"Stream AI auto-edit error: {str(e)}")
+            yield f"data: {json.dumps({'type': 'error', 'message': f'AI自动编辑失败: {str(e)}'})}\n\n"
+
     response = StreamingHttpResponse(
         generate_stream(),
         content_type='text/event-stream'

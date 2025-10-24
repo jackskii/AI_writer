@@ -182,6 +182,23 @@ class ContextBuilder:
 
         return summaries
 
+    @staticmethod
+    def build_summary_context(chapter: Chapter) -> str:
+        """Build context specifically for chapter summarization (work synopsis + last 3 chapter summaries)"""
+        work = chapter.work
+        context_parts = []
+
+        # Add work synopsis
+        if work.synopsis:
+            context_parts.append(f"作品大纲：{work.synopsis}")
+
+        # Get last 3 chapter summaries
+        recent_summaries = ContextBuilder._get_recent_chapter_summaries(chapter, count=3)
+        if recent_summaries:
+            context_parts.append("前文摘要：\n" + "\n".join(recent_summaries))
+
+        return "\n\n".join(context_parts)
+
 
 class AIService:
     """AI Service Manager"""
@@ -418,11 +435,11 @@ class AIService:
 
     async def generate_summary(self, chapter: Chapter) -> str:
         """Generate chapter summary"""
-        # Build context in sync environment to avoid async issues
+        # Build summary context (work synopsis + last 3 chapter summaries)
         from asgiref.sync import sync_to_async
-        context = await sync_to_async(ContextBuilder.build_context)(chapter, include_current_content=True)
+        summary_context = await sync_to_async(ContextBuilder.build_summary_context)(chapter)
 
-        user_content = prompts.format_summary_request(chapter.title, chapter.content)
+        user_content = prompts.format_summary_request(chapter.title, chapter.content, summary_context)
         messages = [
             {"role": "user", "content": user_content}
         ]
@@ -436,11 +453,11 @@ class AIService:
 
     async def generate_summary_stream(self, chapter: Chapter) -> AsyncGenerator[str, None]:
         """Generate chapter summary - streaming version"""
-        # Build context in sync environment to avoid async issues
+        # Build summary context (work synopsis + last 3 chapter summaries)
         from asgiref.sync import sync_to_async
-        context = await sync_to_async(ContextBuilder.build_context)(chapter, include_current_content=True)
+        summary_context = await sync_to_async(ContextBuilder.build_summary_context)(chapter)
 
-        user_content = prompts.format_summary_request(chapter.title, chapter.content)
+        user_content = prompts.format_summary_request(chapter.title, chapter.content, summary_context)
         messages = [
             {"role": "user", "content": user_content}
         ]
@@ -497,6 +514,31 @@ class AIService:
         except Exception as e:
             logger.error(f"Chat AI stream error for chapter {chapter_id}: {str(e)}", exc_info=True)
             raise Exception(f"{prompts.ERROR_CHAT_FAILED}: {str(e)}")
+
+    async def auto_edit_stream(self, selected_text: str, context: str = "") -> AsyncGenerator[str, None]:
+        """AI auto-edit function - streaming version"""
+        logger.debug(f"Starting AI auto-edit stream for text: {selected_text[:50]}...")
+
+        try:
+            # Format the request with context
+            user_message = prompts.format_auto_edit_request(context, selected_text)
+
+            # Build message with system prompt and context + selected text
+            messages = [
+                {"role": "system", "content": prompts.AUTO_EDIT_SYSTEM_PROMPT},
+                {"role": "user", "content": user_message}
+            ]
+
+            logger.debug(f"Sending auto-edit request to DeepSeek API for streaming with context")
+
+            async for chunk in self.deepseek.chat_completion_stream(messages):
+                yield chunk
+
+            logger.info(f"AI auto-edit stream completed successfully")
+
+        except Exception as e:
+            logger.error(f"Auto-edit stream error: {str(e)}", exc_info=True)
+            raise Exception(f"{prompts.ERROR_AUTO_EDIT_FAILED}: {str(e)}")
 
 
 # Sync wrapper for use in Django views

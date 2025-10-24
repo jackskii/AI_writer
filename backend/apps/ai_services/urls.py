@@ -9,4 +9,5 @@ urlpatterns = [
     path('api/ai/suggest/', views.ai_suggest, name='ai-suggest'),
     path('api/ai/summarize/', views.ai_summarize, name='ai-summarize'),
     path('api/ai/summarize/stream/', views.ai_summarize_stream, name='ai-summarize-stream'),
+    path('api/ai/auto-edit/stream/', views.ai_auto_edit_stream, name='ai-auto-edit-stream'),
 ]
