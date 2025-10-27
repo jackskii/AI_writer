@@ -10,7 +10,9 @@ You can easily edit these prompts to customize AI behavior.
 # AI Assistant System Prompts
 # =============================================================================
 
-CHAT_STREAM_SYSTEM_PROMPT = """你是中文小说创作顾问。结合作品大纲、世界观条目以及章节摘要，回答作者关于剧情、人物弧光和设定维护的问题，提供明确、可执行的建议。请使用专业语气，控制在120字以内，并可使用Markdown。"""
+CHAT_STREAM_SYSTEM_PROMPT = """你是中文小说创作顾问。结合作品大纲、世界观条目以及章节摘要，回答作者关于剧情、人物弧光和设定维护的问题，提供有创新性，有趣的建议。同时确定作品逻辑正确，角色行为合理。语气要轻松，要循循渐进，不要一次性给出太多细节，留出空间让用户自己思考和创作。记住用户才是创作者。合理指出作品的不足，不要全部肯定。"""
+
+CHAT_MODEL = "deepseek-reasoner"
 
 
 def get_continue_prompt(token_count: int = 160) -> str:
@@ -202,7 +204,7 @@ def format_current_chapter(chapter_title: str, content: str = None) -> str:
 # =============================================================================
 
 DEFAULT_MODEL = "deepseek-chat"
-DEFAULT_TEMPERATURE = 0.7
+DEFAULT_TEMPERATURE = 1.5
 DEFAULT_MAX_TOKENS = 2000
 DEFAULT_CONTINUE_TOKENS = 160
 

@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Bot, User } from 'lucide-react';
+import { Send, Bot, User, Square } from 'lucide-react';
 import { useMutation } from '@tanstack/react-query';
 import ReactMarkdown from 'react-markdown';
 import { aiApi, chatApi } from '../../services/api';
@@ -16,6 +16,8 @@ interface ChatPanelProps {
 export const ChatPanel: React.FC<ChatPanelProps> = ({ work, chapter }) => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputMessage, setInputMessage] = useState('');
+  const [isStreamingChat, setIsStreamingChat] = useState(false);
+  const [streamingMessage, setStreamingMessage] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const streamEventSourceRef = useRef<EventSource | null>(null);
@@ -39,9 +41,6 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ work, chapter }) => {
     };
   }, []);
 
-  // State for streaming
-  const [isStreamingChat, setIsStreamingChat] = useState(false);
-  const [streamingMessage, setStreamingMessage] = useState('');
   // Fallback chat mutation for when streaming fails
   const chatMutation = useMutation({
     mutationFn: (pendingMessage: string) => {
@@ -183,11 +182,40 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ work, chapter }) => {
     setInputMessage(e.target.value);
   };
 
+  const handleStopGeneration = () => {
+    if (streamEventSourceRef.current) {
+      streamEventSourceRef.current.close();
+      streamEventSourceRef.current = null;
+    }
+
+    // Save whatever we have so far
+    if (streamingMessage) {
+      const aiResponse: ChatMessage = {
+        id: Date.now().toString() + '_ai',
+        role: 'assistant',
+        content: streamingMessage,
+        timestamp: new Date().toISOString()
+      };
+
+      setMessages(prev => [...prev, aiResponse]);
+
+      // Save to backend
+      if (work?.id && chapter?.id) {
+        chatApi.saveMessage(work.id, chapter.id, 'assistant', streamingMessage).catch(error => {
+          console.error('Failed to save stopped message:', error);
+        });
+      }
+    }
+
+    setIsStreamingChat(false);
+    setStreamingMessage('');
+  };
+
   const handleClearChat = async () => {
     if (!confirm('确定要清空聊天记录吗？')) return;
-    
+
     if (!work?.id || !chapter?.id) return;
-    
+
     try {
       await chatApi.clearHistory(work.id, chapter.id);
       setMessages([]);
@@ -383,14 +411,24 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ work, chapter }) => {
             />
           </div>
 
-          <Button
-            onClick={handleSendMessage}
-            disabled={!inputMessage.trim() || isStreamingChat || chatMutation.isPending}
-            size="sm"
-            className="flex items-center gap-2 px-3 py-2"
-          >
-            <Send size={16} />
-          </Button>
+          {isStreamingChat ? (
+            <Button
+              onClick={handleStopGeneration}
+              size="sm"
+              className="flex items-center gap-2 px-3 py-2 bg-red-600 hover:bg-red-700 text-white"
+            >
+              <Square size={16} fill="currentColor" />
+            </Button>
+          ) : (
+            <Button
+              onClick={handleSendMessage}
+              disabled={!inputMessage.trim() || chatMutation.isPending}
+              size="sm"
+              className="flex items-center gap-2 px-3 py-2"
+            >
+              <Send size={16} />
+            </Button>
+          )}
         </div>
         
         {messages.length > 1 && (

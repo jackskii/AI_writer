@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Send, Bot, User } from 'lucide-react';
+import { Send, Bot, User, Square } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { aiApi, chatApi } from '../../services/api';
 import { Button } from '../ui/Button';
@@ -154,6 +154,35 @@ export const WorkChatPanel: React.FC<WorkChatPanelProps> = ({ work }) => {
     }
   };
 
+  const handleStopGeneration = () => {
+    if (streamEventSourceRef.current) {
+      streamEventSourceRef.current.close();
+      streamEventSourceRef.current = null;
+    }
+
+    // Save whatever we have so far
+    if (streamingMessage) {
+      const aiResponse: ChatMessage = {
+        id: `${Date.now()}_ai`,
+        role: 'assistant',
+        content: streamingMessage,
+        timestamp: new Date().toISOString()
+      };
+
+      setMessages(prev => [...prev, aiResponse]);
+
+      // Save to backend
+      if (work?.id) {
+        chatApi.saveWorkMessage(work.id, 'assistant', streamingMessage).catch(error => {
+          console.error('Failed to save stopped work message:', error);
+        });
+      }
+    }
+
+    setIsStreamingChat(false);
+    setStreamingMessage('');
+  };
+
   const handleClearChat = async () => {
     if (!confirm('确定要清空聊天记录吗？')) return;
     if (!work?.id) return;
@@ -289,14 +318,24 @@ export const WorkChatPanel: React.FC<WorkChatPanelProps> = ({ work }) => {
             />
           </div>
 
-          <Button
-            onClick={handleSendMessage}
-            disabled={!inputMessage.trim() || isStreamingChat}
-            size="sm"
-            className="flex items-center gap-2 px-3 py-2"
-          >
-            <Send size={16} />
-          </Button>
+          {isStreamingChat ? (
+            <Button
+              onClick={handleStopGeneration}
+              size="sm"
+              className="flex items-center gap-2 px-3 py-2 bg-red-600 hover:bg-red-700 text-white"
+            >
+              <Square size={16} fill="currentColor" />
+            </Button>
+          ) : (
+            <Button
+              onClick={handleSendMessage}
+              disabled={!inputMessage.trim()}
+              size="sm"
+              className="flex items-center gap-2 px-3 py-2"
+            >
+              <Send size={16} />
+            </Button>
+          )}
         </div>
 
         {messages.length > 1 && (

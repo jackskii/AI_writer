@@ -17,137 +17,6 @@ logger = logging.getLogger(__name__)
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
-def ai_chat(request):
-    """AI聊天端点"""
-    work_id = request.data.get('work_id')
-    chapter_id = request.data.get('chapter_id')
-    message = request.data.get('message')
-
-    if not all([work_id, chapter_id, message]):
-        return Response(
-            {'error': '缺少必要参数'},
-            status=status.HTTP_400_BAD_REQUEST
-        )
-
-    # 获取作品和章节
-    work = get_object_or_404(Work, id=work_id, author=request.user)
-    chapter = get_object_or_404(Chapter, id=chapter_id, work=work)
-
-    try:
-        # Build context in sync environment to avoid async issues
-        from .services import ContextBuilder
-        from . import prompts
-        context = ContextBuilder.build_context(chapter)
-
-        ai_service = AIService()
-        response_content = run_async_ai_task(
-            ai_service.chat_with_ai(context, message, chapter.id)
-        )
-
-        return Response({'response': response_content})
-
-    except ValueError as e:
-        # API key missing
-        logger.error(f"AI configuration error: {str(e)}")
-        return Response(
-            {'error': str(e)},
-            status=status.HTTP_503_SERVICE_UNAVAILABLE
-        )
-    except Exception as e:
-        logger.error(f"AI chat error: {str(e)}")
-        return Response(
-            {'error': f'AI聊天出错：{str(e)}'},
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR
-        )
-
-
-@api_view(['POST'])
-@permission_classes([IsAuthenticated])
-def ai_work_chat(request):
-    """作品总览AI聊天端点"""
-    work_id = request.data.get('work_id')
-    message = request.data.get('message')
-
-    if not all([work_id, message]):
-        return Response(
-            {'error': '缺少必要参数'},
-            status=status.HTTP_400_BAD_REQUEST
-        )
-
-    work = get_object_or_404(Work, id=work_id, author=request.user)
-
-    try:
-        from .services import ContextBuilder
-        context = ContextBuilder.build_work_overview_context(work)
-
-        ai_service = AIService()
-        response_content = run_async_ai_task(
-            ai_service.chat_with_ai(context, message)
-        )
-
-        return Response({'response': response_content})
-
-    except ValueError as e:
-        logger.error(f"AI configuration error: {str(e)}")
-        return Response(
-            {'error': str(e)},
-            status=status.HTTP_503_SERVICE_UNAVAILABLE
-        )
-    except Exception as e:
-        logger.error(f"AI work chat error: {str(e)}")
-        return Response(
-            {'error': f'AI聊天出错：{str(e)}'},
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR
-        )
-
-
-@api_view(['POST'])
-@permission_classes([IsAuthenticated])
-def ai_continue(request):
-    """AI续写端点"""
-    work_id = request.data.get('work_id')
-    chapter_id = request.data.get('chapter_id')
-    guide = request.data.get('guide')  # 可选的写作指导
-    token_count = request.data.get('token_count', 160)  # 默认160 tokens
-    current_content = request.data.get('content', '')  # 当前文本内容
-    
-    if not all([work_id, chapter_id]):
-        return Response(
-            {'error': '缺少必要参数'}, 
-            status=status.HTTP_400_BAD_REQUEST
-        )
-    
-    # 获取作品和章节
-    work = get_object_or_404(Work, id=work_id, author=request.user)
-    chapter = get_object_or_404(Chapter, id=chapter_id, work=work)
-    
-    try:
-        # 如果提供了当前内容，先保存到章节
-        if current_content:
-            chapter.content = current_content
-            chapter.save(update_fields=['content'])
-        
-        # Build context in sync environment to avoid async issues
-        from .services import ContextBuilder
-        context = ContextBuilder.build_context(chapter)
-        
-        ai_service = AIService()
-        continued_content = run_async_ai_task(
-            ai_service.continue_writing(context, guide, chapter.id, token_count)
-        )
-        
-        return Response({'content': continued_content})
-    
-    except Exception as e:
-        logger.error(f"AI continue error: {str(e)}")
-        return Response(
-            {'error': f'AI续写出错：{str(e)}'}, 
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR
-        )
-
-
-@api_view(['POST'])
-@permission_classes([IsAuthenticated])
 def ai_suggest(request):
     """AI建议端点"""
     work_id = request.data.get('work_id')
@@ -176,43 +45,6 @@ def ai_suggest(request):
         logger.error(f"AI suggest error: {str(e)}")
         return Response(
             {'error': f'AI建议生成出错：{str(e)}'}, 
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR
-        )
-
-
-@api_view(['POST'])
-@permission_classes([IsAuthenticated])
-def ai_summarize(request):
-    """AI总结端点"""
-    work_id = request.data.get('work_id')
-    chapter_id = request.data.get('chapter_id')
-    
-    if not all([work_id, chapter_id]):
-        return Response(
-            {'error': '缺少必要参数'}, 
-            status=status.HTTP_400_BAD_REQUEST
-        )
-    
-    # 获取作品和章节
-    work = get_object_or_404(Work, id=work_id, author=request.user)
-    chapter = get_object_or_404(Chapter, id=chapter_id, work=work)
-    
-    try:
-        ai_service = AIService()
-        summary = run_async_ai_task(
-            ai_service.generate_summary(chapter)
-        )
-        
-        # 保存摘要到章节
-        chapter.summary = summary
-        chapter.save(update_fields=['summary'])
-        
-        return Response({'summary': summary})
-    
-    except Exception as e:
-        logger.error(f"AI summarize error: {str(e)}")
-        return Response(
-            {'error': f'AI摘要生成出错：{str(e)}'}, 
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
 
@@ -788,135 +620,44 @@ def ai_summarize_stream(request):
     return response
 
 
-@csrf_exempt
-def ai_auto_edit_stream(request):
-    """AI自动编辑端点 - SSE流式响应"""
-    if request.method != 'GET':
-        return HttpResponse(
-            'data: {"type": "error", "message": "仅支持GET请求"}\n\n',
-            content_type='text/event-stream'
-        )
-
-    # Check authentication via token query parameter for EventSource compatibility
-    user = None
-    token = request.GET.get('token')
-    if token:
-        from django.contrib.auth.models import AnonymousUser
-        from rest_framework.authtoken.models import Token
-        try:
-            token_obj = Token.objects.get(key=token)
-            user = token_obj.user
-            request.user = user
-        except Token.DoesNotExist:
-            return HttpResponse(
-                'data: {"type": "error", "message": "认证令牌无效"}\n\n',
-                content_type='text/event-stream',
-                status=401
-            )
-    elif not request.user.is_authenticated:
-        return HttpResponse(
-            'data: {"type": "error", "message": "需要登录"}\n\n',
-            content_type='text/event-stream',
-            status=401
-        )
-    else:
-        user = request.user
-
-    selected_text = request.GET.get('selected_text')
-    work_id = request.GET.get('work_id')
-    chapter_id = request.GET.get('chapter_id')
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def ai_auto_edit(request):
+    """AI自动编辑端点 - 非流式响应"""
+    selected_text = request.data.get('selected_text')
+    work_id = request.data.get('work_id')
+    chapter_id = request.data.get('chapter_id')
 
     if not all([selected_text, work_id, chapter_id]):
-        return HttpResponse(
-            'data: {"type": "error", "message": "缺少必要参数"}\n\n',
-            content_type='text/event-stream'
+        return Response(
+            {'error': '缺少必要参数'},
+            status=status.HTTP_400_BAD_REQUEST
         )
 
     # 获取作品和章节
-    work = get_object_or_404(Work, id=work_id)
+    work = get_object_or_404(Work, id=work_id, author=request.user)
     chapter = get_object_or_404(Chapter, id=chapter_id, work=work)
 
-    def generate_stream():
-        """生成SSE数据流"""
-        try:
-            # Build context in sync environment
-            from .services import ContextBuilder
-            context = ContextBuilder.build_context(chapter)
+    try:
+        # Build context in sync environment
+        from .services import ContextBuilder
+        context = ContextBuilder.build_context(chapter)
 
-            # 创建AI服务实例并开始流式生成
-            ai_service = AIService()
+        # 格式化上下文
+        formatted_context = ""
+        if context.get('synopsis'):
+            formatted_context += f"作品大纲：{context['synopsis']}\n\n"
 
-            # 运行异步生成器
-            import asyncio
-            import threading
-            from queue import Queue
+        ai_service = AIService()
+        edited_text = run_async_ai_task(
+            ai_service.auto_edit(selected_text, formatted_context)
+        )
 
-            chunk_queue = Queue()
-            error_queue = Queue()
+        return Response({'edited_text': edited_text})
 
-            def run_in_thread():
-                try:
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-
-                    async def collect_chunks():
-                        async for chunk in ai_service.auto_edit_stream(selected_text, context):
-                            chunk_queue.put(chunk)
-                        chunk_queue.put(None)  # 结束标记
-
-                    loop.run_until_complete(collect_chunks())
-                except Exception as e:
-                    error_queue.put(str(e))
-                    chunk_queue.put(None)
-                finally:
-                    loop.close()
-
-            # 启动线程
-            thread = threading.Thread(target=run_in_thread)
-            thread.start()
-
-            # 发送初始事件
-            yield f"data: {json.dumps({'type': 'start', 'message': 'AI自动编辑开始'})}\n\n"
-
-            # 流式发送chunks
-            accumulated_edit = ''
-            while True:
-                # 检查错误
-                if not error_queue.empty():
-                    error = error_queue.get()
-                    yield f"data: {json.dumps({'type': 'error', 'message': f'AI自动编辑失败: {error}'})}\n\n"
-                    break
-
-                # 获取chunk
-                try:
-                    chunk = chunk_queue.get(timeout=1)
-                    if chunk is None:  # 结束标记
-                        yield f"data: {json.dumps({'type': 'end', 'message': 'AI自动编辑完成', 'edited_text': accumulated_edit})}\n\n"
-                        break
-
-                    # 累积编辑内容
-                    accumulated_edit += chunk
-
-                    # 发送chunk
-                    yield f"data: {json.dumps({'type': 'chunk', 'content': chunk})}\n\n"
-
-                except:
-                    # 检查线程是否还活着
-                    if not thread.is_alive():
-                        yield f"data: {json.dumps({'type': 'end', 'message': 'AI自动编辑完成', 'edited_text': accumulated_edit})}\n\n"
-                        break
-
-            thread.join(timeout=5)  # 最多等待5秒
-
-        except Exception as e:
-            logger.error(f"Stream AI auto-edit error: {str(e)}")
-            yield f"data: {json.dumps({'type': 'error', 'message': f'AI自动编辑失败: {str(e)}'})}\n\n"
-
-    response = StreamingHttpResponse(
-        generate_stream(),
-        content_type='text/event-stream'
-    )
-    response['Cache-Control'] = 'no-cache'
-    response['X-Accel-Buffering'] = 'no'  # Disable nginx buffering
-    response['Access-Control-Allow-Origin'] = '*'  # CORS for SSE
-    return response
+    except Exception as e:
+        logger.error(f"AI auto-edit error: {str(e)}")
+        return Response(
+            {'error': f'AI自动编辑出错：{str(e)}'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )

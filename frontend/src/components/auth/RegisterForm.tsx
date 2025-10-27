@@ -3,7 +3,8 @@ import { Eye, EyeOff, User, Lock, Mail } from 'lucide-react';
 import { useMutation } from '@tanstack/react-query';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
-import { authApi, RegisterRequest } from '../../services/authApi';
+import { authApi } from '../../services/authApi';
+import type { RegisterRequest } from '../../services/authApi';
 import { useAuthStore } from '../../stores/useAuthStore';
 
 interface RegisterFormProps {

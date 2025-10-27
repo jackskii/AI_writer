@@ -55,12 +55,29 @@ class DeepSeekAPI:
 
                 stream_response = await self.client.chat.completions.create(**stream_kwargs)
 
+                reasoning_chunks = []
+                content_chunks = []
                 async for chunk in stream_response:
-                    if chunk.choices and len(chunk.choices) > 0 and chunk.choices[0].delta and chunk.choices[0].delta.content:
-                        content_chunks.append(chunk.choices[0].delta.content)
+                    if chunk.choices and len(chunk.choices) > 0 and chunk.choices[0].delta:
+                        delta = chunk.choices[0].delta
+                        # Collect reasoning content (for deepseek-reasoner)
+                        if hasattr(delta, 'reasoning_content') and delta.reasoning_content:
+                            reasoning_chunks.append(delta.reasoning_content)
+                        # Collect regular content
+                        if delta.content:
+                            content_chunks.append(delta.content)
 
                 # Return in the same format as non-streaming
-                full_content = ''.join(content_chunks)
+                reasoning_content = ''.join(reasoning_chunks)
+                content = ''.join(content_chunks)
+
+                # Format: show reasoning before content
+                full_content = ""
+                if reasoning_content:
+                    full_content = f"【思考过程】\n{reasoning_content}\n\n【回答】\n{content}"
+                else:
+                    full_content = content
+
                 return {
                     "choices": [{
                         "message": {
@@ -81,10 +98,22 @@ class DeepSeekAPI:
                     non_stream_kwargs["response_format"] = response_format
 
                 response = await self.client.chat.completions.create(**non_stream_kwargs)
+
+                message = response.choices[0].message
+                reasoning_content = getattr(message, 'reasoning_content', '')
+                content = message.content
+
+                # Format: show reasoning before content
+                full_content = ""
+                if reasoning_content:
+                    full_content = f"【思考过程】\n{reasoning_content}\n\n【回答】\n{content}"
+                else:
+                    full_content = content
+
                 return {
                     "choices": [{
                         "message": {
-                            "content": response.choices[0].message.content
+                            "content": full_content
                         }
                     }]
                 }
@@ -112,9 +141,27 @@ class DeepSeekAPI:
                 stream=True
             )
 
+            reasoning_started = False
+            content_started = False
+
             async for chunk in stream_response:
-                if chunk.choices and len(chunk.choices) > 0 and chunk.choices[0].delta and chunk.choices[0].delta.content:
-                    yield chunk.choices[0].delta.content
+                if chunk.choices and len(chunk.choices) > 0 and chunk.choices[0].delta:
+                    delta = chunk.choices[0].delta
+
+                    # Handle reasoning content (for deepseek-reasoner)
+                    if hasattr(delta, 'reasoning_content') and delta.reasoning_content:
+                        if not reasoning_started:
+                            yield "【思考过程】\n"
+                            reasoning_started = True
+                        yield delta.reasoning_content
+
+                    # Handle regular content
+                    if delta.content:
+                        if not content_started:
+                            if reasoning_started:
+                                yield "\n\n【回答】\n"
+                            content_started = True
+                        yield delta.content
 
         except Exception as e:
             logger.error(f"DeepSeek API streaming error: {str(e)}")
@@ -302,72 +349,6 @@ class AIService:
 
         return "\n\n".join(historic_parts)
 
-    async def chat_with_ai(self, context: Dict, user_message: str, chapter_id: int = None) -> str:
-        """AI chat function"""
-        scope = context.get('context_scope', 'chapter')
-        logger.debug(f"Starting AI chat for scope {scope} (chapter {chapter_id}): {user_message[:50]}...")
-
-        try:
-            logger.debug(f"Using provided context with {len(context.get('lore_entries', []))} lore entries")
-
-            # Format context and user message with instructions
-            formatted_context = self._format_context_for_user(context)
-            user_content = f"{prompts.CHAT_STREAM_SYSTEM_PROMPT}\n\n{formatted_context}\n\n用户问题：{user_message}"
-
-            messages = [
-                {"role": "user", "content": user_content}
-            ]
-
-            logger.debug(f"Sending {len(messages)} messages to DeepSeek API with streaming")
-            response = await self.deepseek.chat_completion(messages, stream=True)
-            logger.info(f"AI chat completed successfully for chapter {chapter_id}")
-            return response["choices"][0]["message"]["content"]
-
-        except Exception as e:
-            logger.error(f"Chat AI error for chapter {chapter_id}: {str(e)}", exc_info=True)
-            raise Exception(f"{prompts.ERROR_CHAT_FAILED}: {str(e)}")
-
-    async def continue_writing(
-        self,
-        context: Dict,
-        guide: Optional[str] = None,
-        chapter_id: int = None,
-        token_count: int = None
-    ) -> str:
-        """AI continuation writing"""
-        token_count = token_count or prompts.DEFAULT_CONTINUE_TOKENS
-        logger.debug(f"Starting AI continue writing for chapter {chapter_id}, guide: {guide}, token_count: {token_count}")
-
-        try:
-            logger.debug(f"Using provided context - current content length: {len(context.get('current_chapter_content', ''))}")
-
-            # Format historic context and current content separately
-            historic_context = self._format_historic_context(context)
-            current_content = context.get('current_chapter_content', '')
-
-            # Build user message using prompts helper
-            user_content = prompts.format_continue_request(
-                historic_context,
-                current_content,
-                guide,
-                token_count
-            )
-
-            messages = [
-                {"role": "user", "content": user_content}
-            ]
-
-            logger.info(f"Continue writing API request - messages: {messages}")
-            logger.debug(f"Sending continue writing request to DeepSeek API with streaming, max_tokens: {token_count}")
-            response = await self.deepseek.chat_completion(messages, stream=True, max_tokens=token_count)
-            result = response["choices"][0]["message"]["content"]
-            logger.info(f"AI continue writing completed successfully for chapter {chapter_id}, result length: {len(result)}")
-            return result
-
-        except Exception as e:
-            logger.error(f"Continue writing AI error for chapter {chapter_id}: {str(e)}", exc_info=True)
-            raise Exception(f"{prompts.ERROR_CONTINUE_FAILED}: {str(e)}")
-
     async def continue_writing_stream(
         self,
         context: Dict,
@@ -398,14 +379,11 @@ class AIService:
                 {"role": "user", "content": user_content}
             ]
 
-            logger.info(f"Continue writing stream API request - messages: {messages}")
             logger.debug(f"Sending continue writing stream request to DeepSeek API, max_tokens: {token_count}")
 
             # Use streaming API
             async for chunk in self.deepseek.chat_completion_stream(messages, max_tokens=token_count):
                 yield chunk
-
-            logger.info(f"AI continue writing stream completed successfully for chapter {chapter_id}")
 
         except Exception as e:
             logger.error(f"Continue writing stream AI error for chapter {chapter_id}: {str(e)}", exc_info=True)
@@ -473,24 +451,6 @@ class AIService:
             logger.error(f"Generate suggestions error: {str(e)}")
             return [{"content": f"{prompts.ERROR_SUGGEST_FAILED}：{str(e)}", "type": "error"}]
 
-    async def generate_summary(self, chapter: Chapter) -> str:
-        """Generate chapter summary"""
-        # Build summary context (work synopsis + last 3 chapter summaries)
-        from asgiref.sync import sync_to_async
-        summary_context = await sync_to_async(ContextBuilder.build_summary_context)(chapter)
-
-        user_content = prompts.format_summary_request(chapter.title, chapter.content, summary_context)
-        messages = [
-            {"role": "user", "content": user_content}
-        ]
-
-        try:
-            response = await self.deepseek.chat_completion(messages)
-            return response["choices"][0]["message"]["content"]
-        except Exception as e:
-            logger.error(f"Generate summary error: {str(e)}")
-            return f"章节《{chapter.title}》{prompts.ERROR_SUMMARY_FAILED}：{str(e)}"
-
     async def generate_summary_stream(self, chapter: Chapter) -> AsyncGenerator[str, None]:
         """Generate chapter summary - streaming version"""
         # Build summary context (work synopsis + last 3 chapter summaries)
@@ -503,7 +463,7 @@ class AIService:
         ]
 
         try:
-            async for chunk in self.deepseek.chat_completion_stream(messages):
+            async for chunk in self.deepseek.chat_completion_stream(messages, model=prompts.CHAT_MODEL):
                 yield chunk
         except Exception as e:
             logger.error(f"Generate summary stream error: {str(e)}")
@@ -547,18 +507,16 @@ class AIService:
 
             logger.debug(f"Sending {len(messages)} messages to DeepSeek API for streaming")
 
-            async for chunk in self.deepseek.chat_completion_stream(messages):
+            async for chunk in self.deepseek.chat_completion_stream(messages, model=prompts.CHAT_MODEL):
                 yield chunk
-
-            logger.info(f"AI chat stream completed successfully for chapter {chapter_id}")
 
         except Exception as e:
             logger.error(f"Chat AI stream error for chapter {chapter_id}: {str(e)}", exc_info=True)
             raise Exception(f"{prompts.ERROR_CHAT_FAILED}: {str(e)}")
 
-    async def auto_edit_stream(self, selected_text: str, context: str = "") -> AsyncGenerator[str, None]:
-        """AI auto-edit function - streaming version"""
-        logger.debug(f"Starting AI auto-edit stream for text: {selected_text[:50]}...")
+    async def auto_edit(self, selected_text: str, context: str = "") -> str:
+        """AI auto-edit function - non-streaming version"""
+        logger.debug(f"Starting AI auto-edit for text: {selected_text[:50]}...")
 
         try:
             # Format the request with context
@@ -570,15 +528,13 @@ class AIService:
                 {"role": "user", "content": user_message}
             ]
 
-            logger.debug(f"Sending auto-edit request to DeepSeek API for streaming with context")
+            logger.debug(f"Sending auto-edit request to DeepSeek API")
 
-            async for chunk in self.deepseek.chat_completion_stream(messages):
-                yield chunk
-
-            logger.info(f"AI auto-edit stream completed successfully")
+            response = await self.deepseek.chat_completion(messages, stream=False)
+            return response["choices"][0]["message"]["content"]
 
         except Exception as e:
-            logger.error(f"Auto-edit stream error: {str(e)}", exc_info=True)
+            logger.error(f"Auto-edit error: {str(e)}", exc_info=True)
             raise Exception(f"{prompts.ERROR_AUTO_EDIT_FAILED}: {str(e)}")
 
 
@@ -603,7 +559,6 @@ def run_async_ai_task(coro):
         logger.debug("Running coroutine with asyncio.run")
         result = asyncio.run(wrapper())
         logger.debug(f"Async task completed, result length: {len(str(result))}")
-        logger.info("Async AI task completed successfully")
         return result
 
     except RuntimeError as e:

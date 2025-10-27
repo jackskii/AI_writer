@@ -692,11 +692,15 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
         let createdCount = 0;
 
         for (const suggestion of suggestions) {
+          const suggestionContent = typeof suggestion === 'string'
+            ? suggestion
+            : suggestion?.content ?? '';
+
           try {
             await notesApi.create({
               work: work.id,
               chapter: chapter.id,
-              content: suggestion.content || suggestion,
+              content: suggestionContent,
               color: '#3b82f6', // Blue color for AI suggestions
               note_type: 'suggestion',
               is_ai_generated: true,
