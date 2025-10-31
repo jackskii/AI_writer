@@ -15,27 +15,6 @@ CHAT_STREAM_SYSTEM_PROMPT = """你是中文小说创作顾问。结合作品大�
 CHAT_MODEL = "deepseek-reasoner"
 
 
-def get_continue_prompt(token_count: int = 160) -> str:
-    """
-    Get the continuation writing prompt with configurable token count.
-
-    Args:
-        token_count: Number of tokens to generate (default: 160)
-
-    Returns:
-        Formatted prompt string
-    """
-    return f"""你是一个专业的中文小说续写助手。请直接从用户提供的文章末尾无缝继续写作，不要重复已有内容或另起段落。续写要求：
-1. 从文章最后一个字符直接继续，不添加换行、空格或任何分隔
-2. 符合已有的故事情节和人物设定
-3. 保持一致的写作风格
-4. 推进故事情节发展
-5. 生成约{token_count}个tokens的内容
-6. 如果有写作指导，严格按照指导进行续写
-7. 续写内容必须与前文语义连贯，就像是同一段落的延续
-8. 不要过度在意输出的长度。生成后不要思考生成了多少token"""
-
-
 SUGGEST_SYSTEM_PROMPT = """你是一个专业的中文小说写作建议助手。请分析用户提供的作品内容，并给出具体的改进建议。建议类型可能包括：情节发展、人物塑造、对话优化、描写增强、节奏调整等。请提供3-5条具体可行的建议，每条建议应该简洁明了，并说明改进的理由。"""
 
 
@@ -69,33 +48,6 @@ AUTO_EDIT_SYSTEM_PROMPT = """你是一名写作助手，将根据用户的指令
 # =============================================================================
 # AI Request Templates
 # =============================================================================
-
-def format_continue_request(
-    historic_context: str,
-    current_content: str,
-    guide: str = None,
-    token_count: int = 160
-) -> str:
-    """
-    Format a continuation writing request.
-
-    Args:
-        historic_context: Historical context (synopsis, lore, summaries)
-        current_content: Current chapter content
-        guide: Optional writing guide/instruction
-        token_count: Number of tokens to generate
-
-    Returns:
-        Formatted request string
-    """
-    instructions = get_continue_prompt(token_count)
-    historic_part = f"\n\n历史文章：{historic_context}" if historic_context.strip() else "\n\n历史文章：无"
-
-    if guide:
-        return f"{instructions}{historic_part}\n指引：{guide}\n\n正文：\n{current_content}"
-    else:
-        return f"{instructions}{historic_part}\n\n正文：\n{current_content}"
-
 
 def format_summary_request(
     chapter_title: str,
@@ -204,9 +156,8 @@ def format_current_chapter(chapter_title: str, content: str = None) -> str:
 # =============================================================================
 
 DEFAULT_MODEL = "deepseek-chat"
-DEFAULT_TEMPERATURE = 1.5
+DEFAULT_TEMPERATURE = 0.7
 DEFAULT_MAX_TOKENS = 2000
-DEFAULT_CONTINUE_TOKENS = 160
 
 
 # =============================================================================
@@ -216,7 +167,6 @@ DEFAULT_CONTINUE_TOKENS = 160
 ERROR_API_KEY_MISSING = "DeepSeek API密钥未配置，请在.env文件中设置DEEPSEEK_API_KEY"
 ERROR_API_FAILED = "AI服务暂时不可用，请稍后重试"
 ERROR_CHAT_FAILED = "AI聊天失败"
-ERROR_CONTINUE_FAILED = "AI续写失败"
 ERROR_SUGGEST_FAILED = "AI建议生成失败"
 ERROR_SUMMARY_FAILED = "AI摘要生成失败"
 ERROR_AUTO_EDIT_FAILED = "AI自动编辑失败"

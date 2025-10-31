@@ -366,81 +366,13 @@ export const aiApi = {
     return eventSource;
   },
 
-  // Streaming version of auto-edit
-  autoEditStream: (
-    selectedText: string,
-    workId: number,
-    chapterId: number,
-    onChunk: (chunk: string) => void,
-    onStart?: () => void,
-    onEnd?: (editedText: string) => void,
-    onError?: (error: string) => void
-  ) => {
-    const params = new URLSearchParams({
+  // Non-streaming version of auto-edit
+  autoEdit: (workId: number, chapterId: number, selectedText: string) =>
+    api.post<{ edited_text: string }>('/ai/auto-edit/', {
+      work_id: workId,
+      chapter_id: chapterId,
       selected_text: selectedText,
-      work_id: workId.toString(),
-      chapter_id: chapterId.toString(),
-    });
-
-    // Add token for authentication since EventSource can't send headers
-    const authStorage = localStorage.getItem('auth-storage');
-    if (authStorage) {
-      try {
-        const parsedStorage = JSON.parse(authStorage);
-        const token = parsedStorage?.state?.token;
-        if (token) {
-          params.append('token', token);
-        }
-      } catch (e) {
-        console.error('Failed to parse auth storage:', e);
-      }
-    }
-
-    const eventSource = new EventSource(`${API_BASE_URL}/ai/auto-edit/stream/?${params.toString()}`, {
-      withCredentials: true,
-    });
-
-    let fullEdit = '';
-
-    eventSource.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-
-        switch (data.type) {
-          case 'start':
-            console.log('Auto-edit streaming started');
-            onStart?.();
-            break;
-          case 'chunk':
-            fullEdit += data.content;
-            onChunk(data.content);
-            break;
-          case 'end':
-            console.log('Auto-edit streaming completed');
-            onEnd?.(data.edited_text || fullEdit);
-            eventSource.close();
-            break;
-          case 'error':
-            onError?.(data.message);
-            eventSource.close();
-            break;
-        }
-      } catch (error) {
-        console.error('Error parsing auto-edit SSE data:', error);
-        onError?.('Error parsing server response');
-        eventSource.close();
-      }
-    };
-
-    eventSource.onerror = (error) => {
-      console.error('Auto-edit EventSource error:', error);
-      onError?.('Connection error occurred');
-      eventSource.close();
-    };
-
-    // Return the EventSource so it can be closed manually if needed
-    return eventSource;
-  },
+    }),
 
   // Streaming version of chat
   chatStream: (
@@ -586,6 +518,12 @@ export const aiApi = {
 
     return eventSource;
   },
+
+  autoDescribeEntry: (workId: number, entryName: string) =>
+    api.post<{ description: string }>('/ai/auto-describe-entry/', {
+      entry_name: entryName,
+      work_id: workId,
+    }),
 };
 
 // WebSocket 连接管理

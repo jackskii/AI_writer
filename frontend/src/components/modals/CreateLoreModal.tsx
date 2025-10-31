@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useMutation } from '@tanstack/react-query';
-import { X, Plus, Minus } from 'lucide-react';
-import { loreApi } from '../../services/api';
+import { X, Plus, Minus, Sparkles } from 'lucide-react';
+import { loreApi, aiApi } from '../../services/api';
 import { Button } from '../ui/Button';
 import { Input, Textarea } from '../ui/Input';
 import { Card, CardHeader, CardContent } from '../ui/Card';
@@ -25,7 +25,8 @@ export const CreateLoreModal: React.FC<CreateLoreModalProps> = ({
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [triggers, setTriggers] = useState<string[]>(['']);
-  
+  const [isGeneratingDescription, setIsGeneratingDescription] = useState(false);
+
   const isEditMode = !!editEntry;
 
   // Populate form when editing
@@ -90,6 +91,24 @@ export const CreateLoreModal: React.FC<CreateLoreModalProps> = ({
     setTriggers(newTriggers);
   };
 
+  const handleAutoDescribe = async () => {
+    if (!name.trim()) {
+      alert('请先输入条目名称');
+      return;
+    }
+
+    setIsGeneratingDescription(true);
+    try {
+      const response = await aiApi.autoDescribeEntry(workId, name.trim());
+      setDescription(response.data.description);
+    } catch (error) {
+      console.error('Failed to generate description:', error);
+      alert('生成描述失败，请稍后重试');
+    } finally {
+      setIsGeneratingDescription(false);
+    }
+  };
+
   if (!isOpen) return null;
 
   return (
@@ -119,13 +138,30 @@ export const CreateLoreModal: React.FC<CreateLoreModalProps> = ({
               autoFocus
             />
             
-            <Textarea
-              label="详细描述"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder="详细描述这个条目的内容、特征、背景等信息..."
-              rows={4}
-            />
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <label className="block text-sm font-medium text-dark-text">
+                  详细描述
+                </label>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleAutoDescribe}
+                  disabled={!name.trim() || isGeneratingDescription}
+                  className="flex items-center gap-1 text-xs"
+                >
+                  <Sparkles size={14} />
+                  {isGeneratingDescription ? '生成中...' : 'AI自动描述'}
+                </Button>
+              </div>
+              <Textarea
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                placeholder="详细描述这个条目的内容、特征、背景等信息..."
+                rows={6}
+              />
+            </div>
 
             <div className="space-y-2">
               <label className="block text-sm font-medium text-dark-text">

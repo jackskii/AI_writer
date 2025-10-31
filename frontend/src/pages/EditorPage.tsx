@@ -231,7 +231,7 @@ export const EditorPage: React.FC = () => {
     <div className="h-screen bg-dark-bg flex flex-col">
       {/* Header */}
       <header className="flex-shrink-0 border-b border-dark-border bg-dark-surface">
-        <div className="flex items-center justify-between px-6 py-3">
+        <div className="flex items-center justify-between px-6 py-2">
           <div className="flex items-center gap-4">
             <Button
               variant="ghost"
@@ -242,33 +242,32 @@ export const EditorPage: React.FC = () => {
               <ArrowLeft size={16} />
               返回
             </Button>
-            <div className="flex flex-col">
-              <div className="text-sm text-dark-text-muted">
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-dark-text-muted">
                 {currentChapterData?.act_name || `第${currentChapterData?.act || 1}卷`}
-              </div>
-              <div className="flex items-center">
-                {isEditingChapterTitle ? (
-                  <input
-                    type="text"
-                    value={chapterTitleInput}
-                    onChange={(e) => setChapterTitleInput(e.target.value)}
-                    onBlur={handleSaveTitle}
-                    onKeyDown={handleTitleKeyDown}
-                    className="text-xl font-semibold text-dark-text bg-transparent border-none outline-none focus:ring-0 px-0"
-                    autoFocus
-                  />
-                ) : (
-                  <button
-                    onClick={handleStartEditingTitle}
-                    className="text-xl font-semibold text-dark-text hover:text-dark-primary transition-colors text-left"
-                  >
-                    {currentChapterData?.title || '未命名章节'}
-                  </button>
-                )}
-              </div>
+              </span>
+              <span className="text-dark-text-muted">·</span>
+              {isEditingChapterTitle ? (
+                <input
+                  type="text"
+                  value={chapterTitleInput}
+                  onChange={(e) => setChapterTitleInput(e.target.value)}
+                  onBlur={handleSaveTitle}
+                  onKeyDown={handleTitleKeyDown}
+                  className="text-base font-semibold text-dark-text bg-transparent border-none outline-none focus:ring-0 px-0"
+                  autoFocus
+                />
+              ) : (
+                <button
+                  onClick={handleStartEditingTitle}
+                  className="text-base font-semibold text-dark-text hover:text-dark-primary transition-colors text-left"
+                >
+                  {currentChapterData?.title || '未命名章节'}
+                </button>
+              )}
             </div>
           </div>
-          
+
           <div className="flex items-center gap-3">
             <AutoSaveIndicator />
             <Button
@@ -280,7 +279,7 @@ export const EditorPage: React.FC = () => {
               <Save size={16} />
               {isAutoSaving ? '保存中...' : '保存'}
             </Button>
-            <UserMenu />
+            <UserMenu iconOnly />
           </div>
         </div>
       </header>

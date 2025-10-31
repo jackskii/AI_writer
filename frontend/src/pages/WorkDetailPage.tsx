@@ -25,10 +25,11 @@ import type { Work, Act, Chapter, LoreEntry } from '../types';
 export const WorkDetailPage: React.FC = () => {
   const { workId } = useParams<{ workId: string }>();
   const navigate = useNavigate();
-  const { 
-    setCurrentWork, 
-    setChapters, 
-    setLoreEntries 
+  const {
+    setCurrentWork,
+    setChapters,
+    loreEntries,
+    setLoreEntries
   } = useWorkStore();
   
   const [activeTab, setActiveTab] = useState<'synopsis' | 'chapters' | 'lore'>('chapters');

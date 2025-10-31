@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { isAxiosError, type AxiosResponse } from 'axios';
-import { Sparkles, Lightbulb, Zap, X, Plus, Edit3, Trash2, StickyNote, ExternalLink, Link, Settings, Wand2 } from 'lucide-react';
+import { Lightbulb, X, Plus, Edit3, Trash2, StickyNote, ExternalLink, Link, Wand2 } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Button } from '../ui/Button';
 import { Input, Textarea } from '../ui/Input';
@@ -40,16 +40,9 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
   const highlightTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const isManualUpdateRef = useRef(false); // Flag to prevent double-adjustment during version switching
 
-  const [guideText, setGuideText] = useState('');
   const [selectedText, setSelectedText] = useState('');
   const [selectionStart, setSelectionStart] = useState(0);
   const [selectionEnd, setSelectionEnd] = useState(0);
-  const [isStreaming, setIsStreaming] = useState(false);
-  const [streamEventSource, setStreamEventSource] = useState<EventSource | null>(null);
-  const [wordCount, setWordCount] = useState(160); // Default word count for AI generation
-  const [showWordCountSettings, setShowWordCountSettings] = useState(false);
-  const settingsDropdownRef = useRef<HTMLDivElement>(null);
-  const guideTextareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Note-related states
   const [isCreatingNote, setIsCreatingNote] = useState(false);
@@ -78,8 +71,6 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
   const [versionPopupPosition, setVersionPopupPosition] = useState<{x: number, y: number} | null>(null);
 
   const {
-    isAIContinueLoading,
-    setAIContinueLoading,
     isAISuggestLoading,
     setAISuggestLoading,
     addNotification
@@ -277,38 +268,11 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
   // Cleanup on component unmount
   useEffect(() => {
     return () => {
-      if (streamEventSource) {
-        streamEventSource.close();
-      }
       if (highlightTimeoutRef.current) {
         clearTimeout(highlightTimeoutRef.current);
       }
     };
-  }, [streamEventSource]);
-
-  // Click outside handler for settings dropdown
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (settingsDropdownRef.current && !settingsDropdownRef.current.contains(event.target as Node)) {
-        setShowWordCountSettings(false);
-      }
-    };
-
-    if (showWordCountSettings) {
-      document.addEventListener('mousedown', handleClickOutside);
-      return () => {
-        document.removeEventListener('mousedown', handleClickOutside);
-      };
-    }
-  }, [showWordCountSettings]);
-
-  // Auto-resize textarea for guide text
-  useEffect(() => {
-    if (guideTextareaRef.current) {
-      guideTextareaRef.current.style.height = 'auto';
-      guideTextareaRef.current.style.height = guideTextareaRef.current.scrollHeight + 'px';
-    }
-  }, [guideText]);
+  }, []);
 
   // Early return AFTER all hooks are called
   if (!work || !chapter) {
@@ -339,18 +303,6 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
   };
 
   // Cancel streaming
-  const handleCancelStreaming = () => {
-    if (streamEventSource) {
-      streamEventSource.close();
-      setStreamEventSource(null);
-    }
-    setIsStreaming(false);
-    setAIContinueLoading(false);
-    addNotification({
-      type: 'info',
-      message: 'AI续写已取消'
-    });
-  };
 
 
   // Function to update note positions (stub for compatibility)
@@ -574,109 +526,6 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
     }
   };
 
-  // AI Continue Writing - Streaming Version
-  const handleAIContinue = async () => {
-    if (isAIContinueLoading) return;
-
-    try {
-      setAIContinueLoading(true);
-      let accumulatedContent = '';
-      let isFirstChunk = true;
-      const startingContent = content;
-
-      const eventSource = aiApi.continueStream(
-        work.id,
-        chapter.id,
-        // onChunk - called for each piece of text
-        (chunk: string) => {
-          accumulatedContent += chunk;
-
-          // Apply duplicate removal only on the first chunk or complete accumulated content
-          let cleanedContent = accumulatedContent;
-          if (isFirstChunk) {
-            cleanedContent = removeDuplicateText(startingContent, accumulatedContent);
-            accumulatedContent = cleanedContent; // Update accumulated content with cleaned version
-            isFirstChunk = false;
-          }
-
-          const newContent = startingContent + cleanedContent;
-          onChange(newContent);
-
-          // Keep cursor at end during streaming
-          if (editorRef.current) {
-            setTimeout(() => {
-              if (editorRef.current) {
-                editorRef.current.setSelectionRange(newContent.length, newContent.length);
-                editorRef.current.focus();
-              }
-            }, 0);
-          }
-        },
-        // onStart
-        () => {
-          console.log('AI streaming started');
-          setIsStreaming(true);
-          addNotification({
-            type: 'info',
-            message: 'AI续写开始...'
-          });
-        },
-        // onEnd
-        () => {
-          console.log('AI streaming completed');
-          setIsStreaming(false);
-          setAIContinueLoading(false);
-          setGuideText('');
-          // Reset textarea height
-          if (guideTextareaRef.current) {
-            guideTextareaRef.current.style.height = 'auto';
-          }
-          setStreamEventSource(null);
-          addNotification({
-            type: 'success',
-            message: 'AI续写完成'
-          });
-
-          // Final cursor position
-          const finalContent = startingContent + accumulatedContent;
-          if (editorRef.current) {
-            setTimeout(() => {
-              if (editorRef.current) {
-                editorRef.current.setSelectionRange(finalContent.length, finalContent.length);
-                editorRef.current.focus();
-              }
-            }, 100);
-          }
-        },
-        // onError
-        (error: string) => {
-          console.error('AI continue streaming error:', error);
-          setIsStreaming(false);
-          setAIContinueLoading(false);
-          setStreamEventSource(null);
-          addNotification({
-            type: 'error',
-            message: `AI续写失败: ${error}`
-          });
-        },
-        guideText || undefined,
-        content,
-        wordCount
-      );
-
-      // Store eventSource reference so we can clean it up if needed
-      setStreamEventSource(eventSource);
-
-    } catch (error) {
-      console.error('AI continue error:', error);
-      setAIContinueLoading(false);
-      addNotification({
-        type: 'error',
-        message: 'AI续写连接失败，请稍后重试'
-      });
-    }
-  };
-
   // AI Suggestions for selected text
   const handleAISuggest = async () => {
     if (isAISuggestLoading || !selectedText) return;
@@ -761,126 +610,102 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
 
     try {
       setIsAutoEditLoading(true);
-      let accumulatedEdit = '';
-
       console.log('Starting auto-edit for text:', selectedText.slice(0, 50));
 
-      aiApi.autoEditStream(
-        selectedText,
-        work.id,
-        chapter.id,
-        // onChunk
-        (chunk: string) => {
-          accumulatedEdit += chunk;
-          console.log('Received chunk, total length:', accumulatedEdit.length);
-        },
-        // onStart
-        () => {
-          console.log('Auto-edit streaming started');
-          addNotification({
-            type: 'info',
-            message: 'AI自动编辑开始...'
-          });
-        },
-        // onEnd
-        async (editedText: string) => {
-          console.log('Auto-edit streaming completed');
-          setIsAutoEditLoading(false);
+      addNotification({
+        type: 'info',
+        message: 'AI自动编辑开始...'
+      });
 
-          const finalEditedText = editedText || accumulatedEdit;
+      // Call non-streaming auto-edit API
+      const response = await aiApi.autoEdit(work.id, chapter.id, selectedText);
+      const finalEditedText = response.data.edited_text;
 
-          // Create AutoEdit record in backend (without versions first)
-          try {
-            console.log('Creating AutoEdit record...');
+      console.log('Auto-edit completed');
 
-            // Step 1: Create the AutoEdit record
-            const createResponse = await autoEditApi.create({
-              work: work.id,
-              chapter: chapter.id,
-              text_start_position: selectionStart,
-              text_end_position: selectionEnd,
-              original_text: selectedText,
-              active_version_index: 0, // Start with original (version 0)
-            });
+      // Create AutoEdit record in backend (without versions first)
+      try {
+        console.log('Creating AutoEdit record...');
 
-            console.log('AutoEdit created:', createResponse.data);
-            const createdAutoEdit = createResponse.data;
+        // Step 1: Create the AutoEdit record
+        const createResponse = await autoEditApi.create({
+          work: work.id,
+          chapter: chapter.id,
+          text_start_position: selectionStart,
+          text_end_position: selectionEnd,
+          original_text: selectedText,
+          active_version_index: 0, // Start with original (version 0)
+        });
 
-            // Step 2: Add the first edited version
-            console.log('Adding version with text length:', finalEditedText.length);
-            const versionResponse = await autoEditApi.addVersion(
-              createdAutoEdit.id,
-              finalEditedText
-            );
+        console.log('AutoEdit created:', createResponse.data);
+        const createdAutoEdit = createResponse.data;
 
-            console.log('Version added:', versionResponse.data);
-            const updatedAutoEdit = versionResponse.data;
+        // Step 2: Add the first edited version
+        console.log('Adding version with text length:', finalEditedText.length);
+        const versionResponse = await autoEditApi.addVersion(
+          createdAutoEdit.id,
+          finalEditedText
+        );
 
-            // Step 3: Update the AutoEdit's end position to match the edited text length
-            // (Since we switched to version 1 which has a different length than original)
-            const newEndPosition = selectionStart + finalEditedText.length;
-            console.log('Updating end position from', selectionEnd, 'to', newEndPosition);
+        console.log('Version added:', versionResponse.data);
+        const updatedAutoEdit = versionResponse.data;
 
-            await autoEditApi.update(updatedAutoEdit.id, {
-              text_end_position: newEndPosition
-            });
+        // Step 3: Update the AutoEdit's end position to match the edited text length
+        // (Since we switched to version 1 which has a different length than original)
+        const newEndPosition = selectionStart + finalEditedText.length;
+        console.log('Updating end position from', selectionEnd, 'to', newEndPosition);
 
-            // Set flag to prevent auto-adjustment
-            isManualUpdateRef.current = true;
+        await autoEditApi.update(updatedAutoEdit.id, {
+          text_end_position: newEndPosition
+        });
 
-            // Replace text in editor
-            const newContent = content.slice(0, selectionStart) + finalEditedText + content.slice(selectionEnd);
-            onChange(newContent);
+        // Set flag to prevent auto-adjustment
+        isManualUpdateRef.current = true;
 
-            console.log('Replaced text with auto-edit:', updatedAutoEdit.id);
+        // Replace text in editor
+        const newContent = content.slice(0, selectionStart) + finalEditedText + content.slice(selectionEnd);
+        onChange(newContent);
 
-            // Track the auto-edit with updated position
-            setAutoEdits(prev => new Map(prev).set(updatedAutoEdit.id, updatedAutoEdit));
-            setAutoEditPositions(prev => new Map(prev).set(updatedAutoEdit.id, {
-              start: selectionStart,
-              end: newEndPosition
-            }));
+        console.log('Replaced text with auto-edit:', updatedAutoEdit.id);
 
-            // Invalidate queries to refresh data
-            queryClient.invalidateQueries({ queryKey: ['autoEdits', chapter.id] });
+        // Track the auto-edit with updated position
+        setAutoEdits(prev => new Map(prev).set(updatedAutoEdit.id, updatedAutoEdit));
+        setAutoEditPositions(prev => new Map(prev).set(updatedAutoEdit.id, {
+          start: selectionStart,
+          end: newEndPosition
+        }));
 
-            addNotification({
-              type: 'success',
-              message: 'AI自动编辑完成'
-            });
+        // Invalidate queries to refresh data
+        queryClient.invalidateQueries({ queryKey: ['autoEdits', chapter.id] });
 
-          } catch (error: unknown) {
-            console.error('Failed to save auto-edit:', error);
-            if (isAxiosError(error) && error.response?.data) {
-              console.error('Error response:', error.response.data);
-            }
-            addNotification({
-              type: 'error',
-              message: `保存编辑失败: ${
-                isAxiosError(error)
-                  ? error.response?.data?.detail || error.message
-                  : '未知错误'
-              }`
-            });
-          }
-        },
-        // onError
-        (error: string) => {
-          console.error('Auto-edit streaming error:', error);
-          setIsAutoEditLoading(false);
-          addNotification({
-            type: 'error',
-            message: `AI自动编辑失败: ${error}`
-          });
+        addNotification({
+          type: 'success',
+          message: 'AI自动编辑完成'
+        });
+
+      } catch (error: unknown) {
+        console.error('Failed to save auto-edit:', error);
+        if (isAxiosError(error) && error.response?.data) {
+          console.error('Error response:', error.response.data);
         }
-      );
+        addNotification({
+          type: 'error',
+          message: `保存编辑失败: ${
+            isAxiosError(error)
+              ? error.response?.data?.detail || error.message
+              : '未知错误'
+          }`
+        });
+      }
+
+      setIsAutoEditLoading(false);
 
     } catch (error) {
       console.error('Auto-edit error:', error);
       setIsAutoEditLoading(false);
       addNotification({
         type: 'error',
-        message: 'AI自动编辑连接失败，请稍后重试'
+        message: 'AI自动编辑失败，请稍后重试'
       });
     }
   };
@@ -1155,39 +980,25 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
       setIsAutoEditLoading(true);
       setShowVersionPopup(false);
 
-      let accumulatedEdit = '';
+      addNotification({
+        type: 'info',
+        message: '正在生成新版本...'
+      });
 
-      aiApi.autoEditStream(
-        autoEdit.original_text,
-        work.id,
-        chapter.id,
-        // onChunk
-        (chunk: string) => {
-          accumulatedEdit += chunk;
-        },
-        // onStart
-        () => {
-          console.log('New auto-edit streaming started');
-          addNotification({
-            type: 'info',
-            message: '正在生成新版本...'
-          });
-        },
-        // onEnd
-        async (editedText: string) => {
-          console.log('New auto-edit streaming completed');
-          setIsAutoEditLoading(false);
+      // Call non-streaming auto-edit API
+      const response = await aiApi.autoEdit(work.id, chapter.id, autoEdit.original_text);
+      const finalEditedText = response.data.edited_text;
 
-          const finalEditedText = editedText || accumulatedEdit;
+      console.log('New auto-edit completed');
 
-          try {
-            // Add new version to existing AutoEdit
-            const versionResponse = await autoEditApi.addVersion(
-              autoEdit.id,
-              finalEditedText
-            );
+      try {
+        // Add new version to existing AutoEdit
+        const versionResponse = await autoEditApi.addVersion(
+          autoEdit.id,
+          finalEditedText
+        );
 
-            const updatedAutoEdit: AutoEdit = versionResponse.data;
+        const updatedAutoEdit: AutoEdit = versionResponse.data;
 
             // Get current position
             const position = autoEditPositions.get(autoEdit.id);
@@ -1289,33 +1100,25 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
             queryClient.invalidateQueries({ queryKey: ['autoEdits', chapter.id] });
             queryClient.invalidateQueries({ queryKey: ['notes', work.id, chapter.id] });
 
-            addNotification({
-              type: 'success',
-              message: '新版本生成完成'
-            });
+        addNotification({
+          type: 'success',
+          message: '新版本生成完成'
+        });
 
-          } catch (error: unknown) {
-            console.error('Failed to save new version:', error);
-            addNotification({
-              type: 'error',
-              message: `保存新版本失败: ${
-                isAxiosError(error)
-                  ? error.response?.data?.detail || error.message
-                  : '未知错误'
-              }`
-            });
-          }
-        },
-        // onError
-        (error: string) => {
-          console.error('New auto-edit streaming error:', error);
-          setIsAutoEditLoading(false);
-          addNotification({
-            type: 'error',
-            message: `生成新版本失败: ${error}`
-          });
-        }
-      );
+        setIsAutoEditLoading(false);
+
+      } catch (error: unknown) {
+        console.error('Failed to save new version:', error);
+        setIsAutoEditLoading(false);
+        addNotification({
+          type: 'error',
+          message: `保存新版本失败: ${
+            isAxiosError(error)
+              ? error.response?.data?.detail || error.message
+              : '未知错误'
+          }`
+        });
+      }
 
     } catch (error) {
       console.error('Create new edit error:', error);
@@ -1634,9 +1437,9 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
 
       {/* Bottom Panel - Stats and AI Tools */}
       <div className="flex-shrink-0 border-t border-dark-border bg-dark-surface">
-        {/* Stats Bar */}
-        <div className="px-6 py-2 border-b border-dark-border">
-          <div className="flex items-center justify-between text-sm text-dark-text-muted">
+        {/* Stats Bar - Fixed height */}
+        <div className="px-6 py-2 border-b border-dark-border h-[48px] flex items-center">
+          <div className="flex items-center justify-between text-sm text-dark-text-muted w-full">
             <div className="flex items-center gap-4">
               <span>字数: {totalWords.toLocaleString()}</span>
               <span>字符: {totalChars.toLocaleString()}</span>
@@ -1646,8 +1449,8 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
                 </span>
               )}
             </div>
-            <div className="flex items-center gap-2">
-              {selectedText && (
+            <div className="flex items-center gap-2 min-h-[32px]">
+              {selectedText ? (
                 <>
                   <Button
                     size="sm"
@@ -1677,120 +1480,13 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
                     {autoEdits.size > 0 && <span className="text-xs">(已有编辑)</span>}
                   </LoadingButton>
                 </>
+              ) : (
+                <div className="h-[32px]"></div>
               )}
             </div>
           </div>
         </div>
 
-        {/* AI Continue Section */}
-        <div className="px-6 py-4">
-          <div className="flex items-start gap-3">
-            <div className="flex-1">
-              <Textarea
-                ref={guideTextareaRef}
-                value={guideText}
-                onChange={(e) => setGuideText(e.target.value)}
-                placeholder="输入写作指导（可选），让AI按您的想法续写..."
-                className="bg-dark-bg border-dark-border text-sm resize-none overflow-hidden min-h-[40px]"
-                rows={1}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault();
-                    handleAIContinue();
-                  }
-                }}
-              />
-            </div>
-            <div className="flex items-center gap-2">
-              {/* Settings Button */}
-              <div className="relative" ref={settingsDropdownRef}>
-                <Button
-                  onClick={() => setShowWordCountSettings(!showWordCountSettings)}
-                  variant="outline"
-                  size="sm"
-                  className="flex items-center gap-1 px-3 py-2"
-                  title="设置生成字数"
-                >
-                  <Settings size={16} />
-                  {wordCount}字
-                </Button>
-
-                {/* Word Count Settings Dropdown */}
-                {showWordCountSettings && (
-                  <div className="absolute bottom-full right-0 mb-2 bg-dark-surface border border-dark-border rounded-lg shadow-lg p-3 z-50 min-w-[200px]">
-                    <div className="text-xs font-medium text-dark-text mb-2">生成字数</div>
-                    <div className="grid grid-cols-2 gap-2">
-                      {[100, 160, 200, 300, 500, 800].map((count) => (
-                        <button
-                          key={count}
-                          onClick={() => {
-                            setWordCount(count);
-                            setShowWordCountSettings(false);
-                          }}
-                          className={`px-3 py-2 text-xs rounded border ${
-                            wordCount === count
-                              ? 'bg-dark-primary text-white border-dark-primary'
-                              : 'bg-dark-bg text-dark-text border-dark-border hover:border-dark-primary'
-                          }`}
-                        >
-                          {count}字
-                        </button>
-                      ))}
-                    </div>
-                    <div className="mt-3 border-t border-dark-border pt-2">
-                      <div className="text-xs text-dark-text-muted mb-1">自定义</div>
-                      <Input
-                        type="number"
-                        value={wordCount}
-                        onChange={(e) => setWordCount(Math.max(50, Math.min(2000, parseInt(e.target.value) || 160)))}
-                        min={50}
-                        max={2000}
-                        className="bg-dark-bg border-dark-border text-xs"
-                        placeholder="50-2000"
-                      />
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              <LoadingButton
-                isLoading={isAIContinueLoading}
-                onClick={handleAIContinue}
-                disabled={isStreaming}
-                className="flex items-center gap-2 px-4 py-2"
-              >
-                {isStreaming ? (
-                  <>
-                    <Zap size={16} className="animate-pulse text-yellow-400" />
-                    流式生成中...
-                  </>
-                ) : (
-                  <>
-                    <Sparkles size={16} />
-                    AI续写
-                  </>
-                )}
-              </LoadingButton>
-
-              {isStreaming && (
-                <Button
-                  onClick={handleCancelStreaming}
-                  variant="outline"
-                  className="flex items-center gap-1 px-3 py-2 border-red-500 text-red-500 hover:bg-red-500 hover:text-white"
-                >
-                  <X size={14} />
-                  取消
-                </Button>
-              )}
-            </div>
-          </div>
-
-          {guideText && (
-            <div className="mt-2 text-xs text-dark-text-muted">
-              AI将根据您的指导「{guideText.slice(0, 50)}{guideText.length > 50 ? '...' : ''}」进行续写
-            </div>
-          )}
-        </div>
       </div>
 
       {/* Delete Note Confirmation Dialog */}

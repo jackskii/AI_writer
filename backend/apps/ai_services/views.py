@@ -342,148 +342,6 @@ def ai_work_chat_stream(request):
 
 
 @csrf_exempt
-def ai_continue_stream(request):
-    """AI续写端点 - SSE流式响应"""
-    if request.method != 'GET':
-        return HttpResponse(
-            'data: {"type": "error", "message": "仅支持GET请求"}\n\n',
-            content_type='text/event-stream'
-        )
-
-    # Check authentication via token query parameter for EventSource compatibility
-    user = None
-    token = request.GET.get('token')
-    if token:
-        from django.contrib.auth.models import AnonymousUser
-        from rest_framework.authtoken.models import Token
-        try:
-            token_obj = Token.objects.get(key=token)
-            user = token_obj.user
-            request.user = user
-        except Token.DoesNotExist:
-            return HttpResponse(
-                'data: {"type": "error", "message": "认证令牌无效"}\n\n',
-                content_type='text/event-stream',
-                status=401
-            )
-    elif not request.user.is_authenticated:
-        return HttpResponse(
-            'data: {"type": "error", "message": "需要登录"}\n\n',
-            content_type='text/event-stream',
-            status=401
-        )
-    else:
-        user = request.user
-        
-    work_id = request.GET.get('work_id')
-    chapter_id = request.GET.get('chapter_id')
-    guide = request.GET.get('guide')
-    token_count = int(request.GET.get('token_count', 160))
-    current_content = request.GET.get('content', '')
-    
-    if not all([work_id, chapter_id]):
-        return HttpResponse(
-            'data: {"type": "error", "message": "缺少必要参数"}\n\n', 
-            content_type='text/event-stream'
-        )
-    
-    # 获取作品和章节
-    work = get_object_or_404(Work, id=work_id)
-    chapter = get_object_or_404(Chapter, id=chapter_id, work=work)
-    
-    def generate_stream():
-        """生成SSE数据流"""
-        try:
-            # 如果提供了当前内容，先保存到章节
-            if current_content:
-                chapter.content = current_content
-                chapter.save(update_fields=['content'])
-            
-            # Build context in sync environment
-            from .services import ContextBuilder
-            context = ContextBuilder.build_context(chapter)
-            
-            # 创建AI服务实例并开始流式生成
-            ai_service = AIService()
-            
-            # 运行异步生成器
-            async def run_async():
-                async for chunk in ai_service.continue_writing_stream(context, guide, chapter.id, token_count):
-                    yield chunk
-            
-            # 在线程中运行异步生成器
-            import asyncio
-            import threading
-            from queue import Queue
-            
-            chunk_queue = Queue()
-            error_queue = Queue()
-            
-            def run_in_thread():
-                try:
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-                    
-                    async def collect_chunks():
-                        async for chunk in ai_service.continue_writing_stream(context, guide, chapter.id, token_count):
-                            chunk_queue.put(chunk)
-                        chunk_queue.put(None)  # 结束标记
-                    
-                    loop.run_until_complete(collect_chunks())
-                except Exception as e:
-                    error_queue.put(str(e))
-                    chunk_queue.put(None)
-                finally:
-                    loop.close()
-            
-            # 启动线程
-            thread = threading.Thread(target=run_in_thread)
-            thread.start()
-            
-            # 发送初始事件
-            yield f"data: {json.dumps({'type': 'start', 'message': 'AI续写开始'})}\n\n"
-            
-            # 流式发送chunks
-            while True:
-                # 检查错误
-                if not error_queue.empty():
-                    error = error_queue.get()
-                    yield f"data: {json.dumps({'type': 'error', 'message': f'AI续写失败: {error}'})}\n\n"
-                    break
-                
-                # 获取chunk
-                try:
-                    chunk = chunk_queue.get(timeout=1)
-                    if chunk is None:  # 结束标记
-                        yield f"data: {json.dumps({'type': 'end', 'message': 'AI续写完成'})}\n\n"
-                        break
-                    
-                    # 发送chunk
-                    yield f"data: {json.dumps({'type': 'chunk', 'content': chunk})}\n\n"
-                    
-                except:
-                    # 检查线程是否还活着
-                    if not thread.is_alive():
-                        yield f"data: {json.dumps({'type': 'end', 'message': 'AI续写完成'})}\n\n"
-                        break
-            
-            thread.join(timeout=5)  # 最多等待5秒
-            
-        except Exception as e:
-            logger.error(f"Stream AI continue error: {str(e)}")
-            yield f"data: {json.dumps({'type': 'error', 'message': f'AI续写失败: {str(e)}'})}\n\n"
-    
-    response = StreamingHttpResponse(
-        generate_stream(),
-        content_type='text/event-stream'
-    )
-    response['Cache-Control'] = 'no-cache'
-    response['X-Accel-Buffering'] = 'no'  # Disable nginx buffering
-    response['Access-Control-Allow-Origin'] = '*'  # CORS for SSE
-    return response
-
-
-@csrf_exempt
 def ai_summarize_stream(request):
     """AI摘要端点 - SSE流式响应"""
     if request.method != 'GET':
@@ -639,14 +497,24 @@ def ai_auto_edit(request):
     chapter = get_object_or_404(Chapter, id=chapter_id, work=work)
 
     try:
-        # Build context in sync environment
-        from .services import ContextBuilder
-        context = ContextBuilder.build_context(chapter)
-
-        # 格式化上下文
+        # Build context: synopsis + last 3 chapters
+        work = chapter.work
         formatted_context = ""
-        if context.get('synopsis'):
-            formatted_context += f"作品大纲：{context['synopsis']}\n\n"
+
+        # Add synopsis
+        if work.synopsis:
+            formatted_context += f"作品大纲：{work.synopsis}\n\n"
+
+        # Get last 3 chapters with full content
+        last_three_chapters = work.chapters.filter(
+            order__lt=chapter.order
+        ).order_by('-order')[:3]
+
+        if last_three_chapters:
+            formatted_context += "前文章节：\n\n"
+            # Reverse to show in chronological order
+            for ch in reversed(list(last_three_chapters)):
+                formatted_context += f"第{ch.chapter_number}章《{ch.title}》\n\n{ch.content or '(空章节)'}\n\n---\n\n"
 
         ai_service = AIService()
         edited_text = run_async_ai_task(
@@ -659,5 +527,77 @@ def ai_auto_edit(request):
         logger.error(f"AI auto-edit error: {str(e)}")
         return Response(
             {'error': f'AI自动编辑出错：{str(e)}'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def ai_auto_describe_entry(request):
+    """AI自动生成条目描述 - 基于章节内容"""
+    entry_name = request.data.get('entry_name')
+    work_id = request.data.get('work_id')
+
+    if not all([entry_name, work_id]):
+        return Response(
+            {'error': '缺少必要参数'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    # 获取作品
+    work = get_object_or_404(Work, id=work_id, author=request.user)
+
+    try:
+        # 搜索包含条目名称的章节（前3章）
+        from django.db.models import Q
+        chapters_with_entry = work.chapters.filter(
+            Q(content__icontains=entry_name) | Q(title__icontains=entry_name)
+        ).order_by('order')[:3]
+
+        if not chapters_with_entry:
+            return Response({
+                'description': f'"{entry_name}" 尚未在故事中出现。'
+            })
+
+        # 构建上下文：章节内容
+        context_parts = []
+        for chapter in chapters_with_entry:
+            context_parts.append(f"### 第{chapter.chapter_number}章《{chapter.title}》\n\n{chapter.content}")
+
+        context_text = "\n\n---\n\n".join(context_parts)
+
+        # 调用AI生成描述
+        ai_service = AIService()
+
+        prompt = f"""基于以下章节内容，为"{entry_name}"创建一个详细的世界观条目描述。
+
+章节内容：
+{context_text}
+
+请按照以下格式生成描述：
+
+名字-年龄-性别。
+外观：
+性格：
+人物简介：
+
+如果"{entry_name}"不是人物，请根据其类型（地点、物品、概念等）调整格式，但保持结构清晰。"""
+
+        messages = [
+            {"role": "user", "content": prompt}
+        ]
+
+        response = run_async_ai_task(
+            ai_service.deepseek.chat_completion(messages, stream=False)
+        )
+
+        description = response["choices"][0]["message"]["content"]
+
+        return Response({'description': description})
+
+    except Exception as e:
+        logger.error(f"AI auto-describe entry error: {str(e)}")
+        return Response(
+            {'error': f'AI生成描述失败：{str(e)}'},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )

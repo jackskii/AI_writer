@@ -6,7 +6,11 @@ import { useAuthStore } from '../../stores/useAuthStore';
 import { useWorkStore } from '../../stores/useWorkStore';
 import { useClickOutside } from '../../hooks/useClickOutside';
 
-export const UserMenu: React.FC = () => {
+interface UserMenuProps {
+  iconOnly?: boolean;
+}
+
+export const UserMenu: React.FC<UserMenuProps> = ({ iconOnly = false }) => {
   const [isOpen, setIsOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
@@ -42,21 +46,27 @@ export const UserMenu: React.FC = () => {
     <div className="relative" ref={menuRef}>
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center gap-2 px-3 py-2 rounded-lg bg-dark-surface border border-dark-border hover:border-dark-primary transition-colors"
+        className={`flex items-center gap-2 rounded-lg bg-dark-surface border border-dark-border hover:border-dark-primary transition-colors ${
+          iconOnly ? 'p-2' : 'px-3 py-2'
+        }`}
       >
         <div className="w-8 h-8 bg-dark-primary rounded-full flex items-center justify-center">
           <User size={16} className="text-white" />
         </div>
-        <div className="flex flex-col items-start">
-          <span className="text-sm font-medium text-dark-text">
-            {user.first_name && user.last_name 
-              ? `${user.first_name} ${user.last_name}` 
-              : user.username
-            }
-          </span>
-          <span className="text-xs text-dark-text-muted">{user.email}</span>
-        </div>
-        <ChevronDown size={16} className={`text-dark-text-muted transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+        {!iconOnly && (
+          <>
+            <div className="flex flex-col items-start">
+              <span className="text-sm font-medium text-dark-text">
+                {user.first_name && user.last_name
+                  ? `${user.first_name} ${user.last_name}`
+                  : user.username
+                }
+              </span>
+              <span className="text-xs text-dark-text-muted">{user.email}</span>
+            </div>
+            <ChevronDown size={16} className={`text-dark-text-muted transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+          </>
+        )}
       </button>
 
       {isOpen && (

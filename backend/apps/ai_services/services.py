@@ -173,7 +173,7 @@ class ContextBuilder:
 
     @staticmethod
     def build_context(chapter: Chapter, include_current_content: bool = True) -> Dict:
-        """Build AI context"""
+        """Build AI context with full chapter content"""
         work = chapter.work
 
         # Basic context
@@ -195,15 +195,15 @@ class ContextBuilder:
             for entry in lore_entries
         ]
 
-        # Get recent chapter summaries (last 5)
-        recent_summaries = ContextBuilder._get_recent_chapter_summaries(chapter)
-        context["recent_chapter_summaries"] = recent_summaries
+        # Get ALL previous chapters with full content
+        previous_chapters = ContextBuilder._get_all_previous_chapters(chapter)
+        context["previous_chapters"] = previous_chapters
 
         return context
 
     @staticmethod
     def build_work_overview_context(work: Work) -> Dict:
-        """Build context for work-level discussions"""
+        """Build context for work-level discussions with full chapter content"""
         context = {
             "context_scope": "work_overview",
             "work_title": work.title,
@@ -218,24 +218,14 @@ class ContextBuilder:
             ]
         }
 
-        chapter_summaries = []
+        # Get ALL chapters with full content
+        all_chapters = []
         chapters = work.chapters.all().order_by('order')
         for chapter in chapters:
-            if chapter.summary:
-                summary_text = chapter.summary.strip()
-            else:
-                content_preview = (chapter.content or '').strip()
-                if content_preview:
-                    summary_text = content_preview[:200]
-                    if len(content_preview) > 200:
-                        summary_text += '...'
-                else:
-                    summary_text = '暂无摘要'
-            chapter_summaries.append(
-                f"第{chapter.chapter_number}章《{chapter.title}》: {summary_text}"
-            )
+            chapter_text = f"第{chapter.chapter_number}章《{chapter.title}》\n\n{chapter.content or '(空章节)'}"
+            all_chapters.append(chapter_text)
 
-        context["chapter_summaries"] = chapter_summaries
+        context["all_chapters"] = all_chapters
         return context
 
     @staticmethod
@@ -253,18 +243,18 @@ class ContextBuilder:
         return triggered_entries
 
     @staticmethod
-    def _get_recent_chapter_summaries(chapter: Chapter, count: int = 5) -> List[str]:
-        """Get recent chapter summaries"""
+    def _get_all_previous_chapters(chapter: Chapter) -> List[str]:
+        """Get ALL previous chapters with full content"""
         chapters = chapter.work.chapters.filter(
             order__lt=chapter.order
-        ).order_by('-order')[:count]
+        ).order_by('order')
 
-        summaries = []
-        for ch in reversed(list(chapters)):
-            if ch.summary:
-                summaries.append(f"第{ch.order}章《{ch.title}》: {ch.summary}")
+        previous_chapters = []
+        for ch in chapters:
+            chapter_text = f"第{ch.chapter_number}章《{ch.title}》\n\n{ch.content or '(空章节)'}"
+            previous_chapters.append(chapter_text)
 
-        return summaries
+        return previous_chapters
 
     @staticmethod
     def build_summary_context(chapter: Chapter) -> str:
@@ -309,12 +299,15 @@ class AIService:
             if lore_info:
                 formatted_parts.append(lore_info)
 
-        # Chapter summaries (recent or full list)
-        summaries_list = context.get('recent_chapter_summaries') or context.get('chapter_summaries')
-        if summaries_list:
-            summaries = prompts.format_chapter_summaries(summaries_list)
-            if summaries:
-                formatted_parts.append(summaries)
+        # Previous chapters with full content (for chapter-level chat)
+        if context.get('previous_chapters'):
+            previous_text = "前文章节：\n\n" + "\n\n---\n\n".join(context['previous_chapters'])
+            formatted_parts.append(previous_text)
+
+        # All chapters with full content (for work-level chat)
+        if context.get('all_chapters'):
+            all_chapters_text = "所有章节：\n\n" + "\n\n---\n\n".join(context['all_chapters'])
+            formatted_parts.append(all_chapters_text)
 
         # Current chapter
         chapter_info = prompts.format_current_chapter(
@@ -327,7 +320,7 @@ class AIService:
         return "\n\n".join(formatted_parts)
 
     def _format_historic_context(self, context: Dict) -> str:
-        """Format historic context (synopsis, summaries, lore)"""
+        """Format historic context (synopsis, previous chapters, lore)"""
         historic_parts = []
 
         # Work synopsis
@@ -340,54 +333,12 @@ class AIService:
             if lore_info:
                 historic_parts.append(lore_info)
 
-        # Chapter summaries (recent or full list)
-        summaries_list = context.get('recent_chapter_summaries') or context.get('chapter_summaries')
-        if summaries_list:
-            summaries = prompts.format_chapter_summaries(summaries_list)
-            if summaries:
-                historic_parts.append(summaries)
+        # Previous chapters with full content
+        if context.get('previous_chapters'):
+            previous_text = "前文章节：\n\n" + "\n\n---\n\n".join(context['previous_chapters'])
+            historic_parts.append(previous_text)
 
         return "\n\n".join(historic_parts)
-
-    async def continue_writing_stream(
-        self,
-        context: Dict,
-        guide: Optional[str] = None,
-        chapter_id: int = None,
-        token_count: int = None
-    ) -> AsyncGenerator[str, None]:
-        """AI continuation writing - streaming version"""
-        token_count = token_count or prompts.DEFAULT_CONTINUE_TOKENS
-        logger.debug(f"Starting AI continue writing stream for chapter {chapter_id}, guide: {guide}, token_count: {token_count}")
-
-        try:
-            logger.debug(f"Using provided context - current content length: {len(context.get('current_chapter_content', ''))}")
-
-            # Format historic context and current content separately
-            historic_context = self._format_historic_context(context)
-            current_content = context.get('current_chapter_content', '')
-
-            # Build user message using prompts helper
-            user_content = prompts.format_continue_request(
-                historic_context,
-                current_content,
-                guide,
-                token_count
-            )
-
-            messages = [
-                {"role": "user", "content": user_content}
-            ]
-
-            logger.debug(f"Sending continue writing stream request to DeepSeek API, max_tokens: {token_count}")
-
-            # Use streaming API
-            async for chunk in self.deepseek.chat_completion_stream(messages, max_tokens=token_count):
-                yield chunk
-
-        except Exception as e:
-            logger.error(f"Continue writing stream AI error for chapter {chapter_id}: {str(e)}", exc_info=True)
-            raise Exception(f"{prompts.ERROR_CONTINUE_FAILED}: {str(e)}")
 
     async def generate_suggestions(self, chapter: Chapter, target_text: Optional[str] = None) -> List[Dict]:
         """Generate writing suggestions - returns single JSON formatted suggestion"""
