@@ -4,15 +4,25 @@ from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
 from django.shortcuts import get_object_or_404
 from django.http import StreamingHttpResponse
-from apps.works.models import Work, Chapter
+from apps.works.models import Work, Chapter, LoreEntry
 from .services import AIService, run_async_ai_task
 from .models import Suggestion
+from . import prompts
 import logging
 import json
 import asyncio
 import uuid
 
 logger = logging.getLogger(__name__)
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def ai_prefills(request):
+    """Get auto-edit prefill options"""
+    return Response({
+        'prefills': prompts.AUTO_EDIT_PREFILLS
+    })
 
 
 @api_view(['POST'])
@@ -531,6 +541,197 @@ def ai_auto_edit(request):
         )
 
 
+@csrf_exempt
+def ai_auto_edit_stream(request):
+    """AI自动编辑端点 - SSE流式响应，支持上下文自定义"""
+    if request.method != 'GET':
+        return HttpResponse(
+            'data: {"type": "error", "message": "仅支持GET请求"}\n\n',
+            content_type='text/event-stream'
+        )
+
+    # Check authentication
+    user = None
+    token = request.GET.get('token')
+    if token:
+        from rest_framework.authtoken.models import Token
+        try:
+            token_obj = Token.objects.get(key=token)
+            user = token_obj.user
+            request.user = user
+        except Token.DoesNotExist:
+            return HttpResponse(
+                'data: {"type": "error", "message": "认证令牌无效"}\n\n',
+                content_type='text/event-stream',
+                status=401
+            )
+    elif not request.user.is_authenticated:
+        return HttpResponse(
+            'data: {"type": "error", "message": "需要登录"}\n\n',
+            content_type='text/event-stream',
+            status=401
+        )
+    else:
+        user = request.user
+
+    selected_text = request.GET.get('selected_text')
+    work_id = request.GET.get('work_id')
+    chapter_id = request.GET.get('chapter_id')
+
+    # Context customization parameters
+    chapter_selection = request.GET.get('chapter_selection', 'past_3')  # 'all', 'past_3', 'custom', 'none'
+    custom_chapter_count = request.GET.get('custom_chapter_count', '3')
+    selected_lore_ids = request.GET.get('selected_lore_ids', '')  # Comma-separated IDs
+    model = request.GET.get('model', 'deepseek-chat')  # Model selection
+    edit_requirement = request.GET.get('edit_requirement', '')  # Editing guide/requirement
+
+    if not all([selected_text, work_id, chapter_id]):
+        return HttpResponse(
+            'data: {"type": "error", "message": "缺少必要参数"}\n\n',
+            content_type='text/event-stream'
+        )
+
+    work = get_object_or_404(Work, id=work_id)
+    chapter = get_object_or_404(Chapter, id=chapter_id, work=work)
+
+    def generate_stream():
+        """生成SSE数据流"""
+        try:
+            # Build context based on user selection
+            formatted_context = ""
+
+            # Add synopsis
+            if work.synopsis:
+                formatted_context += f"作品大纲：{work.synopsis}\n\n"
+
+            # Add selected lore entries
+            if selected_lore_ids:
+                lore_ids = [int(id.strip()) for id in selected_lore_ids.split(',') if id.strip()]
+                if lore_ids:
+                    lore_entries = LoreEntry.objects.filter(id__in=lore_ids, work=work)
+                    if lore_entries:
+                        formatted_context += "世界观条目：\n\n"
+                        for entry in lore_entries:
+                            formatted_context += f"【{entry.name}】\n{entry.description}\n\n"
+                        formatted_context += "---\n\n"
+
+            # Add chapters based on selection
+            # First, get the count of available previous chapters
+            available_previous_count = work.chapters.filter(order__lt=chapter.order).count()
+
+            previous_chapters = []
+            if chapter_selection == 'none':
+                # No previous chapters
+                previous_chapters = []
+            elif chapter_selection == 'all':
+                # Get all previous chapters (no duplicates, ordered by chapter order)
+                previous_chapters = work.chapters.filter(
+                    order__lt=chapter.order
+                ).order_by('order')
+            elif chapter_selection == 'custom':
+                # Get custom number of previous chapters (capped at available)
+                try:
+                    count = int(custom_chapter_count)
+                    count = min(max(0, count), available_previous_count)  # Cap at available chapters, allow 0
+                    if count > 0:
+                        previous_chapters = work.chapters.filter(
+                            order__lt=chapter.order
+                        ).order_by('-order')[:count]
+                        previous_chapters = reversed(list(previous_chapters))
+                    else:
+                        previous_chapters = []
+                except:
+                    count = 3
+                    previous_chapters = work.chapters.filter(
+                        order__lt=chapter.order
+                    ).order_by('-order')[:count]
+                    previous_chapters = reversed(list(previous_chapters))
+            else:  # 'past_3' (default)
+                # Get last 3 chapters (or fewer if not enough available)
+                count = min(3, available_previous_count)
+                previous_chapters = work.chapters.filter(
+                    order__lt=chapter.order
+                ).order_by('-order')[:count]
+                previous_chapters = reversed(list(previous_chapters))
+
+            if previous_chapters and len(list(previous_chapters)) > 0:
+                formatted_context += "前文章节：\n\n"
+                for ch in previous_chapters:
+                    formatted_context += f"第{ch.chapter_number}章《{ch.title}》\n\n{ch.content or '(空章节)'}\n\n---\n\n"
+
+            # Add current chapter content at the end
+            if chapter.content:
+                formatted_context += f"当前章节《{chapter.title}》全文：\n\n{chapter.content}\n\n---\n\n"
+
+            # Create AI service and start streaming
+            ai_service = AIService()
+
+            import asyncio
+            import threading
+            from queue import Queue
+
+            chunk_queue = Queue()
+            error_queue = Queue()
+
+            def run_in_thread():
+                try:
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+
+                    async def collect_chunks():
+                        async for chunk in ai_service.auto_edit_stream(selected_text, formatted_context, model, edit_requirement):
+                            chunk_queue.put(chunk)
+                        chunk_queue.put(None)  # End marker
+
+                    loop.run_until_complete(collect_chunks())
+                except Exception as e:
+                    error_queue.put(str(e))
+                    chunk_queue.put(None)
+                finally:
+                    loop.close()
+
+            thread = threading.Thread(target=run_in_thread)
+            thread.start()
+
+            yield f'data: {json.dumps({"type": "start", "message": "AI自动编辑开始"})}\n\n'
+
+            accumulated_text = ''
+            while True:
+                if not error_queue.empty():
+                    error = error_queue.get()
+                    yield f'data: {json.dumps({"type": "error", "message": f"AI自动编辑失败: {error}"})}\n\n'
+                    break
+
+                try:
+                    chunk = chunk_queue.get(timeout=1)
+                    if chunk is None:
+                        yield f'data: {json.dumps({"type": "end", "message": "AI自动编辑完成", "edited_text": accumulated_text})}\n\n'
+                        break
+
+                    accumulated_text += chunk
+                    yield f'data: {json.dumps({"type": "chunk", "content": chunk})}\n\n'
+
+                except:
+                    if not thread.is_alive():
+                        yield f'data: {json.dumps({"type": "end", "message": "AI自动编辑完成", "edited_text": accumulated_text})}\n\n'
+                        break
+
+            thread.join(timeout=5)
+
+        except Exception as e:
+            logger.error(f"Stream auto-edit error: {str(e)}")
+            yield f'data: {json.dumps({"type": "error", "message": f"AI自动编辑失败: {str(e)}"})}\n\n'
+
+    response = StreamingHttpResponse(
+        generate_stream(),
+        content_type='text/event-stream'
+    )
+    response['Cache-Control'] = 'no-cache'
+    response['X-Accel-Buffering'] = 'no'
+    response['Access-Control-Allow-Origin'] = '*'
+    return response
+
+
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def ai_auto_describe_entry(request):
@@ -548,21 +749,27 @@ def ai_auto_describe_entry(request):
     work = get_object_or_404(Work, id=work_id, author=request.user)
 
     try:
-        # 搜索包含条目名称的章节（前3章）
+        # 搜索包含条目名称的章节（前5章）
         from django.db.models import Q
         chapters_with_entry = work.chapters.filter(
             Q(content__icontains=entry_name) | Q(title__icontains=entry_name)
-        ).order_by('order')[:3]
+        ).order_by('order')[:5]
 
         if not chapters_with_entry:
             return Response({
-                'description': f'"{entry_name}" 尚未在故事中出现。'
+                'description': f'"{entry_name}" 尚未在故事中出现。',
+                'used_chapters': []
             })
 
-        # 构建上下文：章节内容
+        # 构建上下文：章节内容，并记录使用的章节
         context_parts = []
+        used_chapters_info = []
         for chapter in chapters_with_entry:
             context_parts.append(f"### 第{chapter.chapter_number}章《{chapter.title}》\n\n{chapter.content}")
+            used_chapters_info.append({
+                'chapter_number': chapter.chapter_number,
+                'title': chapter.title
+            })
 
         context_text = "\n\n---\n\n".join(context_parts)
 
@@ -593,7 +800,10 @@ def ai_auto_describe_entry(request):
 
         description = response["choices"][0]["message"]["content"]
 
-        return Response({'description': description})
+        return Response({
+            'description': description,
+            'used_chapters': used_chapters_info
+        })
 
     except Exception as e:
         logger.error(f"AI auto-describe entry error: {str(e)}")

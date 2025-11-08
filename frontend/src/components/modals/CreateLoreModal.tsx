@@ -26,6 +26,7 @@ export const CreateLoreModal: React.FC<CreateLoreModalProps> = ({
   const [description, setDescription] = useState('');
   const [triggers, setTriggers] = useState<string[]>(['']);
   const [isGeneratingDescription, setIsGeneratingDescription] = useState(false);
+  const [usedChapters, setUsedChapters] = useState<Array<{chapter_number: number, title: string}>>([]);
 
   const isEditMode = !!editEntry;
 
@@ -98,9 +99,11 @@ export const CreateLoreModal: React.FC<CreateLoreModalProps> = ({
     }
 
     setIsGeneratingDescription(true);
+    setUsedChapters([]); // Clear previous chapters
     try {
       const response = await aiApi.autoDescribeEntry(workId, name.trim());
       setDescription(response.data.description);
+      setUsedChapters(response.data.used_chapters || []);
     } catch (error) {
       console.error('Failed to generate description:', error);
       alert('生成描述失败，请稍后重试');
@@ -155,6 +158,28 @@ export const CreateLoreModal: React.FC<CreateLoreModalProps> = ({
                   {isGeneratingDescription ? '生成中...' : 'AI自动描述'}
                 </Button>
               </div>
+
+              {/* Display used chapters during/after generation */}
+              {(isGeneratingDescription || usedChapters.length > 0) && (
+                <div className="mb-2 p-2 bg-dark-bg rounded border border-dark-border">
+                  <p className="text-xs text-dark-text-muted">
+                    {isGeneratingDescription ? '正在使用' : '已使用'} 章节: {' '}
+                    {usedChapters.length > 0 ? (
+                      <span className="text-dark-text">
+                        {usedChapters.map((ch, idx) => (
+                          <span key={idx}>
+                            第{ch.chapter_number}章《{ch.title}》
+                            {idx < usedChapters.length - 1 ? ', ' : ''}
+                          </span>
+                        ))}
+                      </span>
+                    ) : (
+                      <span className="text-dark-text">查找包含"{name}"的章节...</span>
+                    )}
+                  </p>
+                </div>
+              )}
+
               <Textarea
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}

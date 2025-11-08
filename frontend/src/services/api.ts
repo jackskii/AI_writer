@@ -366,6 +366,9 @@ export const aiApi = {
     return eventSource;
   },
 
+  // Get auto-edit prefills
+  getPrefills: () => api.get<{ prefills: Record<string, string> }>('/ai/prefills/'),
+
   // Non-streaming version of auto-edit
   autoEdit: (workId: number, chapterId: number, selectedText: string) =>
     api.post<{ edited_text: string }>('/ai/auto-edit/', {
@@ -373,6 +376,98 @@ export const aiApi = {
       chapter_id: chapterId,
       selected_text: selectedText,
     }),
+
+  // Streaming version of auto edit
+  autoEditStream: (
+    workId: number,
+    chapterId: number,
+    selectedText: string,
+    context: {
+      chapterSelection: 'all' | 'past_3' | 'custom' | 'none';
+      customChapterCount?: number;
+      selectedLoreEntries: number[];
+      model: 'deepseek-chat' | 'deepseek-reasoner';
+      editRequirement?: string;
+    },
+    onChunk: (chunk: string) => void,
+    onStart?: () => void,
+    onEnd?: (editedText: string) => void,
+    onError?: (error: string) => void
+  ) => {
+    const params = new URLSearchParams({
+      work_id: workId.toString(),
+      chapter_id: chapterId.toString(),
+      selected_text: selectedText,
+      chapter_selection: context.chapterSelection,
+      model: context.model,
+    });
+
+    if (context.customChapterCount) {
+      params.append('custom_chapter_count', context.customChapterCount.toString());
+    }
+
+    if (context.selectedLoreEntries.length > 0) {
+      params.append('selected_lore_ids', context.selectedLoreEntries.join(','));
+    }
+
+    if (context.editRequirement) {
+      params.append('edit_requirement', context.editRequirement);
+    }
+
+    // Add token for authentication since EventSource can't send headers
+    const authStorage = localStorage.getItem('auth-storage');
+    if (authStorage) {
+      try {
+        const parsedStorage = JSON.parse(authStorage);
+        const token = parsedStorage?.state?.token;
+        if (token) {
+          params.append('token', token);
+        }
+      } catch (e) {
+        console.error('Failed to parse auth storage:', e);
+      }
+    }
+
+    const eventSource = new EventSource(`${API_BASE_URL}/ai/auto-edit/stream/?${params.toString()}`, {
+      withCredentials: true
+    });
+
+    eventSource.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+
+        switch (data.type) {
+          case 'start':
+            onStart?.();
+            break;
+          case 'chunk':
+            onChunk(data.content);
+            break;
+          case 'end':
+            onEnd?.(data.edited_text || '');
+            eventSource.close();
+            break;
+          case 'error':
+            onError?.(data.message);
+            eventSource.close();
+            break;
+        }
+      } catch (error) {
+        console.error('Error parsing SSE data:', error);
+        onError?.('Error parsing server response');
+        eventSource.close();
+      }
+    };
+
+    eventSource.onerror = (error) => {
+      console.error('EventSource error:', error);
+      onError?.('Connection error occurred');
+      eventSource.close();
+    };
+
+    // Return the EventSource so it can be closed manually if needed
+    return eventSource;
+  },
 
   // Streaming version of chat
   chatStream: (

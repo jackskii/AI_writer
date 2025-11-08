@@ -8,6 +8,7 @@ import { LoadingButton } from '../ui/Loading';
 import { useUIStore } from '../../stores/useUIStore';
 import { aiApi, notesApi, autoEditApi } from '../../services/api';
 import { DeleteNoteConfirmDialog } from '../modals/DeleteNoteConfirmDialog';
+import { AutoEditModal, type AutoEditContext } from '../modals/AutoEditModal';
 import type { Work, Chapter, Note, AutoEdit } from '../../types';
 
 interface EditorPanelProps {
@@ -43,6 +44,7 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
   const [selectedText, setSelectedText] = useState('');
   const [selectionStart, setSelectionStart] = useState(0);
   const [selectionEnd, setSelectionEnd] = useState(0);
+  const [cursorPosition, setCursorPosition] = useState(0);
 
   // Note-related states
   const [isCreatingNote, setIsCreatingNote] = useState(false);
@@ -69,6 +71,10 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
   const [selectedAutoEdit, setSelectedAutoEdit] = useState<AutoEdit | null>(null);
   const [showVersionPopup, setShowVersionPopup] = useState(false);
   const [versionPopupPosition, setVersionPopupPosition] = useState<{x: number, y: number} | null>(null);
+
+  // New auto edit modal states
+  const [showAutoEditModal, setShowAutoEditModal] = useState(false);
+  const [autoEditOriginalText, setAutoEditOriginalText] = useState('');
 
   const {
     isAISuggestLoading,
@@ -595,119 +601,107 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
     }
   };
 
-  // AI Auto-Edit for selected text
-  const handleAutoEdit = async () => {
-    if (isAutoEditLoading || !selectedText) return;
+  // AI Auto-Edit - opens modal (works with or without selection)
+  const handleAutoEdit = () => {
+    // If text is selected, use it. Otherwise, start with empty text for insertion
+    setAutoEditOriginalText(selectedText || '');
+    setShowAutoEditModal(true);
+  };
 
-    // Check if any auto-edit already exists in this chapter
-    if (autoEdits.size > 0) {
+  // Handle auto edit modal generate
+  const handleAutoEditGenerate = (
+    originalText: string,
+    context: AutoEditContext,
+    onChunk: (chunk: string) => void,
+    onEnd: () => void,
+    onError: (error: string) => void
+  ): EventSource | null => {
+    return aiApi.autoEditStream(
+      work.id,
+      chapter.id,
+      originalText,
+      context,
+      onChunk,
+      () => {
+        console.log('Auto edit stream started');
+      },
+      (editedText: string) => {
+        console.log('Auto edit stream completed');
+        onEnd();
+      },
+      (error: string) => {
+        console.error('Auto edit stream error:', error);
+        addNotification({
+          type: 'error',
+          message: `自动编辑失败: ${error}`
+        });
+        onError(error);
+      }
+    );
+  };
+
+  // Handle auto edit modal accept
+  const handleAutoEditAccept = (editedText: string) => {
+    // Set flag to prevent auto-adjustment
+    isManualUpdateRef.current = true;
+
+    let newContent: string;
+    if (selectedText) {
+      // Replace selected text
+      newContent = content.slice(0, selectionStart) + editedText + content.slice(selectionEnd);
+    } else {
+      // Insert at cursor position
+      newContent = content.slice(0, cursorPosition) + editedText + content.slice(cursorPosition);
+    }
+
+    onChange(newContent);
+
+    // Trigger immediate save after accepting auto edit
+    if (onSave) {
+      setTimeout(() => {
+        onSave();
+      }, 100);
+    }
+
+    // Update cursor position after insertion
+    if (editorRef.current) {
+      const newCursorPos = selectedText ? selectionStart + editedText.length : cursorPosition + editedText.length;
+      setTimeout(() => {
+        if (editorRef.current) {
+          editorRef.current.setSelectionRange(newCursorPos, newCursorPos);
+          editorRef.current.focus();
+        }
+      }, 0);
+    }
+
+    addNotification({
+      type: 'success',
+      message: selectedText ? '已接受编辑并保存' : '已插入文本并保存'
+    });
+  };
+
+  // Handle auto edit modal revert
+  const handleAutoEditRevert = (originalText: string) => {
+    // Only works when there's selected text to revert to
+    if (!selectedText) {
       addNotification({
         type: 'info',
-        message: '当前章节已有自动编辑，请先确认或还原现有编辑'
+        message: '没有原始文本可还原'
       });
       return;
     }
 
-    try {
-      setIsAutoEditLoading(true);
-      console.log('Starting auto-edit for text:', selectedText.slice(0, 50));
+    // Set flag to prevent auto-adjustment
+    isManualUpdateRef.current = true;
 
-      addNotification({
-        type: 'info',
-        message: 'AI自动编辑开始...'
-      });
+    // Replace with original text
+    const newContent = content.slice(0, selectionStart) + originalText + content.slice(selectionEnd);
+    onChange(newContent);
 
-      // Call non-streaming auto-edit API
-      const response = await aiApi.autoEdit(work.id, chapter.id, selectedText);
-      const finalEditedText = response.data.edited_text;
-
-      console.log('Auto-edit completed');
-
-      // Create AutoEdit record in backend (without versions first)
-      try {
-        console.log('Creating AutoEdit record...');
-
-        // Step 1: Create the AutoEdit record
-        const createResponse = await autoEditApi.create({
-          work: work.id,
-          chapter: chapter.id,
-          text_start_position: selectionStart,
-          text_end_position: selectionEnd,
-          original_text: selectedText,
-          active_version_index: 0, // Start with original (version 0)
-        });
-
-        console.log('AutoEdit created:', createResponse.data);
-        const createdAutoEdit = createResponse.data;
-
-        // Step 2: Add the first edited version
-        console.log('Adding version with text length:', finalEditedText.length);
-        const versionResponse = await autoEditApi.addVersion(
-          createdAutoEdit.id,
-          finalEditedText
-        );
-
-        console.log('Version added:', versionResponse.data);
-        const updatedAutoEdit = versionResponse.data;
-
-        // Step 3: Update the AutoEdit's end position to match the edited text length
-        // (Since we switched to version 1 which has a different length than original)
-        const newEndPosition = selectionStart + finalEditedText.length;
-        console.log('Updating end position from', selectionEnd, 'to', newEndPosition);
-
-        await autoEditApi.update(updatedAutoEdit.id, {
-          text_end_position: newEndPosition
-        });
-
-        // Set flag to prevent auto-adjustment
-        isManualUpdateRef.current = true;
-
-        // Replace text in editor
-        const newContent = content.slice(0, selectionStart) + finalEditedText + content.slice(selectionEnd);
-        onChange(newContent);
-
-        console.log('Replaced text with auto-edit:', updatedAutoEdit.id);
-
-        // Track the auto-edit with updated position
-        setAutoEdits(prev => new Map(prev).set(updatedAutoEdit.id, updatedAutoEdit));
-        setAutoEditPositions(prev => new Map(prev).set(updatedAutoEdit.id, {
-          start: selectionStart,
-          end: newEndPosition
-        }));
-
-        // Invalidate queries to refresh data
-        queryClient.invalidateQueries({ queryKey: ['autoEdits', chapter.id] });
-
-        addNotification({
-          type: 'success',
-          message: 'AI自动编辑完成'
-        });
-
-      } catch (error: unknown) {
-        console.error('Failed to save auto-edit:', error);
-        if (isAxiosError(error) && error.response?.data) {
-          console.error('Error response:', error.response.data);
-        }
-        addNotification({
-          type: 'error',
-          message: `保存编辑失败: ${
-            isAxiosError(error)
-              ? error.response?.data?.detail || error.message
-              : '未知错误'
-          }`
-        });
-      }
-
-      setIsAutoEditLoading(false);
-
-    } catch (error) {
-      console.error('Auto-edit error:', error);
-      setIsAutoEditLoading(false);
-      addNotification({
-        type: 'error',
-        message: 'AI自动编辑失败，请稍后重试'
-      });
-    }
+    addNotification({
+      type: 'success',
+      message: '已还原到原始文本'
+    });
   };
 
   // Handle version switching
@@ -1404,9 +1398,41 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
               } else {
                 setSelectedText('');
                 setSelectedTextForNote('');
+                setCursorPosition(start); // Track cursor position when nothing is selected
               }
             }}
+            onClick={(e) => {
+              const target = e.target as HTMLTextAreaElement;
+              setCursorPosition(target.selectionStart);
+              handleEditorClick(e);
+            }}
+            onPaste={(e) => {
+              // Use requestAnimationFrame to ensure paste operation completes
+              // before triggering any save operations
+              requestAnimationFrame(() => {
+                const target = e.currentTarget;
+                const completeValue = target.value;
+
+                // Trigger onChange with complete pasted content
+                // This ensures auto-save gets the full text
+                onChange(completeValue);
+
+                // If onSave exists, trigger immediate save to prevent data loss
+                if (onSave) {
+                  // Small delay to allow state to update
+                  setTimeout(() => {
+                    onSave();
+                  }, 100);
+                }
+              });
+            }}
             onKeyDown={(e) => {
+              // Update cursor position on arrow keys and typing
+              const target = e.target as HTMLTextAreaElement;
+              setTimeout(() => {
+                setCursorPosition(target.selectionStart);
+              }, 0);
+
               // Handle Ctrl+S (Windows/Linux) or Cmd+S (Mac) to save
               if ((e.ctrlKey || e.metaKey) && e.key === 's') {
                 e.preventDefault(); // Prevent browser's default save dialog
@@ -1419,7 +1445,6 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
                 }
               }
             }}
-            onClick={handleEditorClick}
             className="w-full h-full bg-black text-white border-none outline-none resize-none writing-textarea"
             style={{
               fontFamily: "'Source Han Serif CN', serif",
@@ -1469,20 +1494,20 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
                     <Lightbulb size={14} />
                     获取建议
                   </LoadingButton>
-                  <LoadingButton
-                    isLoading={isAutoEditLoading}
-                    onClick={handleAutoEdit}
-                    disabled={autoEdits.size > 0}
-                    className="flex items-center gap-1 px-3 py-1 text-xs"
-                  >
-                    <Wand2 size={14} />
-                    自动编辑
-                    {autoEdits.size > 0 && <span className="text-xs">(已有编辑)</span>}
-                  </LoadingButton>
                 </>
               ) : (
                 <div className="h-[32px]"></div>
               )}
+
+              {/* Auto Edit button - always in same position, same text */}
+              <LoadingButton
+                isLoading={isAutoEditLoading}
+                onClick={handleAutoEdit}
+                className="flex items-center gap-1 px-3 py-1 text-xs"
+              >
+                <Wand2 size={14} />
+                自动编辑
+              </LoadingButton>
             </div>
           </div>
         </div>
@@ -1602,6 +1627,18 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
           </div>
         </div>
       )}
+
+      {/* New Auto Edit Modal */}
+      <AutoEditModal
+        isOpen={showAutoEditModal}
+        onClose={() => setShowAutoEditModal(false)}
+        originalText={autoEditOriginalText}
+        work={work}
+        chapter={chapter}
+        onAccept={handleAutoEditAccept}
+        onRevert={handleAutoEditRevert}
+        onGenerateEdit={handleAutoEditGenerate}
+      />
       </div>
     </>
   );

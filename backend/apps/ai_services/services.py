@@ -488,6 +488,29 @@ class AIService:
             logger.error(f"Auto-edit error: {str(e)}", exc_info=True)
             raise Exception(f"{prompts.ERROR_AUTO_EDIT_FAILED}: {str(e)}")
 
+    async def auto_edit_stream(self, selected_text: str, context: str = "", model: str = "deepseek-chat", edit_requirement: str = None) -> AsyncGenerator[str, None]:
+        """AI auto-edit function - streaming version"""
+        logger.debug(f"Starting AI auto-edit stream for text: {selected_text[:50]}... with model: {model}")
+
+        try:
+            # Format the request with context and edit requirement
+            user_message = prompts.format_auto_edit_request(context, selected_text, edit_requirement)
+
+            # Build message with system prompt and context + selected text
+            messages = [
+                {"role": "system", "content": prompts.AUTO_EDIT_SYSTEM_PROMPT},
+                {"role": "user", "content": user_message}
+            ]
+
+            logger.debug(f"Sending streaming auto-edit request to DeepSeek API with model: {model}")
+
+            async for chunk in self.deepseek.chat_completion_stream(messages, model=model):
+                yield chunk
+
+        except Exception as e:
+            logger.error(f"Auto-edit stream error: {str(e)}", exc_info=True)
+            raise Exception(f"{prompts.ERROR_AUTO_EDIT_FAILED}: {str(e)}")
+
 
 # Sync wrapper for use in Django views
 from asgiref.sync import sync_to_async

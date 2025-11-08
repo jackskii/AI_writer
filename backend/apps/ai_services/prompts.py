@@ -46,6 +46,21 @@ AUTO_EDIT_SYSTEM_PROMPT = """你是一名写作助手，将根据用户的指令
 
 
 # =============================================================================
+# Auto Edit Prefill Options
+# =============================================================================
+
+# Prefill prompts mapping
+AUTO_EDIT_PREFILLS = {
+    '增加细节': '给这段内容增加细节，比如补充角色台词，增加角色的对话和行为描述',
+    '润色': '润色这段内容，使其更加流畅自然，改善用词和句式结构',
+    '修改': '按照我的要求修改这段内容:\n'
+}
+
+# Default editing requirement
+AUTO_EDIT_DEFAULT_REQUIREMENT = AUTO_EDIT_PREFILLS['修改']
+
+
+# =============================================================================
 # AI Request Templates
 # =============================================================================
 
@@ -89,7 +104,8 @@ def format_suggest_request(
 
 def format_auto_edit_request(
     context_info: str,
-    selected_text: str
+    selected_text: str,
+    edit_requirement: str = None
 ) -> str:
     """
     Format an auto-edit request.
@@ -97,14 +113,26 @@ def format_auto_edit_request(
     Args:
         context_info: Story context information (synopsis, lore, summaries)
         selected_text: The text to be edited
+        edit_requirement: Optional editing requirement/instruction (can be a key in AUTO_EDIT_PREFILLS or custom text)
 
     Returns:
         Formatted request string
     """
+    # If edit_requirement is a key in AUTO_EDIT_PREFILLS, use the mapped value
+    # Otherwise use it as-is (custom text) or fall back to default
+    if not edit_requirement:
+        requirement_text = AUTO_EDIT_DEFAULT_REQUIREMENT
+    elif edit_requirement in AUTO_EDIT_PREFILLS:
+        requirement_text = AUTO_EDIT_PREFILLS[edit_requirement]
+    else:
+        requirement_text = edit_requirement
+
     return f"""{context_info}
 
 需要修改的片段：
-{selected_text}"""
+{selected_text}
+
+指引：{requirement_text}"""
 
 
 # =============================================================================
