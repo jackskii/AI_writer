@@ -246,7 +246,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ work, chapter }) => {
         if (history.length > 0) {
           setMessages(history);
         } else {
-          // Show initial greeting if no history
+          // Show initial greeting if no history (ephemeral - not saved to backend)
           const greeting: ChatMessage = {
             id: 'greeting',
             role: 'assistant',
@@ -254,8 +254,6 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ work, chapter }) => {
             timestamp: new Date().toISOString()
           };
           setMessages([greeting]);
-          // Save the greeting to backend
-          await chatApi.saveMessage(work.id, chapter.id, 'assistant', greeting.content);
         }
       } catch (error) {
         console.error('Failed to load chat history:', error);
