@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, Save, MessageCircle } from 'lucide-react';
+import { ArrowLeft, Save, MessageCircle, Settings, Palette } from 'lucide-react';
 import { worksApi, chaptersApi } from '../services/api';
 import { useWorkStore } from '../stores/useWorkStore';
 import { useUIStore } from '../stores/useUIStore';
@@ -13,31 +13,37 @@ import { UserMenu } from '../components/ui/UserMenu';
 import { EditorPanel } from '../components/editor/EditorPanel';
 import { ChatPanel } from '../components/editor/ChatPanel';
 import { AutoSaveIndicator } from '../components/editor/AutoSaveIndicator';
+import { SettingsModal } from '../components/modals/SettingsModal';
+import { StyleManagerModal } from '../components/modals/StyleManagerModal';
+import { CreateStyleModal } from '../components/modals/CreateStyleModal';
 import type { Work } from '../types';
 
 export const EditorPage: React.FC = () => {
   const { workId, chapterId } = useParams<{ workId: string; chapterId: string }>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  
-  const { 
-    currentWork, 
-    currentChapter, 
-    setCurrentWork, 
+
+  const {
+    currentWork,
+    currentChapter,
+    setCurrentWork,
     setCurrentChapter,
-    updateChapter 
+    updateChapter
   } = useWorkStore();
-  
+
   const {
     isAutoSaving,
     setAutoSaving,
     setLastSaveTime
   } = useUIStore();
-  
+
   // Use local state for editor content instead of problematic Zustand store
   const [editorContent, setEditorContent] = useState('');
   const [isEditingChapterTitle, setIsEditingChapterTitle] = useState(false);
   const [chapterTitleInput, setChapterTitleInput] = useState('');
+  const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
+  const [isStyleManagerOpen, setIsStyleManagerOpen] = useState(false);
+  const [isCreateStyleOpen, setIsCreateStyleOpen] = useState(false);
   
   const lastSaveContentRef = useRef('');
   const autoSaveTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -279,6 +285,24 @@ export const EditorPage: React.FC = () => {
               <Save size={16} />
               {isAutoSaving ? '保存中...' : '保存'}
             </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setIsStyleManagerOpen(true)}
+              className="flex items-center gap-2"
+              title="风格"
+            >
+              <Palette size={16} />
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setIsSettingsModalOpen(true)}
+              className="flex items-center gap-2"
+              title="设置"
+            >
+              <Settings size={16} />
+            </Button>
             <UserMenu iconOnly />
           </div>
         </div>
@@ -315,6 +339,28 @@ export const EditorPage: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* Settings Modal */}
+      <SettingsModal
+        isOpen={isSettingsModalOpen}
+        onClose={() => setIsSettingsModalOpen(false)}
+      />
+
+      {/* Style Manager Modal */}
+      <StyleManagerModal
+        isOpen={isStyleManagerOpen}
+        onClose={() => setIsStyleManagerOpen(false)}
+        onCreateNew={() => {
+          setIsStyleManagerOpen(false);
+          setIsCreateStyleOpen(true);
+        }}
+      />
+
+      {/* Create Style Modal */}
+      <CreateStyleModal
+        isOpen={isCreateStyleOpen}
+        onClose={() => setIsCreateStyleOpen(false)}
+      />
     </div>
   );
 };

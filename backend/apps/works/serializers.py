@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Work, Act, Chapter, LoreEntry
+from .models import Work, Act, Chapter, LoreEntry, WritingStyle
 
 
 class ActSerializer(serializers.ModelSerializer):
@@ -56,7 +56,7 @@ class WorkDetailSerializer(WorkSerializer):
 
 class LoreEntrySerializer(serializers.ModelSerializer):
     all_triggers = serializers.ReadOnlyField()
-    
+
     class Meta:
         model = LoreEntry
         fields = [
@@ -65,3 +65,13 @@ class LoreEntrySerializer(serializers.ModelSerializer):
             'created_at', 'updated_at'
         ]
         read_only_fields = ['work', 'created_at', 'updated_at']
+
+
+class WritingStyleSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = WritingStyle
+        fields = [
+            'id', 'name', 'style_data', 'analysis_result',
+            'created_at', 'updated_at'
+        ]
+        read_only_fields = ['created_at', 'updated_at']

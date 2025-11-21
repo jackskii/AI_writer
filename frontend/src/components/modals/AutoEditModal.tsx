@@ -3,7 +3,7 @@ import { X, ChevronLeft, ChevronRight, Square, Wand2, Check, RotateCcw, Settings
 import { Button } from '../ui/Button';
 import { LoadingButton } from '../ui/Loading';
 import { Textarea } from '../ui/Input';
-import type { Work, Chapter, LoreEntry } from '../../types';
+import type { Work, Chapter, LoreEntry, WritingStyle } from '../../types';
 
 interface AutoEditModalProps {
   isOpen: boolean;
@@ -28,6 +28,7 @@ export interface AutoEditContext {
   selectedLoreEntries: number[]; // IDs of selected lore entries
   model: 'deepseek-chat' | 'deepseek-reasoner';
   editRequirement?: string; // Editing requirement/instruction
+  styleId?: number; // Optional writing style ID
 }
 
 interface AutoEditVersion {
@@ -72,6 +73,10 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
   const [prefills, setPrefills] = useState<Record<string, string>>({});
   const [isLoadingPrefills, setIsLoadingPrefills] = useState(true);
 
+  // Writing styles
+  const [styles, setStyles] = useState<WritingStyle[]>([]);
+  const [selectedStyleId, setSelectedStyleId] = useState<number | null>(null);
+
   // Load prefills from backend on mount
   useEffect(() => {
     const loadPrefills = async () => {
@@ -91,6 +96,25 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
     };
     loadPrefills();
   }, []);
+
+  // Load writing styles when modal opens
+  useEffect(() => {
+    if (isOpen) {
+      const loadStyles = async () => {
+        try {
+          const { stylesApi } = await import('../../services/api');
+          const response = await stylesApi.list();
+          // Handle both paginated and non-paginated responses
+          const stylesList = Array.isArray(response.data) ? response.data : (response.data?.results || []);
+          setStyles(stylesList);
+        } catch (error) {
+          console.error('Failed to load styles:', error);
+          setStyles([]);
+        }
+      };
+      loadStyles();
+    }
+  }, [isOpen]);
 
   // Reset state when modal opens
   useEffect(() => {
@@ -169,7 +193,8 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
       customChapterCount: chapterSelection === 'custom' ? customChapterCount : undefined,
       selectedLoreEntries: selectedLoreIds,
       model: selectedModel,
-      editRequirement: editRequirement.trim() || '修改'
+      editRequirement: editRequirement.trim() || '修改',
+      styleId: selectedStyleId || undefined
     };
 
     const eventSource = onGenerateEdit(
@@ -327,6 +352,25 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
           >
             <X size={24} />
           </button>
+        </div>
+
+        {/* Writing Style Selector */}
+        <div className="px-6 py-3 border-b border-dark-border bg-dark-bg flex-shrink-0">
+          <label className="flex items-center gap-3">
+            <span className="text-sm font-medium text-dark-text">写作风格:</span>
+            <select
+              value={selectedStyleId || ''}
+              onChange={(e) => setSelectedStyleId(e.target.value ? parseInt(e.target.value) : null)}
+              className="flex-1 bg-dark-surface border border-dark-border rounded px-3 py-1.5 text-sm text-dark-text focus:outline-none focus:ring-2 focus:ring-dark-primary"
+            >
+              <option value="">无风格 (默认)</option>
+              {styles.map((style) => (
+                <option key={style.id} value={style.id}>
+                  {style.name}
+                </option>
+              ))}
+            </select>
+          </label>
         </div>
 
         {/* Content */}

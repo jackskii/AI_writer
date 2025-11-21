@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, Plus, Edit3, Settings, BookOpen, Layers, Edit, Trash2 } from 'lucide-react';
+import { ArrowLeft, Plus, Edit3, Settings, Palette, BookOpen, Layers, Edit, Trash2 } from 'lucide-react';
 import { worksApi, actsApi, chaptersApi, loreApi } from '../services/api';
 import { useWorkStore } from '../stores/useWorkStore';
 import { Button } from '../components/ui/Button';
@@ -13,6 +13,8 @@ import { UserMenu } from '../components/ui/UserMenu';
 import { Textarea } from '../components/ui/Input';
 import { CreateLoreModal } from '../components/modals/CreateLoreModal';
 import { SettingsModal } from '../components/modals/SettingsModal';
+import { StyleManagerModal } from '../components/modals/StyleManagerModal';
+import { CreateStyleModal } from '../components/modals/CreateStyleModal';
 import { SummaryModal } from '../components/modals/SummaryModal';
 import { DeleteConfirmDialog } from '../components/modals/DeleteConfirmDialog';
 import { DeleteLoreConfirmDialog } from '../components/modals/DeleteLoreConfirmDialog';
@@ -37,6 +39,8 @@ export const WorkDetailPage: React.FC = () => {
   const [editingLoreEntry, setEditingLoreEntry] = useState<LoreEntry | null>(null);
   const [deletingLoreEntry, setDeletingLoreEntry] = useState<LoreEntry | null>(null);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
+  const [isStyleManagerOpen, setIsStyleManagerOpen] = useState(false);
+  const [isCreateStyleOpen, setIsCreateStyleOpen] = useState(false);
   const [summaryModalChapter, setSummaryModalChapter] = useState<Chapter | null>(null);
   const [deleteModalChapter, setDeleteModalChapter] = useState<Chapter | null>(null);
   const [editActNameModal, setEditActNameModal] = useState<{ act: number; currentName?: string } | null>(null);
@@ -407,6 +411,15 @@ export const WorkDetailPage: React.FC = () => {
               <Button
                 variant="outline"
                 size="sm"
+                onClick={() => setIsStyleManagerOpen(true)}
+                className="flex items-center gap-2"
+              >
+                <Palette size={16} />
+                风格
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
                 onClick={() => setIsSettingsModalOpen(true)}
                 className="flex items-center gap-2"
               >
@@ -664,6 +677,20 @@ export const WorkDetailPage: React.FC = () => {
       <SettingsModal
         isOpen={isSettingsModalOpen}
         onClose={() => setIsSettingsModalOpen(false)}
+      />
+
+      <StyleManagerModal
+        isOpen={isStyleManagerOpen}
+        onClose={() => setIsStyleManagerOpen(false)}
+        onCreateNew={() => {
+          setIsStyleManagerOpen(false);
+          setIsCreateStyleOpen(true);
+        }}
+      />
+
+      <CreateStyleModal
+        isOpen={isCreateStyleOpen}
+        onClose={() => setIsCreateStyleOpen(false)}
       />
 
       <SummaryModal

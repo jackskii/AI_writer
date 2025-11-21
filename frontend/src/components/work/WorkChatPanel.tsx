@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Send, Bot, User, Square } from 'lucide-react';
+import { Send, Bot, User, Square, Settings } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { aiApi, chatApi } from '../../services/api';
 import { Button } from '../ui/Button';
@@ -10,11 +10,15 @@ interface WorkChatPanelProps {
   work: Work;
 }
 
+type AIModel = 'deepseek-chat' | 'deepseek-reasoner';
+
 export const WorkChatPanel: React.FC<WorkChatPanelProps> = ({ work }) => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputMessage, setInputMessage] = useState('');
   const [isStreamingChat, setIsStreamingChat] = useState(false);
   const [streamingMessage, setStreamingMessage] = useState('');
+  const [selectedModel, setSelectedModel] = useState<AIModel>('deepseek-chat');
+  const [showModelSelector, setShowModelSelector] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const streamEventSourceRef = useRef<EventSource | null>(null);
@@ -118,7 +122,8 @@ export const WorkChatPanel: React.FC<WorkChatPanelProps> = ({ work }) => {
             timestamp: new Date().toISOString(),
           };
           setMessages((prev) => [...prev, fallback]);
-        }
+        },
+        selectedModel
       );
 
       streamEventSourceRef.current = eventSource;
@@ -242,6 +247,56 @@ export const WorkChatPanel: React.FC<WorkChatPanelProps> = ({ work }) => {
             <p className="text-xs text-dark-text-muted mt-1">
               基于作品大纲、世界观与章节摘要提供总体建议
             </p>
+          </div>
+          <div className="relative">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setShowModelSelector(!showModelSelector)}
+              className="flex items-center gap-1 text-xs text-dark-text-muted hover:text-dark-text"
+            >
+              <Settings size={14} />
+              <span>{selectedModel === 'deepseek-chat' ? '标准模式' : '推理模式'}</span>
+            </Button>
+
+            {/* Model Selector Dropdown */}
+            {showModelSelector && (
+              <div className="absolute right-0 top-full mt-1 w-48 bg-dark-surface border border-dark-border rounded-lg shadow-lg z-50">
+                <div className="p-2 border-b border-dark-border">
+                  <div className="text-xs font-semibold text-dark-text">选择AI模型</div>
+                </div>
+                <div className="p-1">
+                  <button
+                    onClick={() => {
+                      setSelectedModel('deepseek-chat');
+                      setShowModelSelector(false);
+                    }}
+                    className={`w-full text-left px-3 py-2 text-sm rounded transition-colors ${
+                      selectedModel === 'deepseek-chat'
+                        ? 'bg-dark-primary text-white'
+                        : 'text-dark-text hover:bg-dark-bg'
+                    }`}
+                  >
+                    <div className="font-medium">标准模式</div>
+                    <div className="text-xs opacity-75">deepseek-chat</div>
+                  </button>
+                  <button
+                    onClick={() => {
+                      setSelectedModel('deepseek-reasoner');
+                      setShowModelSelector(false);
+                    }}
+                    className={`w-full text-left px-3 py-2 text-sm rounded transition-colors ${
+                      selectedModel === 'deepseek-reasoner'
+                        ? 'bg-dark-primary text-white'
+                        : 'text-dark-text hover:bg-dark-bg'
+                    }`}
+                  >
+                    <div className="font-medium">推理模式</div>
+                    <div className="text-xs opacity-75">deepseek-reasoner</div>
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>

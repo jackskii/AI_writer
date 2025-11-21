@@ -425,11 +425,14 @@ class AIService:
         context: Dict,
         user_message: str,
         chat_history: List[Dict] = None,
-        chapter_id: int = None
+        chapter_id: int = None,
+        model: str = None
     ) -> AsyncGenerator[str, None]:
         """AI chat function - streaming version with chat history support"""
+        # Use provided model or default to prompts.CHAT_MODEL
+        model = model or prompts.CHAT_MODEL
         scope = context.get('context_scope', 'chapter')
-        logger.debug(f"Starting AI chat stream for scope {scope} (chapter {chapter_id}): {user_message[:50]}...")
+        logger.debug(f"Starting AI chat stream for scope {scope} (chapter {chapter_id}) with model {model}: {user_message[:50]}...")
 
         try:
             logger.debug(f"Using provided context with {len(context.get('lore_entries', []))} lore entries")
@@ -456,9 +459,9 @@ class AIService:
             # Add current user message
             messages.append({"role": "user", "content": user_message})
 
-            logger.debug(f"Sending {len(messages)} messages to DeepSeek API for streaming")
+            logger.debug(f"Sending {len(messages)} messages to DeepSeek API for streaming with model {model}")
 
-            async for chunk in self.deepseek.chat_completion_stream(messages, model=prompts.CHAT_MODEL):
+            async for chunk in self.deepseek.chat_completion_stream(messages, model=model):
                 yield chunk
 
         except Exception as e:
@@ -510,6 +513,109 @@ class AIService:
         except Exception as e:
             logger.error(f"Auto-edit stream error: {str(e)}", exc_info=True)
             raise Exception(f"{prompts.ERROR_AUTO_EDIT_FAILED}: {str(e)}")
+
+    async def analyze_writing_style(self, text_sample: str) -> Dict:
+        """分析文本样本的写作风格 - 使用deepseek-reasoner模型"""
+        logger.debug(f"Starting writing style analysis for text of length: {len(text_sample)}")
+
+        try:
+            # Construct analysis prompt with strict JSON schema enforcement
+            analysis_prompt = f"""请深入分析以下文本的写作风格特点，从以下维度进行详细分析：
+
+1. **句式特点**：分析句子长度、结构复杂度、特殊句式的使用
+2. **词汇风格**：分析用词特点、专业术语、口语/书面语倾向
+3. **节奏韵律**：分析叙述节奏、段落长度、停顿和起伏
+4. **对话风格**：分析对话的自然度、个性化程度、标点使用
+5. **描写手法**：分析描写的详略、感官描写、修辞手法
+
+每个维度需要包含：
+- 详细描述（100-200字）
+- 2-3个最能体现该特点的示例句子（从原文中摘取）
+
+文本内容：
+{text_sample}
+
+重要：必须返回完整的JSON，包含所有5个维度（句式特点、词汇风格、节奏韵律、对话风格、描写手法）。每个维度都必须有name、description和examples字段。
+
+请严格按照以下JSON格式返回：
+{{
+  "perspectives": [
+    {{
+      "name": "句式特点",
+      "description": "详细描述...",
+      "examples": ["例句1", "例句2", "例句3"]
+    }},
+    {{
+      "name": "词汇风格",
+      "description": "详细描述...",
+      "examples": ["例句1", "例句2", "例句3"]
+    }},
+    {{
+      "name": "节奏韵律",
+      "description": "详细描述...",
+      "examples": ["例句1", "例句2", "例句3"]
+    }},
+    {{
+      "name": "对话风格",
+      "description": "详细描述...",
+      "examples": ["例句1", "例句2", "例句3"]
+    }},
+    {{
+      "name": "描写手法",
+      "description": "详细描述...",
+      "examples": ["例句1", "例句2", "例句3"]
+    }}
+  ]
+}}"""
+
+            messages = [
+                {"role": "user", "content": analysis_prompt}
+            ]
+
+            logger.debug("Sending style analysis request to DeepSeek API with deepseek-reasoner model")
+
+            # Use deepseek-reasoner model for analysis with JSON response format
+            # Set max_tokens to 64000 to ensure complete output
+            response = await self.deepseek.chat_completion(
+                messages,
+                model="deepseek-reasoner",
+                stream=False,
+                max_tokens=64000,
+                response_format={"type": "json_object"}
+            )
+
+            # Extract JSON from response
+            content = response["choices"][0]["message"]["content"]
+
+            # Parse JSON (handle case where reasoning is included)
+            # If content has reasoning sections, extract just the JSON part
+            if "【回答】" in content:
+                # Extract content after 【回答】
+                json_part = content.split("【回答】")[-1].strip()
+            else:
+                json_part = content
+
+            try:
+                analysis_result = json.loads(json_part)
+                logger.debug(f"Successfully parsed analysis result with {len(analysis_result.get('perspectives', []))} perspectives")
+                return analysis_result
+            except json.JSONDecodeError as json_err:
+                logger.error(f"Failed to parse JSON from AI response: {json_err}")
+                logger.error(f"Response content: {content[:500]}")
+                # Return a fallback structure
+                return {
+                    "perspectives": [
+                        {
+                            "name": "分析结果",
+                            "description": content,
+                            "examples": []
+                        }
+                    ]
+                }
+
+        except Exception as e:
+            logger.error(f"Writing style analysis error: {str(e)}", exc_info=True)
+            raise Exception(f"写作风格分析失败: {str(e)}")
 
 
 # Sync wrapper for use in Django views

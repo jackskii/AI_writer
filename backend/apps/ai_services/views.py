@@ -95,10 +95,11 @@ def ai_chat_stream(request):
         )
     else:
         user = request.user
-        
+
     work_id = request.GET.get('work_id')
     chapter_id = request.GET.get('chapter_id')
     message = request.GET.get('message')
+    model = request.GET.get('model', 'deepseek-chat')  # Get model parameter, default to deepseek-chat
     
     if not all([work_id, chapter_id, message]):
         return HttpResponse(
@@ -153,7 +154,7 @@ def ai_chat_stream(request):
                     asyncio.set_event_loop(loop)
                     
                     async def collect_chunks():
-                        async for chunk in ai_service.chat_with_ai_stream(context, message, chat_history, chapter.id):
+                        async for chunk in ai_service.chat_with_ai_stream(context, message, chat_history, chapter.id, model):
                             chunk_queue.put(chunk)
                         chunk_queue.put(None)  # 结束标记
                     
@@ -250,6 +251,7 @@ def ai_work_chat_stream(request):
 
     work_id = request.GET.get('work_id')
     message = request.GET.get('message')
+    model = request.GET.get('model', 'deepseek-chat')  # Get model parameter, default to deepseek-chat
 
     if not all([work_id, message]):
         return HttpResponse(
@@ -298,7 +300,7 @@ def ai_work_chat_stream(request):
                     asyncio.set_event_loop(loop)
 
                     async def collect_chunks():
-                        async for chunk in ai_service.chat_with_ai_stream(context, message, chat_history):
+                        async for chunk in ai_service.chat_with_ai_stream(context, message, chat_history, None, model):
                             chunk_queue.put(chunk)
                         chunk_queue.put(None)
 
@@ -584,6 +586,7 @@ def ai_auto_edit_stream(request):
     selected_lore_ids = request.GET.get('selected_lore_ids', '')  # Comma-separated IDs
     model = request.GET.get('model', 'deepseek-chat')  # Model selection
     edit_requirement = request.GET.get('edit_requirement', '')  # Editing guide/requirement
+    style_id = request.GET.get('style_id', '')  # Optional writing style ID
 
     if not all([selected_text, work_id, chapter_id]):
         return HttpResponse(
@@ -599,6 +602,16 @@ def ai_auto_edit_stream(request):
         try:
             # Build context based on user selection
             formatted_context = ""
+
+            # Add writing style if selected
+            if style_id:
+                try:
+                    from apps.works.models import WritingStyle
+                    style = WritingStyle.objects.get(id=int(style_id), user=user)
+                    formatted_context += f"写作风格参考：\n\n{style.style_data}\n\n---\n\n"
+                except (WritingStyle.DoesNotExist, ValueError):
+                    # Style not found or invalid ID, continue without it
+                    pass
 
             # Add synopsis
             if work.synopsis:

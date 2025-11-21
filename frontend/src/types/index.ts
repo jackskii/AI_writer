@@ -115,3 +115,20 @@ export interface AIContext {
   currentChapterContent: string;
   guide?: string;
 }
+
+export interface WritingStylePerspective {
+  name: string;
+  description: string;
+  examples: string[];
+}
+
+export interface WritingStyle {
+  id: number;
+  name: string;
+  style_data: string;
+  analysis_result?: {
+    perspectives: WritingStylePerspective[];
+  };
+  created_at: string;
+  updated_at: string;
+}

@@ -1,11 +1,12 @@
 from rest_framework.routers import DefaultRouter
 from django.urls import path, include
-from .views import WorkViewSet, ActViewSet, ChapterViewSet, LoreEntryViewSet
+from .views import WorkViewSet, ActViewSet, ChapterViewSet, LoreEntryViewSet, WritingStyleViewSet
 
 # 主路由器
 router = DefaultRouter()
 router.register(r'works', WorkViewSet, basename='works')
 router.register(r'works/(?P<work_pk>\d+)/acts', ActViewSet, basename='work-acts')
+router.register(r'styles', WritingStyleViewSet, basename='styles')  # User-global styles
 
 # 简单的章节和世界观路由 (TODO: 后续改为嵌套路由)
 urlpatterns = [

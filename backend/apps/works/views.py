@@ -4,8 +4,8 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
-from .models import Work, Act, Chapter, LoreEntry
-from .serializers import WorkSerializer, WorkDetailSerializer, ActSerializer, ChapterSerializer, LoreEntrySerializer
+from .models import Work, Act, Chapter, LoreEntry, WritingStyle
+from .serializers import WorkSerializer, WorkDetailSerializer, ActSerializer, ChapterSerializer, LoreEntrySerializer, WritingStyleSerializer
 
 
 class WorkViewSet(viewsets.ModelViewSet):
@@ -182,3 +182,90 @@ class LoreEntryViewSet(viewsets.ModelViewSet):
         work_id = self.kwargs.get('work_pk')
         work = get_object_or_404(Work, id=work_id, author=self.request.user)
         serializer.save(work=work)
+
+
+class WritingStyleViewSet(viewsets.ModelViewSet):
+    """用户全局写作风格管理"""
+    serializer_class = WritingStyleSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        # Return only styles belonging to the current user
+        return WritingStyle.objects.filter(user=self.request.user)
+
+    def perform_create(self, serializer):
+        # Automatically set the user to the current user
+        serializer.save(user=self.request.user)
+
+    @action(detail=False, methods=['post'])
+    def analyze(self, request):
+        """分析文本样本并生成写作风格"""
+        from apps.ai_services.services import AIService, run_async_ai_task
+
+        text_sample = request.data.get('text')
+        name = request.data.get('name', '未命名风格')
+
+        if not text_sample:
+            return Response(
+                {'error': '需要提供文本样本'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Validate text length (1000-100000 words/characters)
+        text_length = len(text_sample)
+        if text_length < 1000:
+            return Response(
+                {'error': f'文本太短（{text_length}字），至少需要1000字'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        if text_length > 100000:
+            return Response(
+                {'error': f'文本太长（{text_length}字），最多100000字'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            ai_service = AIService()
+            analysis_result = run_async_ai_task(
+                ai_service.analyze_writing_style(text_sample)
+            )
+
+            # Format the analysis result into readable text
+            formatted_text = self._format_analysis_result(analysis_result)
+
+            return Response({
+                'analysis_result': analysis_result,
+                'formatted_text': formatted_text,
+                'name': name
+            })
+
+        except Exception as e:
+            return Response(
+                {'error': f'分析失败：{str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+    def _format_analysis_result(self, analysis_result):
+        """将结构化分析结果格式化为可读文本"""
+        if not analysis_result or 'perspectives' not in analysis_result:
+            return ''
+
+        formatted_parts = []
+        for perspective in analysis_result['perspectives']:
+            name = perspective.get('name', '')
+            description = perspective.get('description', '')
+            examples = perspective.get('examples', [])
+
+            # Format with 【】brackets around name, description as paragraph
+            part = f"【{name}】\n{description}"
+
+            # Add examples on separate lines if present
+            if examples:
+                part += "\n示例：\n"
+                for example in examples:
+                    part += f"{example}\n"
+
+            formatted_parts.append(part)
+
+        # Join with double newline to create spacing between sections
+        return '\n\n'.join(formatted_parts)

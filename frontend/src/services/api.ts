@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { Work, Act, Chapter, LoreEntry, Note, ChatMessage, AutoEdit, Suggestion } from '../types';
+import type { Work, Act, Chapter, LoreEntry, Note, ChatMessage, AutoEdit, Suggestion, WritingStyle } from '../types';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8001/api';
 
@@ -184,11 +184,12 @@ export const chatApi = {
 
 // AI 服务相关 API
 export const aiApi = {
-  chat: (workId: number, chapterId: number, message: string) =>
+  chat: (workId: number, chapterId: number, message: string, model: string = 'deepseek-chat') =>
     api.post<{ response: string }>('/ai/chat/', {
       work_id: workId,
       chapter_id: chapterId,
       message,
+      model,
     }),
 
   continue: (workId: number, chapterId: number, guide?: string, content?: string, tokenCount?: number) =>
@@ -388,6 +389,7 @@ export const aiApi = {
       selectedLoreEntries: number[];
       model: 'deepseek-chat' | 'deepseek-reasoner';
       editRequirement?: string;
+      styleId?: number;
     },
     onChunk: (chunk: string) => void,
     onStart?: () => void,
@@ -412,6 +414,10 @@ export const aiApi = {
 
     if (context.editRequirement) {
       params.append('edit_requirement', context.editRequirement);
+    }
+
+    if (context.styleId) {
+      params.append('style_id', context.styleId.toString());
     }
 
     // Add token for authentication since EventSource can't send headers
@@ -477,12 +483,14 @@ export const aiApi = {
     onChunk: (chunk: string) => void,
     onStart?: () => void,
     onEnd?: (fullResponse: string) => void,
-    onError?: (error: string) => void
+    onError?: (error: string) => void,
+    model: string = 'deepseek-chat'
   ) => {
     const params = new URLSearchParams({
       work_id: workId.toString(),
       chapter_id: chapterId.toString(),
       message: message,
+      model: model,
     });
 
     // Add token for authentication since EventSource can't send headers
@@ -551,11 +559,13 @@ export const aiApi = {
     onChunk: (chunk: string) => void,
     onStart?: () => void,
     onEnd?: (fullResponse: string) => void,
-    onError?: (error: string) => void
+    onError?: (error: string) => void,
+    model: string = 'deepseek-chat'
   ) => {
     const params = new URLSearchParams({
       work_id: workId.toString(),
       message: message,
+      model: model,
     });
 
     const authStorage = localStorage.getItem('auth-storage');
@@ -619,6 +629,33 @@ export const aiApi = {
       entry_name: entryName,
       work_id: workId,
     }),
+};
+
+// 写作风格相关 API
+export const stylesApi = {
+  list: () => api.get<WritingStyle[]>('/styles/'),
+
+  get: (id: number) => api.get<WritingStyle>(`/styles/${id}/`),
+
+  create: (data: Partial<WritingStyle>) => api.post<WritingStyle>('/styles/', data),
+
+  update: (id: number, data: Partial<WritingStyle>) =>
+    api.patch<WritingStyle>(`/styles/${id}/`, data),
+
+  delete: (id: number) => api.delete(`/styles/${id}/`),
+
+  analyze: (text: string, name: string) =>
+    api.post<{
+      analysis_result: {
+        perspectives: Array<{
+          name: string;
+          description: string;
+          examples: string[];
+        }>;
+      };
+      formatted_text: string;
+      name: string;
+    }>('/styles/analyze/', { text, name }),
 };
 
 // WebSocket 连接管理

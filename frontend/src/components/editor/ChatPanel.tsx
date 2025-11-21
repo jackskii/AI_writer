@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Bot, User, Square } from 'lucide-react';
+import { Send, Bot, User, Square, Settings } from 'lucide-react';
 import { useMutation } from '@tanstack/react-query';
 import ReactMarkdown from 'react-markdown';
 import { aiApi, chatApi } from '../../services/api';
@@ -13,11 +13,15 @@ interface ChatPanelProps {
   chapter: Chapter;
 }
 
+type AIModel = 'deepseek-chat' | 'deepseek-reasoner';
+
 export const ChatPanel: React.FC<ChatPanelProps> = ({ work, chapter }) => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputMessage, setInputMessage] = useState('');
   const [isStreamingChat, setIsStreamingChat] = useState(false);
   const [streamingMessage, setStreamingMessage] = useState('');
+  const [selectedModel, setSelectedModel] = useState<AIModel>('deepseek-chat');
+  const [showModelSelector, setShowModelSelector] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const streamEventSourceRef = useRef<EventSource | null>(null);
@@ -47,7 +51,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ work, chapter }) => {
       if (!work?.id || !chapter?.id) {
         throw new Error('Work or chapter not available');
       }
-      return aiApi.chat(work.id, chapter.id, pendingMessage);
+      return aiApi.chat(work.id, chapter.id, pendingMessage, selectedModel);
     },
     onSuccess: async (response) => {
       const aiResponse: ChatMessage = {
@@ -138,12 +142,12 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ work, chapter }) => {
             content: fullResponse,
             timestamp: new Date().toISOString()
           };
-          
+
           setMessages(prev => [...prev, aiResponse]);
           setIsStreamingChat(false);
           setStreamingMessage('');
           streamEventSourceRef.current = null;
-          
+
           // Save AI response to backend
           try {
             await chatApi.saveMessage(work.id, chapter.id, 'assistant', fullResponse);
@@ -157,10 +161,11 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ work, chapter }) => {
           setIsStreamingChat(false);
           setStreamingMessage('');
           streamEventSourceRef.current = null;
-          
+
           // Fallback to regular API
           chatMutation.mutate(message);
-        }
+        },
+        selectedModel
       );
       
       streamEventSourceRef.current = eventSource;
@@ -275,9 +280,61 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ work, chapter }) => {
 
   return (
     <div className="h-full flex flex-col bg-dark-bg">
-      {/* Connection Status */}
-      <div className="flex-shrink-0 px-4 py-2 bg-dark-surface border-b border-dark-border text-xs text-dark-text-muted">
-        使用HTTP模式
+      {/* Header with Model Selection */}
+      <div className="flex-shrink-0 px-4 py-2 bg-dark-surface border-b border-dark-border">
+        <div className="flex items-center justify-between">
+          <span className="text-xs text-dark-text-muted">使用HTTP模式</span>
+          <div className="relative">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setShowModelSelector(!showModelSelector)}
+              className="flex items-center gap-1 text-xs text-dark-text-muted hover:text-dark-text"
+            >
+              <Settings size={14} />
+              <span>{selectedModel === 'deepseek-chat' ? '标准模式' : '推理模式'}</span>
+            </Button>
+
+            {/* Model Selector Dropdown */}
+            {showModelSelector && (
+              <div className="absolute right-0 top-full mt-1 w-48 bg-dark-surface border border-dark-border rounded-lg shadow-lg z-50">
+                <div className="p-2 border-b border-dark-border">
+                  <div className="text-xs font-semibold text-dark-text">选择AI模型</div>
+                </div>
+                <div className="p-1">
+                  <button
+                    onClick={() => {
+                      setSelectedModel('deepseek-chat');
+                      setShowModelSelector(false);
+                    }}
+                    className={`w-full text-left px-3 py-2 text-sm rounded transition-colors ${
+                      selectedModel === 'deepseek-chat'
+                        ? 'bg-dark-primary text-white'
+                        : 'text-dark-text hover:bg-dark-bg'
+                    }`}
+                  >
+                    <div className="font-medium">标准模式</div>
+                    <div className="text-xs opacity-75">deepseek-chat</div>
+                  </button>
+                  <button
+                    onClick={() => {
+                      setSelectedModel('deepseek-reasoner');
+                      setShowModelSelector(false);
+                    }}
+                    className={`w-full text-left px-3 py-2 text-sm rounded transition-colors ${
+                      selectedModel === 'deepseek-reasoner'
+                        ? 'bg-dark-primary text-white'
+                        : 'text-dark-text hover:bg-dark-bg'
+                    }`}
+                  >
+                    <div className="font-medium">推理模式</div>
+                    <div className="text-xs opacity-75">deepseek-reasoner</div>
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
       </div>
 
       {/* Chat Messages */}

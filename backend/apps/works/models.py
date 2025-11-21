@@ -181,3 +181,35 @@ class LoreEntry(models.Model):
         all_triggers.extend(self.triggers or [])
         all_triggers.extend(self.extra_triggers or [])
         return list(set(all_triggers))  # 去重
+
+
+class WritingStyle(models.Model):
+    """写作风格模型 - 用户全局的写作风格管理"""
+
+    id = models.BigIntegerField(primary_key=True, default=generate_large_id)
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='writing_styles',
+        verbose_name='用户'
+    )
+    name = models.CharField('风格名称', max_length=200)
+    style_data = models.TextField('风格内容', help_text='完整的风格描述文本')
+    analysis_result = models.JSONField(
+        '分析结果',
+        null=True,
+        blank=True,
+        help_text='AI分析的结构化数据，包含多个维度和示例'
+    )
+
+    created_at = models.DateTimeField('创建时间', auto_now_add=True)
+    updated_at = models.DateTimeField('更新时间', auto_now=True)
+
+    class Meta:
+        verbose_name = '写作风格'
+        verbose_name_plural = '写作风格'
+        ordering = ['user', '-updated_at']
+        unique_together = ['user', 'name']  # 同一用户不能有重名风格
+
+    def __str__(self):
+        return f'{self.user.username} - {self.name}'

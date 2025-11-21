@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { Plus, BookOpen, Calendar, FileText, Trash2 } from 'lucide-react';
+import { Plus, BookOpen, Calendar, FileText, Trash2, Settings, Palette } from 'lucide-react';
 import { worksApi } from '../services/api';
 import { useWorkStore } from '../stores/useWorkStore';
 import { Button } from '../components/ui/Button';
@@ -11,6 +11,9 @@ import { Card, CardContent, CardFooter, CardHeader } from '../components/ui/Card
 import { LoadingScreen } from '../components/ui/Loading';
 import { UserMenu } from '../components/ui/UserMenu';
 import { CreateWorkModal } from '../components/modals/CreateWorkModal';
+import { SettingsModal } from '../components/modals/SettingsModal';
+import { StyleManagerModal } from '../components/modals/StyleManagerModal';
+import { CreateStyleModal } from '../components/modals/CreateStyleModal';
 import type { Work } from '../types';
 
 export const HomePage: React.FC = () => {
@@ -19,6 +22,9 @@ export const HomePage: React.FC = () => {
   const { setCurrentWork } = useWorkStore();
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [deleteModalWork, setDeleteModalWork] = useState<Work | null>(null);
+  const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
+  const [isStyleManagerOpen, setIsStyleManagerOpen] = useState(false);
+  const [isCreateStyleOpen, setIsCreateStyleOpen] = useState(false);
 
   const { data: works, isLoading, error, refetch } = useQuery({
     queryKey: ['works'],
@@ -95,6 +101,22 @@ export const HomePage: React.FC = () => {
               <Button onClick={handleCreateWork} className="flex items-center gap-2">
                 <Plus size={18} />
                 新建作品
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => setIsStyleManagerOpen(true)}
+                className="flex items-center gap-2"
+              >
+                <Palette size={18} />
+                风格
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => setIsSettingsModalOpen(true)}
+                className="flex items-center gap-2"
+              >
+                <Settings size={18} />
+                设置
               </Button>
               <UserMenu />
             </div>
@@ -223,6 +245,28 @@ export const HomePage: React.FC = () => {
           </Card>
         </div>
       )}
+
+      {/* Settings Modal */}
+      <SettingsModal
+        isOpen={isSettingsModalOpen}
+        onClose={() => setIsSettingsModalOpen(false)}
+      />
+
+      {/* Style Manager Modal */}
+      <StyleManagerModal
+        isOpen={isStyleManagerOpen}
+        onClose={() => setIsStyleManagerOpen(false)}
+        onCreateNew={() => {
+          setIsStyleManagerOpen(false);
+          setIsCreateStyleOpen(true);
+        }}
+      />
+
+      {/* Create Style Modal */}
+      <CreateStyleModal
+        isOpen={isCreateStyleOpen}
+        onClose={() => setIsCreateStyleOpen(false)}
+      />
     </div>
   );
 };
