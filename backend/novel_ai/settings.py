@@ -212,7 +212,7 @@ CHANNEL_LAYERS = {
 }
 
 # DeepSeek API Configuration
-DEEPSEEK_API_KEY = os.environ.get('DEEPSEEK_API_KEY', '')
+# Note: API keys are now stored per-user in UserSettings model
 DEEPSEEK_API_BASE = os.environ.get('DEEPSEEK_API_BASE', 'https://api.deepseek.com/v1')
 
 # Auto-save settings

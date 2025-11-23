@@ -16,6 +16,21 @@ import uuid
 logger = logging.getLogger(__name__)
 
 
+def get_user_api_key(user):
+    """获取用户的API密钥"""
+    try:
+        from apps.user_auth.models import UserSettings
+        settings = UserSettings.objects.get(user=user)
+        api_key = settings.deepseek_api_key
+        if not api_key:
+            raise ValueError("API密钥未配置")
+        return api_key
+    except UserSettings.DoesNotExist:
+        raise ValueError("用户设置不存在，请先配置API密钥")
+    except Exception as e:
+        raise ValueError(f"获取API密钥失败: {str(e)}")
+
+
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def ai_prefills(request):
@@ -44,7 +59,8 @@ def ai_suggest(request):
     chapter = get_object_or_404(Chapter, id=chapter_id, work=work)
     
     try:
-        ai_service = AIService()
+        api_key = get_user_api_key(request.user)
+        ai_service = AIService(api_key=api_key)
         suggestions = run_async_ai_task(
             ai_service.generate_suggestions(chapter, target_text)
         )
@@ -138,7 +154,8 @@ def ai_chat_stream(request):
             context = ContextBuilder.build_context(chapter)
             
             # 创建AI服务实例并开始流式生成
-            ai_service = AIService()
+            api_key = get_user_api_key(user)
+            ai_service = AIService(api_key=api_key)
             
             # 运行异步生成器
             import asyncio
@@ -285,7 +302,8 @@ def ai_work_chat_stream(request):
             from .services import ContextBuilder
             context = ContextBuilder.build_work_overview_context(work)
 
-            ai_service = AIService()
+            api_key = get_user_api_key(user)
+            ai_service = AIService(api_key=api_key)
 
             import asyncio
             import threading
@@ -408,7 +426,8 @@ def ai_summarize_stream(request):
             context = ContextBuilder.build_context(chapter, include_current_content=True)
             
             # 创建AI服务实例并开始流式生成
-            ai_service = AIService()
+            api_key = get_user_api_key(user)
+            ai_service = AIService(api_key=api_key)
             
             # 运行异步生成器
             import asyncio
@@ -528,7 +547,8 @@ def ai_auto_edit(request):
             for ch in reversed(list(last_three_chapters)):
                 formatted_context += f"第{ch.chapter_number}章《{ch.title}》\n\n{ch.content or '(空章节)'}\n\n---\n\n"
 
-        ai_service = AIService()
+        api_key = get_user_api_key(request.user)
+        ai_service = AIService(api_key=api_key)
         edited_text = run_async_ai_task(
             ai_service.auto_edit(selected_text, formatted_context)
         )
@@ -677,7 +697,8 @@ def ai_auto_edit_stream(request):
                 formatted_context += f"当前章节《{chapter.title}》全文：\n\n{chapter.content}\n\n---\n\n"
 
             # Create AI service and start streaming
-            ai_service = AIService()
+            api_key = get_user_api_key(user)
+            ai_service = AIService(api_key=api_key)
 
             import asyncio
             import threading
@@ -787,7 +808,8 @@ def ai_auto_describe_entry(request):
         context_text = "\n\n---\n\n".join(context_parts)
 
         # 调用AI生成描述
-        ai_service = AIService()
+        api_key = get_user_api_key(request.user)
+        ai_service = AIService(api_key=api_key)
 
         prompt = f"""基于以下章节内容，为"{entry_name}"创建一个详细的世界观条目描述。
 

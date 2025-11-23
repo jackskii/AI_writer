@@ -5,7 +5,8 @@ from rest_framework.response import Response
 from rest_framework.authtoken.models import Token
 from django.contrib.auth import login, logout
 from django.contrib.auth.models import User
-from .serializers import UserRegistrationSerializer, UserLoginSerializer, UserSerializer
+from .serializers import UserRegistrationSerializer, UserLoginSerializer, UserSerializer, UserSettingsSerializer
+from .models import UserSettings
 
 
 @api_view(['POST'])
@@ -16,10 +17,13 @@ def register_view(request):
     if serializer.is_valid():
         user = serializer.save()
         token, created = Token.objects.get_or_create(user=user)
-        
+
+        # 为新用户创建设置
+        UserSettings.objects.create(user=user)
+
         # 为新用户创建模板作品
         create_template_work_for_user(user)
-        
+
         return Response({
             'message': '注册成功',
             'token': token.key,
@@ -110,4 +114,29 @@ def update_profile_view(request):
     if serializer.is_valid():
         serializer.save()
         return Response(serializer.data)
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_user_settings_view(request):
+    """获取用户设置"""
+    # Get or create user settings
+    settings, created = UserSettings.objects.get_or_create(user=request.user)
+    serializer = UserSettingsSerializer(settings)
+    return Response(serializer.data)
+
+
+@api_view(['PUT', 'PATCH'])
+@permission_classes([IsAuthenticated])
+def update_user_settings_view(request):
+    """更新用户设置（主要是API密钥）"""
+    settings, created = UserSettings.objects.get_or_create(user=request.user)
+    serializer = UserSettingsSerializer(settings, data=request.data, partial=True)
+    if serializer.is_valid():
+        serializer.save()
+        return Response({
+            'message': 'API密钥已更新',
+            'data': serializer.data
+        })
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)

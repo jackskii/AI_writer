@@ -2,46 +2,99 @@ version: '3.8'
 
 services:
   postgres:
-    image: postgres:16
+    image: postgres:16-alpine
+    container_name: novel_ai_postgres
     environment:
-      POSTGRES_DB: novel_ai_db
-      POSTGRES_USER: novel_user
-      POSTGRES_PASSWORD: novel_password
+      POSTGRES_DB: ${DB_NAME:-novel_ai_db}
+      POSTGRES_USER: ${DB_USER:-novel_user}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-novel_password}
     ports:
-      - "5433:5432"
+      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-novel_user}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - novel_ai_network
 
   redis:
-    image: redis:7
+    image: redis:7-alpine
+    container_name: novel_ai_redis
+    command: redis-server --appendonly yes
     ports:
-      - "6380:6379"
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - novel_ai_network
 
   backend:
-    build: ./backend
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: novel_ai_backend
+    command: /bin/bash -c "chmod +x /app/entrypoint.sh && /app/entrypoint.sh daphne -b 0.0.0.0 -p 8000 novel_ai.asgi:application"
     ports:
-      - "8001:8000"
+      - "${BACKEND_PORT:-8001}:8000"
     environment:
-      - DEBUG=1
-      - DATABASE_URL=postgresql://novel_user:novel_password@postgres:5432/novel_ai_db
+      - DEBUG=${DEBUG:-True}
+      - SECRET_KEY=${SECRET_KEY:-your-secret-key-change-this}
+      - ALLOWED_HOSTS=${ALLOWED_HOSTS:-localhost,127.0.0.1,backend}
+      - DB_NAME=${DB_NAME:-novel_ai_db}
+      - DB_USER=${DB_USER:-novel_user}
+      - DB_PASSWORD=${DB_PASSWORD:-novel_password}
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DATABASE_URL=postgresql://${DB_USER:-novel_user}:${DB_PASSWORD:-novel_password}@postgres:5432/${DB_NAME:-novel_ai_db}
       - REDIS_URL=redis://redis:6379/0
+      - DEEPSEEK_API_BASE=${DEEPSEEK_API_BASE:-https://api.deepseek.com/v1}
+      - FRONTEND_URL=${FRONTEND_URL:-http://localhost:3000}
     depends_on:
-      - postgres
-      - redis
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     volumes:
       - ./backend:/app
+      - static_volume:/app/staticfiles
+      - media_volume:/app/media
+    networks:
+      - novel_ai_network
+    restart: unless-stopped
 
   frontend:
-    build: ./frontend
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        - VITE_API_URL=${VITE_API_URL:-http://localhost:8001/api}
+    container_name: novel_ai_frontend
     ports:
-      - "3001:3000"
-    environment:
-      - REACT_APP_API_URL=http://localhost:8001/api
+      - "${FRONTEND_PORT:-3000}:80"
     depends_on:
       - backend
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
+    networks:
+      - novel_ai_network
+    restart: unless-stopped
 
 volumes:
   postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  static_volume:
+    driver: local
+  media_volume:
+    driver: local
+
+networks:
+  novel_ai_network:
+    driver: bridge

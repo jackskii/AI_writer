@@ -1,197 +1,209 @@
 # Editor System Documentation
 
-The heart of the AI Novel Writing Assistant - a sophisticated text editor with marker-based highlighting, real-time AI integration, and advanced note-taking capabilities.
+The heart of the AI Novel Writing Assistant - a clean, efficient text editor with position-based note tracking, real-time AI integration, and advanced note-taking capabilities.
 
 ## Architecture Overview
 
 ### Core Components
-- **EditorPanel**: Main editor component with text input and AI integration
+- **EditorPanel**: Main editor component with native textarea and AI integration
 - **ChatPanel**: AI conversation interface with context awareness
-- **NotesPanel**: Color-coded note management with text linking
-- **MarkerUtils**: Invisible Unicode marker system for text-note relationships
+- **NotesPanel**: Color-coded note management with text position linking
+- **Position Tracking**: Character offset-based system for note-text relationships
 
-## Marker-Based Text Highlighting System
+## Position-Based Text Editor System
 
 ### The Challenge
-Traditional HTML-based text highlighting doesn't work in textarea elements. The system needed a way to:
+We needed a simple, reliable way to:
 - Link notes to specific text positions
 - Preserve links through text editing
-- Allow text highlighting without HTML markup
-- Survive copy/paste operations
+- Allow text highlighting without complex editor dependencies
+- Maintain performance with large documents
 
-### The Solution: Invisible Unicode Markers
+### The Solution: Native Textarea + Position Tracking
 **File**: `frontend/src/components/editor/EditorPanel.tsx`
 
-The system uses invisible Unicode characters as text markers:
+The system uses a native HTML textarea with character offset-based position tracking:
 
-```javascript
-const MARKER_BASE_CHARS = [
-  '\u200B', // Zero-width space
-  '\u200C', // Zero-width non-joiner
-  '\u200D', // Zero-width joiner
-  '\u2060', // Word joiner (invisible)
-  '\uFEFF', // Zero-width no-break space
-];
-```
+```typescript
+// Simple textarea ref
+const editorRef = useRef<HTMLTextAreaElement | null>(null);
 
-### How Markers Work
+// Track note positions as character offsets
+const [notePositions, setNotePositions] = useState<Map<number, {start: number, end: number}>>(new Map());
 
-#### 1. Marker Creation
-```javascript
-const MarkerUtils = {
-  // Encode note ID as invisible characters
-  encodeId: (noteId: number): string => {
-    const chars = ['\uFEFF', '\u200C', '\u200D', '\u2060', '\u180E'];
-    let result = '';
-    let id = noteId;
-
-    // Base-5 encoding using invisible characters
-    while (id > 0) {
-      result = chars[id % 5] + result;
-      id = Math.floor(id / 5);
-    }
-    return result;
-  },
-
-  // Create start marker: Zero-width space + encoded ID + Zero-width non-joiner
-  createStartMarker: (noteId: number): string => {
-    const encoded = MarkerUtils.encodeId(noteId);
-    return `\u200B${encoded}\u200C`;
-  },
-
-  // Create end marker: Zero-width joiner + encoded ID + Word joiner
-  createEndMarker: (noteId: number): string => {
-    const encoded = MarkerUtils.encodeId(noteId);
-    return `\u200D${encoded}\u2060`;
-  }
+// Use native selection API for highlighting
+const highlightText = (start: number, end: number) => {
+  if (!editorRef.current) return;
+  editorRef.current.setSelectionRange(start, end);
+  editorRef.current.focus();
 };
 ```
 
-#### 2. Text Wrapping Process
+### How Position Tracking Works
+
+#### 1. Note Creation with Position Storage
 When a note is created with linked text:
 
-```javascript
-wrapWithMarkers: (content: string, textToWrap: string, noteId: number): string => {
-  const index = content.indexOf(textToWrap);
-  if (index === -1) return content;
+```typescript
+// User selects text in textarea
+onSelect={(e) => {
+  const target = e.target as HTMLTextAreaElement;
+  const start = target.selectionStart;  // Character offset from start
+  const end = target.selectionEnd;      // Character offset to end
 
-  const startMarker = MarkerUtils.createStartMarker(noteId);
-  const endMarker = MarkerUtils.createEndMarker(noteId);
-
-  return content.slice(0, index) +
-         startMarker +
-         textToWrap +
-         endMarker +
-         content.slice(index + textToWrap.length);
-}
-```
-
-**Example**:
-- Original: `"Hello world, this is a test."`
-- After wrapping "world": `"Hello \u200B{encoded_id}\u200Cworld\u200D{encoded_id}\u2060, this is a test."`
-- Display: Still shows as `"Hello world, this is a test."` (markers are invisible)
-
-#### 3. Marker Detection and Navigation
-```javascript
-findMarkers: (content: string, noteId: number): { start: number; end: number } | null => {
-  const startMarker = MarkerUtils.createStartMarker(noteId);
-  const endMarker = MarkerUtils.createEndMarker(noteId);
-
-  const startIdx = content.indexOf(startMarker);
-  const endIdx = content.indexOf(endMarker);
-
-  if (startIdx === -1 || endIdx === -1) return null;
-
-  return {
-    start: startIdx + startMarker.length,  // Position after start marker
-    end: endIdx                            // Position before end marker
-  };
-}
-```
-
-### Critical Issues with Markers
-
-#### Problem 1: Text Boundary Insertion
-**Issue**: When users type at the exact end of highlighted text, the insertion can break markers.
-
-**Example**:
-- Text: `"Hello \u200B{id}\u200Cworld\u200D{id}\u2060!"`
-- User places cursor after "world" and types "s"
-- Result: `"Hello \u200B{id}\u200Cworlds\u200D{id}\u2060!"` ✅ (works)
-- BUT if cursor is after end marker: `"Hello \u200B{id}\u200Cworld\u200D{id}\u2060s!"` ❌ (breaks link)
-
-**Current Protection**:
-```javascript
-handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-  if (e.key === 'Backspace' || e.key === 'Delete') {
-    // Check if deletion would affect markers
-    const markerRegex = /\u200B[\uFEFF\u200C\u200D\u2060\u180E]+\u200C|\u200D[\uFEFF\u200C\u200D\u2060\u180E]+\u2060/g;
-    // Prevent deletion and move cursor to safe position
+  if (start !== end) {
+    const selectedText = target.value.slice(start, end);
+    setSelectedText(selectedText);
+    setSelectionStart(start);
+    setSelectionEnd(end);
   }
-}
+}}
+
+// Note saved with positions
+await notesApi.create({
+  work: work.id,
+  chapter: chapter.id,
+  content: noteContent,
+  color: selectedColor,
+  text_start_position: start,  // Stored in database
+  text_end_position: end,       // Stored in database
+  linked_text: selectedText
+});
 ```
 
-#### Problem 2: Marker Restoration Complexity
-**Issue**: When markers break, restoring them is complex and error-prone.
+#### 2. Automatic Position Adjustment
+When content changes, all note positions are automatically adjusted:
 
-**Current Approach**:
-- Store previous content state
-- Detect when markers are missing
-- Attempt to restore based on stored positions
-- **This approach is fragile and often fails**
+```typescript
+useEffect(() => {
+  if (content === previousContentRef.current) return;
 
-#### Problem 3: Invisible Character Handling
-**Issue**: Different text operations handle invisible characters differently.
+  const oldContent = previousContentRef.current;
+  const newContent = content;
 
-**Examples**:
-- Copy/paste may or may not preserve markers
-- Find/replace operations can corrupt marker sequences
-- Some text processing removes invisible characters
+  // Find where the change occurred
+  let changeStart = 0;
+  while (changeStart < Math.min(oldContent.length, newContent.length) &&
+         oldContent[changeStart] === newContent[changeStart]) {
+    changeStart++;
+  }
 
-### Marker System Functions
+  const lengthDiff = newContent.length - oldContent.length;
 
-#### Core Functions
-```javascript
-// Text wrapping and unwrapping
-wrapWithMarkers(content, textToWrap, noteId)
-removeMarkers(content, noteId)
-
-// Marker detection and positioning
-findMarkers(content, noteId)
-hasMarkers(content, noteId)
-
-// Content processing
-stripAllMarkers(text)  // Remove all markers for display
-getTextBetweenMarkers(content, noteId)
-
-// Selection handling
-adjustSelectionToExcludeMarkers(text, start, end)
-```
-
-#### Usage in Note Operations
-```javascript
-// Creating a note with text link
-const handleCreateNote = () => {
-  createNoteMutation.mutate({
-    // ... note data
-    linked_text: selectedTextForNote
+  // Adjust all note positions after the change
+  const updatedPositions = new Map(notePositions);
+  notes.forEach(note => {
+    const pos = updatedPositions.get(note.id);
+    if (pos && pos.start >= changeStart) {
+      updatedPositions.set(note.id, {
+        start: Math.max(changeStart, pos.start + lengthDiff),
+        end: Math.max(changeStart, pos.end + lengthDiff)
+      });
+    }
   });
-};
 
-// On successful creation
-onSuccess: (response) => {
-  if (selectedTextForNote) {
-    wrapTextWithMarkers(createdNote.id, selectedTextForNote);
-  }
-}
+  setNotePositions(updatedPositions);
+  previousContentRef.current = content;
+}, [content, notes]);
+```
 
-// Clicking a note to highlight linked text
+**How It Works:**
+1. Compare old content with new content character by character
+2. Find exact position where change occurred
+3. Calculate length difference (positive = insertion, negative = deletion)
+4. Adjust all note positions that come after the change
+5. Update position map in state
+
+**Example:**
+```
+Before: "Hello world, this is a test."
+        ^     ^
+        10    16 (note position)
+
+User types "big " at position 10:
+After:  "Hello big world, this is a test."
+        ^         ^
+        10        20 (adjusted to 16+4)
+
+Length diff: +4 characters
+All notes after position 10 shifted by +4
+```
+
+#### 3. Text Highlighting from Notes
+Clicking a note highlights its linked text:
+
+```typescript
 const handleNoteClick = (note: Note) => {
-  const markerPositions = MarkerUtils.findMarkers(contentWithMarkers, note.id);
-  if (markerPositions) {
-    textareaRef.current.setSelectionRange(markerPositions.start, markerPositions.end);
+  // Clear existing highlight timeout
+  if (highlightTimeoutRef.current) {
+    clearTimeout(highlightTimeoutRef.current);
   }
-}
+
+  // Get note position (from database or local map)
+  const position = notePositions.get(note.id) || {
+    start: note.text_start_position,
+    end: note.text_end_position
+  };
+
+  if (position) {
+    // Highlight using native selection
+    setHighlightedNoteId(note.id);
+    setHighlightPosition({
+      start: position.start,
+      end: position.end,
+      color: note.color
+    });
+
+    highlightText(position.start, position.end);
+
+    // Auto-clear after 10 seconds
+    highlightTimeoutRef.current = setTimeout(() => {
+      setHighlightedNoteId(undefined);
+      setHighlightPosition(null);
+    }, 10000);
+  }
+};
+```
+
+### Benefits of This Approach
+
+✅ **Simple**: No invisible characters, markers, or complex decoration APIs
+✅ **Reliable**: Native browser textarea APIs are battle-tested
+✅ **Fast**: Minimal overhead, O(n) position adjustment on edits
+✅ **Maintainable**: Easy to understand and debug
+✅ **Lightweight**: No heavy dependencies (removed Monaco Editor)
+✅ **Predictable**: Character offsets are intuitive and stable
+✅ **Database-backed**: Positions persist across sessions
+
+### Position Tracking Edge Cases
+
+#### Case 1: Editing Before a Note
+```
+Text: "Hello world"
+Note position: 6-11 ("world")
+
+User types at position 0: "Hi "
+New text: "Hi Hello world"
+Note position adjusted to: 9-14 ("world" still highlighted correctly)
+```
+
+#### Case 2: Editing Within a Note
+```
+Text: "Hello world"
+Note position: 6-11 ("world")
+
+User types at position 7: "new "
+New text: "Hello wnew orld"
+Note position adjusted to: 6-15 (entire edited region)
+```
+
+#### Case 3: Deletion Before a Note
+```
+Text: "Hello world"
+Note position: 6-11 ("world")
+
+User deletes "Hello ": "world"
+Note position adjusted to: 0-5 ("world" at new position)
 ```
 
 ## Auto-Save System
@@ -199,7 +211,7 @@ const handleNoteClick = (note: Note) => {
 ### Implementation
 **File**: `frontend/src/pages/EditorPage.tsx`
 
-```javascript
+```typescript
 // Auto-save every 5 seconds
 useEffect(() => {
   if (!isAutoSaving && hasUnsavedChanges && chapter?.id) {
@@ -226,29 +238,16 @@ const handleAutoSave = async () => {
 ```
 
 ### Auto-Save Features
-- **5-second interval**: Automatic saving every 5 seconds after changes
+- **5-second interval**: Automatic saving after changes stop
 - **Visual feedback**: Shows "Saving..." status and last saved time
 - **Conflict resolution**: Handles concurrent editing scenarios
 - **Error handling**: Graceful failure with user notification
-
-### Content State Management
-```javascript
-// Two content states for marker system
-const [content, setContent] = useState('');                    // Clean content (no markers)
-const [contentWithMarkers, setContentWithMarkers] = useState(''); // Content with markers
-
-// Synchronization
-useEffect(() => {
-  // Strip markers for display but save with markers
-  const cleanContent = MarkerUtils.stripAllMarkers(contentWithMarkers);
-  setContent(cleanContent);
-}, [contentWithMarkers]);
-```
+- **Ctrl+S support**: Manual save with keyboard shortcut
 
 ## AI Integration in Editor
 
 ### Continue Writing Feature
-```javascript
+```typescript
 const handleAIContinue = async () => {
   const eventSource = aiApi.continueStream(
     work.id,
@@ -256,26 +255,34 @@ const handleAIContinue = async () => {
     // onChunk - called for each piece of text
     (chunk: string) => {
       accumulatedContent += chunk;
-      const newContent = startingContent + accumulatedContent;
-      setContentWithMarkers(startingContentWithMarkers + accumulatedContent);
-      onChange(newContentWithMarkers);
+      const newContent = content + accumulatedContent;
+      onChange(newContent);
     },
     // onStart
     () => {
-      setIsStreaming(true);
+      setIsAIContinueLoading(true);
     },
     // onEnd
     () => {
-      setIsStreaming(false);
+      setIsAIContinueLoading(false);
+      // Trigger auto-save after AI generation
+      if (onSave) onSave();
     }
   );
 };
 ```
 
+### Auto-Edit Feature
+- **Selection-based**: User selects text to edit
+- **AI-powered**: Uses DeepSeek to rewrite selected text
+- **Version tracking**: Keeps both original and edited versions
+- **Toggle functionality**: Click to switch between versions
+
 ### Suggestion System
 - **Auto-trigger**: After 300 characters of new content
 - **Manual trigger**: User can request suggestions for selected text
-- **Integration**: Suggestions stored in database and linked to specific text positions
+- **Database storage**: Suggestions stored as notes with AI flag
+- **Color-coded**: Blue color indicates AI-generated suggestions
 
 ### Context Awareness
 All AI operations automatically include:
@@ -289,28 +296,30 @@ All AI operations automatically include:
 ### Panel Structure
 **File**: `frontend/src/pages/EditorPage.tsx`
 
-```javascript
-<div className="flex h-screen bg-dark-bg">
-  {/* Left Panel - Editor */}
+```tsx
+<div className="flex h-screen bg-black">
+  {/* Left Panel - Editor with AI Controls */}
   <div className="flex-1 flex flex-col">
     <EditorPanel
       content={content}
       onChange={handleContentChange}
       work={work}
       chapter={chapter}
+      onSave={handleSave}
     />
   </div>
 
-  {/* Center Panel - Notes */}
-  <div className="w-80 border-l border-dark-border">
+  {/* Center Panel - Notes Sidebar */}
+  <div className="w-80 border-l border-gray-800">
     <NotesPanel
       notes={notes}
       onNoteClick={handleNoteClick}
+      selectedNoteId={highlightedNoteId}
     />
   </div>
 
-  {/* Right Panel - Chat */}
-  <div className="w-96 border-l border-dark-border">
+  {/* Right Panel - AI Chat */}
+  <div className="w-96 border-l border-gray-800">
     <ChatPanel
       work={work}
       chapter={chapter}
@@ -322,59 +331,59 @@ All AI operations automatically include:
 ### Panel Responsibilities
 
 #### Left Panel (Editor)
-- Text editing with syntax highlighting
-- Auto-save functionality
-- AI continue writing
-- Marker-based text highlighting
+- Native textarea for text editing
+- Auto-save functionality (5s interval)
+- AI continue writing button
+- Auto-edit functionality
+- Position-based text highlighting
 - Selection handling for notes
 
 #### Center Panel (Notes)
-- Color-coded note display
+- Color-coded note display (6 colors)
 - Note creation/editing forms
-- Text position linking
-- Note filtering and search
+- Text position linking and updating
+- Click to highlight linked text
+- Filter by AI-generated vs manual
 
 #### Right Panel (Chat)
 - AI conversation interface
 - Chat history persistence
 - Context-aware responses
 - Streaming message display
+- Markdown rendering
 
 ## Common Issues & Solutions
 
-### 1. Markers Breaking During Editing
-**Problem**: Users type at text boundaries, breaking marker integrity.
+### 1. Position Tracking After Large Edits
+**Problem**: Note positions become incorrect after major text changes.
 
-**Current Protection**:
-- `handleKeyDown` prevents deletion of marker characters
-- Cursor positioning moves away from markers during problematic operations
+**Solution**: Position adjustment algorithm automatically handles this:
+- Detects change location precisely
+- Adjusts all affected notes
+- Maintains relative positions
 
-**Limitations**: Protection is not foolproof and complex editing can still break markers.
+**Manual Fix**: Use "Update Link" button on notes to re-link to selected text.
 
-### 2. Performance with Large Content
-**Problem**: Marker scanning becomes slow with very large documents.
+### 2. Highlight Not Clearing
+**Problem**: Text remains highlighted after clicking note.
 
-**Solution**: Consider implementing:
-- Marker indexing for faster lookups
-- Content chunking for better performance
-- Lazy loading of notes and markers
+**Solution**:
+- Highlights auto-clear after 10 seconds
+- Click editor anywhere to dismiss
+- Timeout is properly cleaned up on component unmount
 
-### 3. Copy/Paste Marker Preservation
-**Problem**: Copy/paste operations may not preserve markers correctly.
+### 3. Performance with Many Notes
+**Problem**: Position tracking becomes slow with 100+ notes.
 
-**Current Behavior**: Markers are preserved in most cases but may be lost in some text operations.
+**Optimization**:
+- Position map stored in component state (fast lookups)
+- Only recalculates on actual content changes
+- Uses ref for previous content comparison
 
-### 4. Marker Cleanup on Note Deletion
-**Problem**: Deleted notes leave orphaned markers in content.
+### 4. Selection Issues in Some Browsers
+**Problem**: Text selection behaves differently across browsers.
 
-**Solution**: Already implemented in `deleteNoteMutation`:
-```javascript
-onSuccess: (_, deletedNote) => {
-  const newContentWithMarkers = MarkerUtils.removeMarkers(contentWithMarkers, deletedNote.id);
-  setContentWithMarkers(newContentWithMarkers);
-  onChange(newContentWithMarkers);
-}
-```
+**Solution**: Use standard `setSelectionRange(start, end)` API which works everywhere.
 
 ## Development Guidelines
 
@@ -382,40 +391,57 @@ onSuccess: (_, deletedNote) => {
 1. **NEVER** remove the AI Continue Writing functionality
 2. **NEVER** remove the Update Link button for notes
 3. **NEVER** remove streaming capabilities
-4. Always test marker functionality after changes
+4. Always test position tracking after changes
 5. Preserve the three-panel layout structure
+6. **CRITICAL**: Don't modify the position adjustment `useEffect`
+7. Test with various edit scenarios (insert, delete, paste)
+8. Don't replace textarea without discussing trade-offs
 
-### Testing Marker System:
-```javascript
-// Test marker creation
-const testText = "Hello world";
-const noteId = 123;
-const wrapped = MarkerUtils.wrapWithMarkers(content, testText, noteId);
-const positions = MarkerUtils.findMarkers(wrapped, noteId);
-console.log('Marker positions:', positions);
+### Testing Position Tracking:
+```typescript
+// Test position adjustment
+console.log('Before edit:', notePositions.get(noteId));
+// Make text change
+console.log('After edit:', notePositions.get(noteId));
 
-// Test marker removal
-const cleaned = MarkerUtils.removeMarkers(wrapped, noteId);
-console.log('Original content restored:', cleaned === content);
+// Test highlighting
+handleNoteClick(note);
+// Verify text is highlighted in editor
+
+// Test "Update Link"
+// 1. Select new text
+// 2. Click "Update Link" on note
+// 3. Verify note.text_start_position and note.text_end_position updated
 ```
 
-### Debugging Markers:
-The system includes extensive console logging:
-```javascript
-console.log('🔄 Wrapping text with markers for note', noteId);
-console.log('✅ Found markers for note', noteId, 'at positions', start, '-', end);
-console.log('❌ Markers not found for note', noteId);
+### Debugging Positions:
+The system includes console logging:
+```typescript
+console.log('📝 Highlighting text at positions', start, '-', end);
+console.log('✅ Note position adjusted', oldPos, '->', newPos);
+console.log('❌ No valid position found for note', noteId);
 ```
 
-Monitor these logs when debugging marker issues.
+Monitor these logs when debugging position issues.
 
 ## Future Improvements
 
 ### Potential Enhancements:
-1. **Marker Versioning**: Store marker versions to enable better restoration
-2. **Alternative Linking**: Consider DOM-based highlighting for better reliability
-3. **Performance Optimization**: Implement marker indexing for large documents
-4. **Better Error Recovery**: Improved marker restoration algorithms
-5. **Visual Indicators**: Show marker boundaries in debug mode
+1. **Undo/Redo**: Add undo/redo for position changes
+2. **Multi-select**: Support multiple note highlights simultaneously
+3. **Position History**: Track position changes over time
+4. **Smart Adjustment**: Use text similarity for better position recovery
+5. **Visual Indicators**: Show note boundaries in editor
 
-The editor system is complex but powerful, providing seamless integration between text editing, note-taking, and AI assistance while maintaining data integrity through the challenging marker system.
+## Architecture Decision: Why Native Textarea?
+
+We chose native textarea over rich text editors (like Monaco, Draft.js, etc.) because:
+
+1. **Simplicity**: No complex editor APIs to learn
+2. **Reliability**: Native browser APIs are stable
+3. **Performance**: Minimal overhead, fast rendering
+4. **Bundle Size**: Removed ~2MB Monaco Editor dependency
+5. **Maintainability**: Easy to understand and debug
+6. **Accessibility**: Native textarea has excellent a11y support
+
+The position-based tracking system provides all the functionality we need without the complexity of heavy editor frameworks.

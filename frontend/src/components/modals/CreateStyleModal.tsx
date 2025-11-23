@@ -25,6 +25,7 @@ export const CreateStyleModal: React.FC<CreateStyleModalProps> = ({
   const [styleData, setStyleData] = useState('');
   const [analysisResult, setAnalysisResult] = useState<any>(null);
   const [showResult, setShowResult] = useState(false);
+  const [isNsfw, setIsNsfw] = useState(false);
 
   // Reset state when modal closes
   const handleClose = () => {
@@ -34,12 +35,24 @@ export const CreateStyleModal: React.FC<CreateStyleModalProps> = ({
     setStyleData('');
     setAnalysisResult(null);
     setShowResult(false);
+    setIsNsfw(false);
     onClose();
   };
 
-  // Analyze text mutation
+  // Analyze text mutation (normal)
   const analyzeMutation = useMutation({
     mutationFn: () => stylesApi.analyze(textSample, name || '未命名风格'),
+    onSuccess: (response) => {
+      setAnalysisResult(response.data.analysis_result);
+      setStyleData(response.data.formatted_text);
+      setName(response.data.name);
+      setShowResult(true);
+    },
+  });
+
+  // Analyze NSFW text mutation
+  const analyzeNsfwMutation = useMutation({
+    mutationFn: () => stylesApi.analyzeNsfw(textSample, name || '未命名NSFW风格'),
     onSuccess: (response) => {
       setAnalysisResult(response.data.analysis_result);
       setStyleData(response.data.formatted_text);
@@ -74,7 +87,12 @@ export const CreateStyleModal: React.FC<CreateStyleModalProps> = ({
       return;
     }
 
-    analyzeMutation.mutate();
+    // Use appropriate mutation based on NSFW flag
+    if (isNsfw) {
+      analyzeNsfwMutation.mutate();
+    } else {
+      analyzeMutation.mutate();
+    }
   };
 
   const handleCreateFromAnalysis = () => {
@@ -187,6 +205,24 @@ export const CreateStyleModal: React.FC<CreateStyleModalProps> = ({
                 />
               </div>
 
+              {/* NSFW Toggle */}
+              <div className="bg-dark-bg border border-dark-border rounded-lg p-3">
+                <label className="flex items-center gap-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={isNsfw}
+                    onChange={(e) => setIsNsfw(e.target.checked)}
+                    className="w-4 h-4 rounded border-dark-border bg-dark-surface text-dark-primary focus:ring-dark-primary focus:ring-offset-0"
+                  />
+                  <div className="flex-1">
+                    <span className="text-sm font-medium text-dark-text">NSFW内容</span>
+                    <p className="text-xs text-dark-text-muted mt-0.5">
+                      勾选此项将使用专门的成人内容风格分析（分析维度包括：情欲描写、身体描写、动作描写、对话风格、氛围营造、心理描写）
+                    </p>
+                  </div>
+                </label>
+              </div>
+
               <div>
                 <label className="block text-sm font-medium text-dark-text mb-2">
                   文章内容 (1000-100000字)
@@ -225,10 +261,10 @@ export const CreateStyleModal: React.FC<CreateStyleModalProps> = ({
                 </Button>
                 <Button
                   onClick={handleAnalyze}
-                  disabled={analyzeMutation.isPending || textSample.length < 1000 || textSample.length > 100000}
+                  disabled={analyzeMutation.isPending || analyzeNsfwMutation.isPending || textSample.length < 1000 || textSample.length > 100000}
                   className="flex items-center gap-2"
                 >
-                  {analyzeMutation.isPending ? (
+                  {(analyzeMutation.isPending || analyzeNsfwMutation.isPending) ? (
                     <>
                       <LoadingSpinner size="sm" />
                       分析中...

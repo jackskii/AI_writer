@@ -8,6 +8,21 @@ from .models import Work, Act, Chapter, LoreEntry, WritingStyle
 from .serializers import WorkSerializer, WorkDetailSerializer, ActSerializer, ChapterSerializer, LoreEntrySerializer, WritingStyleSerializer
 
 
+def get_user_api_key(user):
+    """获取用户的API密钥"""
+    try:
+        from apps.user_auth.models import UserSettings
+        settings = UserSettings.objects.get(user=user)
+        api_key = settings.deepseek_api_key
+        if not api_key:
+            raise ValueError("API密钥未配置")
+        return api_key
+    except UserSettings.DoesNotExist:
+        raise ValueError("用户设置不存在，请先配置API密钥")
+    except Exception as e:
+        raise ValueError(f"获取API密钥失败: {str(e)}")
+
+
 class WorkViewSet(viewsets.ModelViewSet):
     serializer_class = WorkSerializer
     permission_classes = [IsAuthenticated]
@@ -117,7 +132,8 @@ class ChapterViewSet(viewsets.ModelViewSet):
 
         try:
             from apps.ai_services.services import AIService, run_async_ai_task
-            ai_service = AIService()
+            api_key = get_user_api_key(request.user)
+            ai_service = AIService(api_key=api_key)
             summary = run_async_ai_task(
                 ai_service.generate_summary(chapter)
             )
@@ -225,7 +241,8 @@ class WritingStyleViewSet(viewsets.ModelViewSet):
             )
 
         try:
-            ai_service = AIService()
+            api_key = get_user_api_key(request.user)
+            ai_service = AIService(api_key=api_key)
             analysis_result = run_async_ai_task(
                 ai_service.analyze_writing_style(text_sample)
             )
@@ -245,12 +262,68 @@ class WritingStyleViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
+    @action(detail=False, methods=['post'])
+    def analyze_nsfw(self, request):
+        """分析NSFW文本样本并生成写作风格"""
+        from apps.ai_services.services import AIService, run_async_ai_task
+
+        text_sample = request.data.get('text')
+        name = request.data.get('name', '未命名NSFW风格')
+
+        if not text_sample:
+            return Response(
+                {'error': '需要提供文本样本'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Validate text length (1000-100000 words/characters)
+        text_length = len(text_sample)
+        if text_length < 1000:
+            return Response(
+                {'error': f'文本太短（{text_length}字），至少需要1000字'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        if text_length > 100000:
+            return Response(
+                {'error': f'文本太长（{text_length}字），最多100000字'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            api_key = get_user_api_key(request.user)
+            ai_service = AIService(api_key=api_key)
+            analysis_result = run_async_ai_task(
+                ai_service.analyze_nsfw_writing_style(text_sample)
+            )
+
+            # Format the analysis result into readable text
+            formatted_text = self._format_analysis_result(analysis_result)
+
+            return Response({
+                'analysis_result': analysis_result,
+                'formatted_text': formatted_text,
+                'name': name
+            })
+
+        except Exception as e:
+            return Response(
+                {'error': f'NSFW分析失败：{str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
     def _format_analysis_result(self, analysis_result):
         """将结构化分析结果格式化为可读文本"""
         if not analysis_result or 'perspectives' not in analysis_result:
             return ''
 
         formatted_parts = []
+
+        # Add overall description at the top if present
+        if 'overall' in analysis_result and analysis_result['overall']:
+            overall = f"【风格总览】\n{analysis_result['overall']}"
+            formatted_parts.append(overall)
+
+        # Format each perspective
         for perspective in analysis_result['perspectives']:
             name = perspective.get('name', '')
             description = perspective.get('description', '')

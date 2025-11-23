@@ -34,12 +34,21 @@ api.interceptors.request.use(
   }
 );
 
-// Add response interceptor to handle 401 errors
+// Add response interceptor to handle errors
 api.interceptors.response.use(
   (response) => {
     return response;
   },
   (error) => {
+    // Check for API key missing error
+    const errorMessage = error.response?.data?.error || '';
+    if (errorMessage.includes('API密钥未配置') || errorMessage.includes('请先配置API密钥') || errorMessage.includes('用户设置不存在')) {
+      // Trigger settings modal via custom event
+      window.dispatchEvent(new CustomEvent('openSettingsModal', {
+        detail: { reason: 'API密钥未配置，请先配置您的DeepSeek API密钥' }
+      }));
+    }
+
     if (error.response?.status === 401) {
       // Clear auth state and redirect to login
       const authStorage = localStorage.getItem('auth-storage');
@@ -647,6 +656,7 @@ export const stylesApi = {
   analyze: (text: string, name: string) =>
     api.post<{
       analysis_result: {
+        overall?: string;
         perspectives: Array<{
           name: string;
           description: string;
@@ -656,6 +666,20 @@ export const stylesApi = {
       formatted_text: string;
       name: string;
     }>('/styles/analyze/', { text, name }),
+
+  analyzeNsfw: (text: string, name: string) =>
+    api.post<{
+      analysis_result: {
+        overall?: string;
+        perspectives: Array<{
+          name: string;
+          description: string;
+          examples: string[];
+        }>;
+      };
+      formatted_text: string;
+      name: string;
+    }>('/styles/analyze_nsfw/', { text, name }),
 };
 
 // WebSocket 连接管理

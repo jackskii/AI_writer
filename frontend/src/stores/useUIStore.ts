@@ -22,6 +22,8 @@ interface UIState {
   isCreateChapterModalOpen: boolean;
   isLoreEntryModalOpen: boolean;
   selectedLoreEntry: LoreEntry | null;
+  isSettingsModalOpen: boolean;
+  settingsModalReason: string | null; // Why settings modal was opened
   
   // Notifications
   notifications: Array<{
@@ -46,6 +48,7 @@ interface UIState {
   setCreateWorkModalOpen: (open: boolean) => void;
   setCreateChapterModalOpen: (open: boolean) => void;
   setLoreEntryModalOpen: (open: boolean, entry?: LoreEntry) => void;
+  setSettingsModalOpen: (open: boolean, reason?: string) => void;
   
   addNotification: (notification: Omit<UIState['notifications'][0], 'id' | 'timestamp'>) => void;
   removeNotification: (id: string) => void;
@@ -70,6 +73,8 @@ export const useUIStore = create<UIState>((set, get) => ({
   isCreateChapterModalOpen: false,
   isLoreEntryModalOpen: false,
   selectedLoreEntry: null,
+  isSettingsModalOpen: false,
+  settingsModalReason: null,
   
   notifications: [],
   
@@ -90,9 +95,13 @@ export const useUIStore = create<UIState>((set, get) => ({
   
   setCreateWorkModalOpen: (open) => set({ isCreateWorkModalOpen: open }),
   setCreateChapterModalOpen: (open) => set({ isCreateChapterModalOpen: open }),
-  setLoreEntryModalOpen: (open, entry) => set({ 
+  setLoreEntryModalOpen: (open, entry) => set({
     isLoreEntryModalOpen: open,
     selectedLoreEntry: entry || null
+  }),
+  setSettingsModalOpen: (open, reason) => set({
+    isSettingsModalOpen: open,
+    settingsModalReason: reason || null
   }),
   
   addNotification: (notification) => {

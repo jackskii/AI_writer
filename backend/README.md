@@ -74,9 +74,14 @@ This backend now supports all initially planned features:
 
 ```python
 class DeepSeekAPI:
-    def __init__(self):
+    def __init__(self, api_key: str = None):
+        # API key is passed from user settings
+        self.api_key = api_key or getattr(settings, 'DEEPSEEK_API_KEY', None)
+        if not self.api_key:
+            raise ValueError("API key not configured")
+
         self.client = AsyncOpenAI(
-            api_key=settings.DEEPSEEK_API_KEY,
+            api_key=self.api_key,
             base_url=settings.DEEPSEEK_API_BASE
         )
 
@@ -301,9 +306,8 @@ GET /api/ai/chat/stream/?token={user_token}&work_id=123&chapter_id=456&message=h
 
 ### Required Settings
 ```bash
-# API Keys
-DEEPSEEK_API_KEY=sk-your-deepseek-api-key
-DEEPSEEK_API_BASE=https://api.deepseek.com
+# DeepSeek API (Note: API keys are stored per-user in account settings)
+DEEPSEEK_API_BASE=https://api.deepseek.com/v1
 
 # Django Settings
 DEBUG=True
@@ -328,14 +332,12 @@ REDIS_URL=redis://localhost:6379/0
 ## Common Issues & Troubleshooting
 
 ### 1. AI Services Not Working
-**Symptoms**: Mock responses, no actual AI
-**Cause**: Missing or invalid `DEEPSEEK_API_KEY`
+**Symptoms**: Error messages about missing API key
+**Cause**: User hasn't configured DeepSeek API key in their account settings
 **Solution**:
-```bash
-# Check .env file
-echo $DEEPSEEK_API_KEY
-# Should output your API key, not empty
-```
+- Each user must configure their own API key in account settings after registration
+- API keys are stored encrypted per-user in the UserSettings model
+- Check that user.settings.deepseek_api_key is set
 
 ### 2. Streaming Authentication Fails
 **Symptoms**: 401 errors on `/stream/` endpoints
@@ -404,9 +406,8 @@ export DEBUG=True
 # Show SQL queries
 export DJANGO_LOG_LEVEL=DEBUG
 
-# Test AI services without API key
-unset DEEPSEEK_API_KEY
-# Should show mock responses
+# Test AI services without user API key
+# User without configured API key will get error message
 ```
 
 This backend is designed to be robust, scalable, and maintainable with clear separation of concerns and comprehensive error handling.

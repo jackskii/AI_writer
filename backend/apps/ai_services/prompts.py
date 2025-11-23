@@ -192,7 +192,7 @@ DEFAULT_MAX_TOKENS = 2000
 # Error Messages (User-facing)
 # =============================================================================
 
-ERROR_API_KEY_MISSING = "DeepSeek API密钥未配置，请在.env文件中设置DEEPSEEK_API_KEY"
+ERROR_API_KEY_MISSING = "DeepSeek API密钥未配置，请在账户设置中配置您的API密钥"
 ERROR_API_FAILED = "AI服务暂时不可用，请稍后重试"
 ERROR_CHAT_FAILED = "AI聊天失败"
 ERROR_SUGGEST_FAILED = "AI建议生成失败"

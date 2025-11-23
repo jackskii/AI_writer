@@ -86,5 +86,21 @@ export const authApi = {
   updateProfile: async (data: Partial<User>): Promise<User> => {
     const response = await authAxios.put(`${API_BASE_URL}/api/auth/profile/update/`, data);
     return response.data;
+  },
+
+  getSettings: async (): Promise<UserSettings> => {
+    const response = await authAxios.get(`${API_BASE_URL}/api/auth/settings/`);
+    return response.data;
+  },
+
+  updateSettings: async (data: { deepseek_api_key?: string }): Promise<{ message: string; data: UserSettings }> => {
+    const response = await authAxios.put(`${API_BASE_URL}/api/auth/settings/update/`, data);
+    return response.data;
   }
 };
+
+export interface UserSettings {
+  masked_api_key: string;
+  has_api_key: boolean;
+  updated_at: string;
+}

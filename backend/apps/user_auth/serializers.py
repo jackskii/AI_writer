@@ -1,6 +1,7 @@
 from rest_framework import serializers
 from django.contrib.auth.models import User
 from django.contrib.auth import authenticate
+from .models import UserSettings
 
 
 class UserRegistrationSerializer(serializers.ModelSerializer):
@@ -76,3 +77,30 @@ class UserSerializer(serializers.ModelSerializer):
 
     def get_works_count(self, obj):
         return obj.works.count()
+
+
+class UserSettingsSerializer(serializers.ModelSerializer):
+    deepseek_api_key = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    masked_api_key = serializers.SerializerMethodField(read_only=True)
+    has_api_key = serializers.SerializerMethodField(read_only=True)
+
+    class Meta:
+        model = UserSettings
+        fields = ('deepseek_api_key', 'masked_api_key', 'has_api_key', 'updated_at')
+        read_only_fields = ('masked_api_key', 'has_api_key', 'updated_at')
+
+    def get_masked_api_key(self, obj):
+        """返回脱敏后的API密钥"""
+        return obj.get_masked_api_key()
+
+    def get_has_api_key(self, obj):
+        """返回是否有有效的API密钥"""
+        return obj.has_valid_api_key()
+
+    def update(self, instance, validated_data):
+        """更新API密钥"""
+        if 'deepseek_api_key' in validated_data:
+            api_key = validated_data.pop('deepseek_api_key')
+            instance.deepseek_api_key = api_key
+            instance.save()
+        return instance

@@ -127,6 +127,7 @@ export interface WritingStyle {
   name: string;
   style_data: string;
   analysis_result?: {
+    overall?: string;
     perspectives: WritingStylePerspective[];
   };
   created_at: string;

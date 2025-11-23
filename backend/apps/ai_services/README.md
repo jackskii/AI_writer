@@ -21,17 +21,17 @@ The main interface to DeepSeek's API using AsyncOpenAI client:
 class DeepSeekAPI:
     """DeepSeek API 客户端 - 使用 OpenAI 客户端库"""
 
-    def __init__(self):
-        self.api_key = settings.DEEPSEEK_API_KEY
+    def __init__(self, api_key: str = None):
+        # API key is now passed per-user from UserSettings
+        self.api_key = api_key or getattr(settings, 'DEEPSEEK_API_KEY', None)
         self.base_url = settings.DEEPSEEK_API_BASE
         if not self.api_key:
-            logger.warning("DEEPSEEK_API_KEY not configured, using mock responses")
-            self.client = None
-        else:
-            self.client = AsyncOpenAI(
-                api_key=self.api_key,
-                base_url=self.base_url
-            )
+            raise ValueError("API密钥未配置。请在设置中配置您的DeepSeek API密钥。")
+
+        self.client = AsyncOpenAI(
+            api_key=self.api_key,
+            base_url=self.base_url
+        )
 ```
 
 #### Key Methods
@@ -475,8 +475,8 @@ def _run_in_thread(coro):
 ### Required Environment Variables
 ```python
 # settings.py
-DEEPSEEK_API_KEY = env('DEEPSEEK_API_KEY', default='')
-DEEPSEEK_API_BASE = env('DEEPSEEK_API_BASE', default='https://api.deepseek.com')
+# Note: API keys are now stored per-user in UserSettings model
+DEEPSEEK_API_BASE = env('DEEPSEEK_API_BASE', default='https://api.deepseek.com/v1')
 
 # Logging configuration
 LOGGING = {
@@ -513,12 +513,18 @@ LOGGING = {
 
 ## Error Handling & Fallbacks
 
-### Mock Responses for Development
+### API Key Management
 ```python
-# When DEEPSEEK_API_KEY is not configured
-if not self.api_key:
-    logger.info("Using mock AI response (no API key configured)")
-    user_message = messages[-1].get('content', '') if messages else ''
+# API keys are retrieved from user settings
+from apps.user_auth.models import UserSettings
+
+def get_user_api_key(user):
+    try:
+        settings = UserSettings.objects.get(user=user)
+        api_key = settings.deepseek_api_key
+        if not api_key:
+            raise ValueError("Please configure your DeepSeek API key in account settings")
+        return api_key
     mock_content = f"这是一个模拟的AI回复。您的消息是：{user_message[:50]}..."
 
     return {
