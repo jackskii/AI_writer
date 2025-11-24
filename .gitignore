@@ -110,3 +110,7 @@ jspm_packages/
 
 # DynamoDB Local files
 .dynamodb/
+
+# Claude AI
+.claude/
+CLAUDE.md
