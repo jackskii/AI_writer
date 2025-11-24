@@ -3,7 +3,7 @@ import { X, Settings, Type, Palette, Clock, Brain, Key, Eye, EyeOff } from 'luci
 import { Button } from '../ui/Button';
 import { Card, CardHeader, CardContent } from '../ui/Card';
 import { Input } from '../ui/Input';
-import { authApi, type UserSettings } from '../../services/authApi';
+import { authApi } from '../../services/authApi';
 import { LoadingSpinner } from '../ui/Loading';
 
 interface SettingsModalProps {
@@ -43,7 +43,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         setSaveMessage({ type: 'error', text: event.detail.reason });
       }
       // Trigger parent to open modal if not already open
-      if (!isOpen && onClose) {
+      if (!isOpen) {
         // This assumes the parent component also listens to the UIStore
         // We'll update pages to use UIStore for settings modal
       }

@@ -7,20 +7,14 @@ export default defineConfig({
   server: {
     port: 3001,
     host: true,
-    allowedHosts: ['98f47a5be1c9f6c953b91ad07961dcee.serveo.net', '.serveo.net', 'novel-ai-frontend.loca.lt', '.loca.lt']
+    // Add your production domains here if needed
+    // allowedHosts: ['your-domain.com']
   },
   build: {
     // Enable source maps for debugging (disable in production if needed)
     sourcemap: false,
-    // Optimize build output
-    minify: 'terser',
-    // Remove console logs in production
-    terserOptions: {
-      compress: {
-        drop_console: true,
-        drop_debugger: true
-      }
-    },
+    // Optimize build output - use esbuild instead of terser
+    minify: 'esbuild',
     // Generate build report
     reportCompressedSize: true,
     // Chunk size warning limit

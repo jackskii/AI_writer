@@ -31,13 +31,13 @@ export const StyleManagerModal: React.FC<StyleManagerModalProps> = ({
     queryFn: async () => {
       const response = await stylesApi.list();
       // Handle both paginated and non-paginated responses
-      return Array.isArray(response.data) ? response.data : (response.data?.results || []);
+      return Array.isArray(response.data) ? response.data : ((response.data as any)?.results || []);
     },
     enabled: isOpen,
   });
 
   // Get selected style
-  const selectedStyle = styles?.find(s => s.id === selectedStyleId);
+  const selectedStyle = styles?.find((s: any) => s.id === selectedStyleId);
 
   // Update local state when selected style changes
   useEffect(() => {
@@ -147,7 +147,7 @@ export const StyleManagerModal: React.FC<StyleManagerModalProps> = ({
                   </div>
                 ) : styles && styles.length > 0 ? (
                   <div className="space-y-1">
-                    {styles.map((style) => (
+                    {styles.map((style: any) => (
                       <button
                         key={style.id}
                         onClick={() => setSelectedStyleId(style.id)}
@@ -210,10 +210,10 @@ export const StyleManagerModal: React.FC<StyleManagerModalProps> = ({
                   {/* Action Buttons */}
                   <div className="flex-shrink-0 border-t border-dark-border p-4 flex items-center justify-between bg-dark-bg">
                     <Button
-                      variant="destructive"
+                      variant="outline"
                       size="sm"
                       onClick={handleDelete}
-                      className="flex items-center gap-2"
+                      className="flex items-center gap-2 text-red-500 hover:bg-red-500/10"
                       disabled={deleteMutation.isPending}
                     >
                       <Trash2 size={16} />

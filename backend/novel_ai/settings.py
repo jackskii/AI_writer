@@ -15,7 +15,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # Security settings
 SECRET_KEY = os.environ.get('SECRET_KEY', 'django-insecure-0#rt!guz40l1*_99@)_&c3#ztdx_@f=02hvpx9@$159n3fk8cy')
 DEBUG = os.environ.get('DEBUG', 'True').lower() == 'true'
-ALLOWED_HOSTS = os.environ.get('ALLOWED_HOSTS', 'localhost,127.0.0.1,83ddbd0bb18bc5642e91a6d3f3770c1a.serveo.net,98f47a5be1c9f6c953b91ad07961dcee.serveo.net').split(',')
+ALLOWED_HOSTS = os.environ.get('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
 
 # Application definition
 DJANGO_APPS = [
@@ -143,8 +143,6 @@ CORS_ALLOWED_ORIGINS = [
     'http://127.0.0.1:3001',
     'http://localhost:5173',
     'http://127.0.0.1:5173',
-    'https://83ddbd0bb18bc5642e91a6d3f3770c1a.serveo.net',
-    'https://98f47a5be1c9f6c953b91ad07961dcee.serveo.net',
 ]
 
 # Allow tunnel URLs for development deployment

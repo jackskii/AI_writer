@@ -686,7 +686,7 @@ export const stylesApi = {
 export class ChatWebSocket {
   private ws: WebSocket | null = null;
   private url: string;
-  private reconnectTimer: NodeJS.Timeout | null = null;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private maxReconnectAttempts = 5;
   private reconnectAttempts = 0;
   

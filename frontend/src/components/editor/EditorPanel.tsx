@@ -3,7 +3,7 @@ import { isAxiosError, type AxiosResponse } from 'axios';
 import { Lightbulb, X, Plus, Edit3, Trash2, StickyNote, ExternalLink, Link, Wand2 } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Button } from '../ui/Button';
-import { Input, Textarea } from '../ui/Input';
+import { Textarea } from '../ui/Input';
 import { LoadingButton } from '../ui/Loading';
 import { useUIStore } from '../../stores/useUIStore';
 import { aiApi, notesApi, autoEditApi } from '../../services/api';
@@ -38,7 +38,7 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
   // ALL HOOKS MUST BE CALLED BEFORE ANY EARLY RETURNS
   const editorRef = useRef<HTMLTextAreaElement | null>(null);
   const previousContentRef = useRef(content);
-  const highlightTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const highlightTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isManualUpdateRef = useRef(false); // Flag to prevent double-adjustment during version switching
 
   const [selectedText, setSelectedText] = useState('');
@@ -452,6 +452,7 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
   };
 
   // Remove exact duplicate text from AI continuation
+  // @ts-expect-error - Function reserved for future duplicate detection
   const removeDuplicateText = (existingContent: string, newContent: string): string => {
     if (!existingContent || !newContent) return newContent;
 
@@ -625,7 +626,7 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
       () => {
         console.log('Auto edit stream started');
       },
-      (editedText: string) => {
+      (_editedText: string) => {
         console.log('Auto edit stream completed');
         onEnd();
       },

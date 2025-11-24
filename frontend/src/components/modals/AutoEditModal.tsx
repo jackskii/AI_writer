@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { X, ChevronLeft, ChevronRight, Square, Wand2, Check, RotateCcw, Settings } from 'lucide-react';
 import { Button } from '../ui/Button';
-import { LoadingButton } from '../ui/Loading';
 import { Textarea } from '../ui/Input';
 import type { Work, Chapter, LoreEntry, WritingStyle } from '../../types';
 
@@ -105,7 +104,7 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
           const { stylesApi } = await import('../../services/api');
           const response = await stylesApi.list();
           // Handle both paginated and non-paginated responses
-          const stylesList = Array.isArray(response.data) ? response.data : (response.data?.results || []);
+          const stylesList = Array.isArray(response.data) ? response.data : ((response.data as any)?.results || []);
           setStyles(stylesList);
         } catch (error) {
           console.error('Failed to load styles:', error);
@@ -140,8 +139,8 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
       // Handle both array and paginated response formats
       if (Array.isArray(data)) {
         setLoreEntries(data);
-      } else if (data.results && Array.isArray(data.results)) {
-        setLoreEntries(data.results);
+      } else if ((data as any).results && Array.isArray((data as any).results)) {
+        setLoreEntries((data as any).results);
       } else {
         console.warn('Unexpected lore entries format:', data);
         setLoreEntries([]);

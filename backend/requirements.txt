@@ -1,6 +1,7 @@
 Django
 djangorestframework
 django-cors-headers
+django-axes
 psycopg2-binary
 redis
 celery

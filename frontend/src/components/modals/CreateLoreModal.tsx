@@ -103,7 +103,7 @@ export const CreateLoreModal: React.FC<CreateLoreModalProps> = ({
     try {
       const response = await aiApi.autoDescribeEntry(workId, name.trim());
       setDescription(response.data.description);
-      setUsedChapters(response.data.used_chapters || []);
+      setUsedChapters((response.data as any).used_chapters || []);
     } catch (error) {
       console.error('Failed to generate description:', error);
       alert('生成描述失败，请稍后重试');
