@@ -193,111 +193,12 @@ export const chatApi = {
 
 // AI 服务相关 API
 export const aiApi = {
-  chat: (workId: number, chapterId: number, message: string, model: string = 'deepseek-chat') =>
-    api.post<{ response: string }>('/ai/chat/', {
-      work_id: workId,
-      chapter_id: chapterId,
-      message,
-      model,
-    }),
-
-  continue: (workId: number, chapterId: number, guide?: string, content?: string, tokenCount?: number) =>
-    api.post<{ content: string }>('/ai/continue/', {
-      work_id: workId,
-      chapter_id: chapterId,
-      guide,
-      content,
-      token_count: tokenCount,
-    }),
-  
   suggest: (workId: number, chapterId: number, targetText?: string) =>
     api.post<{ suggestions: Suggestion[] }>('/ai/suggest/', {
       work_id: workId,
       chapter_id: chapterId,
       target_text: targetText,
     }),
-  
-  summarize: (workId: number, chapterId: number) =>
-    api.post<{ summary: string }>('/ai/summarize/', {
-      work_id: workId,
-      chapter_id: chapterId,
-    }),
-
-  // Streaming version of continue writing
-  continueStream: (
-    workId: number,
-    chapterId: number,
-    onChunk: (chunk: string) => void,
-    onStart?: () => void,
-    onEnd?: () => void,
-    onError?: (error: string) => void,
-    guide?: string,
-    content?: string,
-    tokenCount?: number
-  ) => {
-    const params = new URLSearchParams({
-      work_id: workId.toString(),
-      chapter_id: chapterId.toString(),
-    });
-
-    if (guide) params.append('guide', guide);
-    if (content) params.append('content', content);
-    if (tokenCount) params.append('token_count', tokenCount.toString());
-
-    // Add token for authentication since EventSource can't send headers
-    const authStorage = localStorage.getItem('auth-storage');
-    if (authStorage) {
-      try {
-        const parsedStorage = JSON.parse(authStorage);
-        const token = parsedStorage?.state?.token;
-        if (token) {
-          params.append('token', token);
-        }
-      } catch (e) {
-        console.error('Failed to parse auth storage:', e);
-      }
-    }
-
-    const eventSource = new EventSource(`${API_BASE_URL}/ai/continue/stream/?${params.toString()}`, {
-      withCredentials: true
-    });
-
-    eventSource.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        
-        switch (data.type) {
-          case 'start':
-            onStart?.();
-            break;
-          case 'chunk':
-            onChunk(data.content);
-            break;
-          case 'end':
-            onEnd?.();
-            eventSource.close();
-            break;
-          case 'error':
-            onError?.(data.message);
-            eventSource.close();
-            break;
-        }
-      } catch (error) {
-        console.error('Error parsing SSE data:', error);
-        onError?.('Error parsing server response');
-        eventSource.close();
-      }
-    };
-
-    eventSource.onerror = (error) => {
-      console.error('EventSource error:', error);
-      onError?.('Connection error occurred');
-      eventSource.close();
-    };
-
-    // Return the EventSource so it can be closed manually if needed
-    return eventSource;
-  },
 
   // Streaming version of summarize
   summarizeStream: (
@@ -378,14 +279,6 @@ export const aiApi = {
 
   // Get auto-edit prefills
   getPrefills: () => api.get<{ prefills: Record<string, string> }>('/ai/prefills/'),
-
-  // Non-streaming version of auto-edit
-  autoEdit: (workId: number, chapterId: number, selectedText: string) =>
-    api.post<{ edited_text: string }>('/ai/auto-edit/', {
-      work_id: workId,
-      chapter_id: chapterId,
-      selected_text: selectedText,
-    }),
 
   // Streaming version of auto edit
   autoEditStream: (

@@ -469,29 +469,6 @@ class AIService:
             logger.error(f"Chat AI stream error for chapter {chapter_id}: {str(e)}", exc_info=True)
             raise Exception(f"{prompts.ERROR_CHAT_FAILED}: {str(e)}")
 
-    async def auto_edit(self, selected_text: str, context: str = "") -> str:
-        """AI auto-edit function - non-streaming version"""
-        logger.debug(f"Starting AI auto-edit for text: {selected_text[:50]}...")
-
-        try:
-            # Format the request with context
-            user_message = prompts.format_auto_edit_request(context, selected_text)
-
-            # Build message with system prompt and context + selected text
-            messages = [
-                {"role": "system", "content": prompts.AUTO_EDIT_SYSTEM_PROMPT},
-                {"role": "user", "content": user_message}
-            ]
-
-            logger.debug(f"Sending auto-edit request to DeepSeek API")
-
-            response = await self.deepseek.chat_completion(messages, stream=False)
-            return response["choices"][0]["message"]["content"]
-
-        except Exception as e:
-            logger.error(f"Auto-edit error: {str(e)}", exc_info=True)
-            raise Exception(f"{prompts.ERROR_AUTO_EDIT_FAILED}: {str(e)}")
-
     async def auto_edit_stream(self, selected_text: str, context: str = "", model: str = "deepseek-chat", edit_requirement: str = None) -> AsyncGenerator[str, None]:
         """AI auto-edit function - streaming version"""
         logger.debug(f"Starting AI auto-edit stream for text: {selected_text[:50]}... with model: {model}")

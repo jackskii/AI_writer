@@ -661,7 +661,7 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
     if (onSave) {
       setTimeout(() => {
         onSave();
-      }, 100);
+      }, 0);
     }
 
     // Update cursor position after insertion
@@ -980,11 +980,36 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
         message: '正在生成新版本...'
       });
 
-      // Call non-streaming auto-edit API
-      const response = await aiApi.autoEdit(work.id, chapter.id, autoEdit.original_text);
-      const finalEditedText = response.data.edited_text;
+      // Call streaming auto-edit API
+      let streamedText = '';
+      await new Promise<void>((resolve, reject) => {
+        aiApi.autoEditStream(
+          work.id,
+          chapter.id,
+          autoEdit.original_text,
+          {
+            chapterSelection: 'past_3',  // Use past 3 chapters for context
+            selectedLoreEntries: [],      // Could retrieve saved lore IDs from autoEdit if stored
+            model: 'deepseek-chat'
+          },
+          (chunk) => {
+            streamedText += chunk;
+          },
+          () => {
+            console.log('Auto-edit stream started');
+          },
+          (_editedText) => {
+            console.log('New auto-edit completed');
+            resolve();
+          },
+          (error) => {
+            console.error('Auto-edit stream error:', error);
+            reject(new Error(error));
+          }
+        );
+      });
 
-      console.log('New auto-edit completed');
+      const finalEditedText = streamedText;
 
       try {
         // Add new version to existing AutoEdit

@@ -1,11 +1,10 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { flushSync } from 'react-dom';
 import { Send, Bot, User, Square, Settings } from 'lucide-react';
-import { useMutation } from '@tanstack/react-query';
 import ReactMarkdown from 'react-markdown';
 import { aiApi, chatApi } from '../../services/api';
 import { Button } from '../ui/Button';
 import { Textarea } from '../ui/Input';
-import { LoadingSpinner } from '../ui/Loading';
 import type { Work, Chapter, ChatMessage } from '../../types';
 
 interface ChatPanelProps {
@@ -20,6 +19,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ work, chapter }) => {
   const [inputMessage, setInputMessage] = useState('');
   const [isStreamingChat, setIsStreamingChat] = useState(false);
   const [streamingMessage, setStreamingMessage] = useState('');
+  const [errorMessage, setErrorMessage] = useState('');
   const [selectedModel, setSelectedModel] = useState<AIModel>('deepseek-chat');
   const [showModelSelector, setShowModelSelector] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -33,7 +33,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ work, chapter }) => {
 
   useEffect(() => {
     scrollToBottom();
-  }, [messages, streamingMessage]);
+  }, [messages, streamingMessage, errorMessage]);
 
   // Close active stream when unmounting
   useEffect(() => {
@@ -45,49 +45,9 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ work, chapter }) => {
     };
   }, []);
 
-  // Fallback chat mutation for when streaming fails
-  const chatMutation = useMutation({
-    mutationFn: (pendingMessage: string) => {
-      if (!work?.id || !chapter?.id) {
-        throw new Error('Work or chapter not available');
-      }
-      return aiApi.chat(work.id, chapter.id, pendingMessage, selectedModel);
-    },
-    onSuccess: async (response) => {
-      const aiResponse: ChatMessage = {
-        id: Date.now().toString() + '_ai',
-        role: 'assistant',
-        content: response.data.response,
-        timestamp: new Date().toISOString()
-      };
-      
-      setMessages(prev => [...prev, aiResponse]);
-      
-      // Save AI response to backend
-      if (work?.id && chapter?.id) {
-        try {
-          await chatApi.saveMessage(work.id, chapter.id, 'assistant', response.data.response);
-        } catch (error) {
-          console.error('Failed to save AI response:', error);
-        }
-      }
-    },
-    onError: (error) => {
-      const errorMessage: ChatMessage = {
-        id: Date.now().toString() + '_error',
-        role: 'assistant',
-        content: 'AI暂时无法回应，请稍后重试。',
-        timestamp: new Date().toISOString()
-      };
-      
-      setMessages(prev => [...prev, errorMessage]);
-      console.error('Chat error:', error);
-    }
-  });
-
   const handleSendMessage = async () => {
     const message = inputMessage.trim();
-    if (!message || isStreamingChat || chatMutation.isPending) return;
+    if (!message || isStreamingChat) return;
 
     // Check if work and chapter are available
     if (!work?.id || !chapter?.id) {
@@ -121,14 +81,18 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ work, chapter }) => {
     try {
       setIsStreamingChat(true);
       setStreamingMessage('');
-      
+      setErrorMessage('');
+
       const eventSource = aiApi.chatStream(
         work.id,
         chapter.id,
         message,
         // onChunk
         (chunk: string) => {
-          setStreamingMessage(prev => prev + chunk);
+          console.log('Chat chunk received:', chunk);
+          flushSync(() => {
+            setStreamingMessage(prev => prev + chunk);
+          });
         },
         // onStart
         () => {
@@ -160,10 +124,15 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ work, chapter }) => {
           console.error('Streaming chat error:', error);
           setIsStreamingChat(false);
           setStreamingMessage('');
+          setErrorMessage(error);
           streamEventSourceRef.current = null;
 
-          // Fallback to regular API
-          chatMutation.mutate(message);
+          // Check if it's an API key error and trigger settings modal
+          if (error.includes('API密钥') || error.includes('API key')) {
+            window.dispatchEvent(new CustomEvent('openSettingsModal', {
+              detail: { reason: 'API密钥未配置，请先配置您的DeepSeek API密钥' }
+            }));
+          }
         },
         selectedModel
       );
@@ -172,7 +141,6 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ work, chapter }) => {
     } catch (error) {
       console.error('Failed to start streaming:', error);
       setIsStreamingChat(false);
-      chatMutation.mutate(message);
     }
   };
 
@@ -408,7 +376,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ work, chapter }) => {
                 <span className="text-xs text-dark-text-muted">AI助手</span>
               </div>
             </div>
-            
+
             {/* Streaming content */}
             <div className="w-full bg-dark-surface border border-dark-border rounded-lg p-3 mb-1">
               <div className="prose prose-sm prose-invert max-w-none text-dark-text">
@@ -416,7 +384,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ work, chapter }) => {
                 <span className="inline-block w-2 h-4 bg-dark-primary animate-pulse ml-1" />
               </div>
             </div>
-            
+
             {/* Timestamp */}
             <div className="text-xs opacity-70 mb-4 text-left text-dark-text-muted">
               正在输入...
@@ -424,25 +392,36 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ work, chapter }) => {
           </div>
         )}
 
-        {/* Loading indicator for HTTP requests */}
-        {chatMutation.isPending && !isStreamingChat && (
+        {/* Error message display */}
+        {errorMessage && !isStreamingChat && (
           <div className="w-full">
             {/* Avatar on top */}
             <div className="flex items-center mb-2 justify-start">
               <div className="flex items-center gap-2">
-                <div className="flex-shrink-0 w-6 h-6 bg-dark-primary rounded-full flex items-center justify-center">
+                <div className="flex-shrink-0 w-6 h-6 bg-red-600 rounded-full flex items-center justify-center">
                   <Bot size={12} className="text-white" />
                 </div>
-                <span className="text-xs text-dark-text-muted">AI助手</span>
+                <span className="text-xs text-dark-text-muted">系统提示</span>
               </div>
             </div>
-            
-            {/* Full width loading bubble */}
-            <div className="w-full bg-dark-surface border border-dark-border rounded-lg p-3">
-              <div className="flex items-center gap-2 text-dark-text-muted">
-                <LoadingSpinner size="sm" />
-                <span className="text-sm">AI正在思考...</span>
+
+            {/* Error content */}
+            <div className="w-full bg-red-900/20 border border-red-600/50 rounded-lg p-3 mb-1">
+              <div className="text-sm text-red-300">
+                <p className="font-semibold mb-1">错误</p>
+                <p>{errorMessage}</p>
+                {(errorMessage.includes('API密钥') || errorMessage.includes('API key')) && (
+                  <p className="mt-2 text-xs">请点击右上角设置按钮配置您的API密钥</p>
+                )}
               </div>
+            </div>
+
+            {/* Timestamp */}
+            <div className="text-xs opacity-70 mb-4 text-left text-red-300">
+              {new Date().toLocaleTimeString('zh-CN', {
+                hour: '2-digit',
+                minute: '2-digit'
+              })}
             </div>
           </div>
         )}
@@ -462,7 +441,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ work, chapter }) => {
               placeholder="与AI助手聊天... (Enter发送, Shift+Enter换行)"
               className="bg-dark-bg border-dark-border text-sm resize-none overflow-hidden min-h-[40px] max-h-[200px]"
               rows={1}
-              disabled={isStreamingChat || chatMutation.isPending}
+              disabled={isStreamingChat}
             />
           </div>
 
@@ -477,7 +456,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ work, chapter }) => {
           ) : (
             <Button
               onClick={handleSendMessage}
-              disabled={!inputMessage.trim() || chatMutation.isPending}
+              disabled={!inputMessage.trim()}
               size="sm"
               className="flex items-center gap-2 px-3 py-2"
             >

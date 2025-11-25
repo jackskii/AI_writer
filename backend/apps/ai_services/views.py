@@ -4,6 +4,7 @@ from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
 from django.shortcuts import get_object_or_404
 from django.http import StreamingHttpResponse
+from asgiref.sync import sync_to_async
 from apps.works.models import Work, Chapter, LoreEntry
 from .services import AIService, run_async_ai_task
 from .models import Suggestion
@@ -14,6 +15,131 @@ import asyncio
 import uuid
 
 logger = logging.getLogger(__name__)
+
+
+# Async helper functions for database operations
+@sync_to_async
+def get_user_api_key_async(user):
+    """获取用户的API密钥 (async version)"""
+    from apps.user_auth.models import UserSettings
+    settings = UserSettings.objects.get(user=user)
+    api_key = settings.deepseek_api_key
+    if not api_key:
+        raise ValueError("API密钥未配置")
+    return api_key
+
+
+@sync_to_async
+def get_token_user(token_key):
+    """Get user from token (async version)"""
+    from rest_framework.authtoken.models import Token
+    token_obj = Token.objects.get(key=token_key)
+    return token_obj.user
+
+
+@sync_to_async
+def get_work_and_chapter(work_id, chapter_id=None):
+    """Get work and optionally chapter (async version)"""
+    work = Work.objects.get(id=work_id)
+    if chapter_id:
+        chapter = Chapter.objects.get(id=chapter_id, work=work)
+        return work, chapter
+    return work, None
+
+
+@sync_to_async
+def get_chat_history(work, chapter, user):
+    """Get chat history (async version)"""
+    from apps.chat.models import ChatSession
+    try:
+        session = ChatSession.objects.get(work=work, chapter=chapter, user=user)
+        recent_messages = session.messages.all().order_by('-created_at')[:10]
+        return [{'role': msg.role, 'content': msg.content} for msg in reversed(list(recent_messages))]
+    except ChatSession.DoesNotExist:
+        return []
+
+
+@sync_to_async
+def get_work_chat_history(work, user):
+    """Get work-level chat history (async version)"""
+    from apps.chat.models import WorkChatSession, WorkChatMessage
+    session, _ = WorkChatSession.objects.get_or_create(
+        work=work, user=user, defaults={'session_id': str(uuid.uuid4())}
+    )
+    recent_messages = WorkChatMessage.objects.filter(session=session).order_by('-created_at')[:10]
+    return [{'role': msg.role, 'content': msg.content} for msg in reversed(list(recent_messages))]
+
+
+@sync_to_async
+def save_chapter_summary(chapter, summary):
+    """Save chapter summary (async version)"""
+    chapter.summary = summary
+    chapter.save(update_fields=['summary'])
+
+
+@sync_to_async
+def build_auto_edit_context(work, chapter, user, style_id, selected_lore_ids, chapter_selection, custom_chapter_count):
+    """Build context for auto-edit (async version)"""
+    formatted_context = ""
+
+    # Add writing style if selected
+    if style_id:
+        try:
+            from apps.works.models import WritingStyle
+            style = WritingStyle.objects.get(id=int(style_id), user=user)
+            formatted_context += f"写作风格参考：\n\n{style.style_data}\n\n---\n\n"
+        except (WritingStyle.DoesNotExist, ValueError):
+            pass
+
+    # Add synopsis
+    if work.synopsis:
+        formatted_context += f"作品大纲：{work.synopsis}\n\n"
+
+    # Add selected lore entries
+    if selected_lore_ids:
+        lore_ids = [int(id.strip()) for id in selected_lore_ids.split(',') if id.strip()]
+        if lore_ids:
+            lore_entries = LoreEntry.objects.filter(id__in=lore_ids, work=work)
+            if lore_entries:
+                formatted_context += "世界观条目：\n\n"
+                for entry in lore_entries:
+                    formatted_context += f"【{entry.name}】\n{entry.description}\n\n"
+                formatted_context += "---\n\n"
+
+    # Add chapters based on selection
+    available_previous_count = work.chapters.filter(order__lt=chapter.order).count()
+
+    previous_chapters = []
+    if chapter_selection == 'none':
+        previous_chapters = []
+    elif chapter_selection == 'all':
+        previous_chapters = list(work.chapters.filter(order__lt=chapter.order).order_by('order'))
+    elif chapter_selection == 'custom':
+        try:
+            count = int(custom_chapter_count)
+            count = min(max(0, count), available_previous_count)
+            if count > 0:
+                previous_chapters = list(work.chapters.filter(order__lt=chapter.order).order_by('-order')[:count])
+                previous_chapters = list(reversed(previous_chapters))
+        except:
+            count = 3
+            previous_chapters = list(work.chapters.filter(order__lt=chapter.order).order_by('-order')[:count])
+            previous_chapters = list(reversed(previous_chapters))
+    else:  # 'past_3' (default)
+        count = min(3, available_previous_count)
+        previous_chapters = list(work.chapters.filter(order__lt=chapter.order).order_by('-order')[:count])
+        previous_chapters = list(reversed(previous_chapters))
+
+    if previous_chapters:
+        formatted_context += "前文章节：\n\n"
+        for ch in previous_chapters:
+            formatted_context += f"第{ch.chapter_number}章《{ch.title}》\n\n{ch.content or '(空章节)'}\n\n---\n\n"
+
+    # Add current chapter content at the end
+    if chapter.content:
+        formatted_context += f"当前章节《{chapter.title}》全文：\n\n{chapter.content}\n\n---\n\n"
+
+    return formatted_context
 
 
 def get_user_api_key(user):
@@ -79,8 +205,8 @@ from django.views.decorators.csrf import csrf_exempt
 from django.http import HttpResponse
 
 @csrf_exempt
-def ai_chat_stream(request):
-    """AI聊天端点 - SSE流式响应，支持聊天历史"""
+async def ai_chat_stream(request):
+    """AI聊天端点 - SSE流式响应，支持聊天历史 (async version for ASGI)"""
     if request.method != 'GET':
         return HttpResponse(
             'data: {"type": "error", "message": "仅支持GET请求"}\n\n',
@@ -91,151 +217,90 @@ def ai_chat_stream(request):
     user = None
     token = request.GET.get('token')
     if token:
-        from django.contrib.auth.models import AnonymousUser
-        from rest_framework.authtoken.models import Token
         try:
-            token_obj = Token.objects.get(key=token)
-            user = token_obj.user
-            request.user = user
-        except Token.DoesNotExist:
+            user = await get_token_user(token)
+        except Exception:
             return HttpResponse(
                 'data: {"type": "error", "message": "认证令牌无效"}\n\n',
                 content_type='text/event-stream',
                 status=401
             )
-    elif not request.user.is_authenticated:
+    elif hasattr(request, 'user') and request.user.is_authenticated:
+        user = request.user
+    else:
         return HttpResponse(
             'data: {"type": "error", "message": "需要登录"}\n\n',
             content_type='text/event-stream',
             status=401
         )
-    else:
-        user = request.user
 
     work_id = request.GET.get('work_id')
     chapter_id = request.GET.get('chapter_id')
     message = request.GET.get('message')
-    model = request.GET.get('model', 'deepseek-chat')  # Get model parameter, default to deepseek-chat
-    
+    model = request.GET.get('model', 'deepseek-chat')
+
     if not all([work_id, chapter_id, message]):
         return HttpResponse(
-            'data: {"type": "error", "message": "缺少必要参数"}\n\n', 
+            'data: {"type": "error", "message": "缺少必要参数"}\n\n',
             content_type='text/event-stream'
         )
-    
-    # 获取作品和章节
-    work = get_object_or_404(Work, id=work_id)
-    chapter = get_object_or_404(Chapter, id=chapter_id, work=work)
-    
-    def generate_stream():
-        """生成SSE数据流"""
+
+    # Get work and chapter
+    try:
+        work, chapter = await get_work_and_chapter(work_id, chapter_id)
+    except Exception:
+        return HttpResponse(
+            'data: {"type": "error", "message": "作品或章节不存在"}\n\n',
+            content_type='text/event-stream',
+            status=404
+        )
+
+    async def generate_stream():
+        """生成SSE数据流 (async generator)"""
         try:
-            # 获取聊天历史
-            from apps.chat.models import ChatSession, ChatMessage
-            try:
-                session = ChatSession.objects.get(
-                    work=work,
-                    chapter=chapter,
-                    user=request.user if hasattr(request, 'user') and request.user.is_authenticated else None
-                )
-                # 获取最近10条消息作为上下文
-                recent_messages = session.messages.all().order_by('-created_at')[:10]
-                chat_history = []
-                for msg in reversed(list(recent_messages)):
-                    chat_history.append({
-                        'role': msg.role,
-                        'content': msg.content
-                    })
-            except ChatSession.DoesNotExist:
-                chat_history = []
-            
-            # Build context in sync environment
+            # Get chat history
+            chat_history = await get_chat_history(work, chapter, user)
+
+            # Build context
             from .services import ContextBuilder
-            context = ContextBuilder.build_context(chapter)
-            
-            # 创建AI服务实例并开始流式生成
-            api_key = get_user_api_key(user)
+            context = await sync_to_async(ContextBuilder.build_context)(chapter)
+
+            # Get API key and create AI service
+            api_key = await get_user_api_key_async(user)
             ai_service = AIService(api_key=api_key)
-            
-            # 运行异步生成器
-            import asyncio
-            import threading
-            from queue import Queue
-            
-            chunk_queue = Queue()
-            error_queue = Queue()
-            
-            def run_in_thread():
-                try:
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-                    
-                    async def collect_chunks():
-                        async for chunk in ai_service.chat_with_ai_stream(context, message, chat_history, chapter.id, model):
-                            chunk_queue.put(chunk)
-                        chunk_queue.put(None)  # 结束标记
-                    
-                    loop.run_until_complete(collect_chunks())
-                except Exception as e:
-                    error_queue.put(str(e))
-                    chunk_queue.put(None)
-                finally:
-                    loop.close()
-            
-            # 启动线程
-            thread = threading.Thread(target=run_in_thread)
-            thread.start()
-            
-            # 发送初始事件
+
+            # Send start event
             yield f'data: {json.dumps({"type": "start", "message": "AI聊天开始"})}\n\n'
-            
-            # 流式发送chunks
+
+            # Stream chunks directly from async generator
             accumulated_response = ''
-            while True:
-                # 检查错误
-                if not error_queue.empty():
-                    error = error_queue.get()
-                    yield f'data: {json.dumps({"type": "error", "message": f"AI聊天失败: {error}"})}\n\n'
-                    break
-                
-                # 获取chunk
-                try:
-                    chunk = chunk_queue.get(timeout=1)
-                    if chunk is None:  # 结束标记
-                        yield f'data: {json.dumps({"type": "end", "message": "AI聊天完成", "full_response": accumulated_response})}\n\n'
-                        break
-                    
-                    # 累积响应内容
+            try:
+                async for chunk in ai_service.chat_with_ai_stream(context, message, chat_history, chapter.id, model):
                     accumulated_response += chunk
-                    
-                    # 发送chunk
                     yield f'data: {json.dumps({"type": "chunk", "content": chunk})}\n\n'
-                    
-                except:
-                    # 检查线程是否还活着
-                    if not thread.is_alive():
-                        yield f'data: {json.dumps({"type": "end", "message": "AI聊天完成", "full_response": accumulated_response})}\n\n'
-                        break
-            
-            thread.join(timeout=5)  # 最多等待5秒
-            
+
+                yield f'data: {json.dumps({"type": "end", "message": "AI聊天完成", "full_response": accumulated_response})}\n\n'
+            except Exception as e:
+                logger.error(f"Stream AI chat error during generation: {str(e)}")
+                yield f'data: {json.dumps({"type": "error", "message": f"AI聊天失败: {str(e)}"})}\n\n'
+
         except Exception as e:
             logger.error(f"Stream AI chat error: {str(e)}")
             yield f'data: {json.dumps({"type": "error", "message": f"AI聊天失败: {str(e)}"})}\n\n'
-    
+
     response = StreamingHttpResponse(
         generate_stream(),
         content_type='text/event-stream'
     )
     response['Cache-Control'] = 'no-cache'
-    response['X-Accel-Buffering'] = 'no'  # Disable nginx buffering
-    response['Access-Control-Allow-Origin'] = '*'  # CORS for SSE
+    response['X-Accel-Buffering'] = 'no'
+    response['Access-Control-Allow-Origin'] = '*'
     return response
 
 
 @csrf_exempt
-def ai_work_chat_stream(request):
-    """作品总览AI聊天端点 - SSE流式响应"""
+async def ai_work_chat_stream(request):
+    """作品总览AI聊天端点 - SSE流式响应 (async version for ASGI)"""
     if request.method != 'GET':
         return HttpResponse(
             'data: {"type": "error", "message": "仅支持GET请求"}\n\n',
@@ -245,30 +310,26 @@ def ai_work_chat_stream(request):
     user = None
     token = request.GET.get('token')
     if token:
-        from django.contrib.auth.models import AnonymousUser
-        from rest_framework.authtoken.models import Token
         try:
-            token_obj = Token.objects.get(key=token)
-            user = token_obj.user
-            request.user = user
-        except Token.DoesNotExist:
+            user = await get_token_user(token)
+        except Exception:
             return HttpResponse(
                 'data: {"type": "error", "message": "认证令牌无效"}\n\n',
                 content_type='text/event-stream',
                 status=401
             )
-    elif not request.user.is_authenticated:
+    elif hasattr(request, 'user') and request.user.is_authenticated:
+        user = request.user
+    else:
         return HttpResponse(
             'data: {"type": "error", "message": "需要登录"}\n\n',
             content_type='text/event-stream',
             status=401
         )
-    else:
-        user = request.user
 
     work_id = request.GET.get('work_id')
     message = request.GET.get('message')
-    model = request.GET.get('model', 'deepseek-chat')  # Get model parameter, default to deepseek-chat
+    model = request.GET.get('model', 'deepseek-chat')
 
     if not all([work_id, message]):
         return HttpResponse(
@@ -276,86 +337,38 @@ def ai_work_chat_stream(request):
             content_type='text/event-stream'
         )
 
-    work = get_object_or_404(Work, id=work_id)
+    try:
+        work, _ = await get_work_and_chapter(work_id)
+    except Exception:
+        return HttpResponse(
+            'data: {"type": "error", "message": "作品不存在"}\n\n',
+            content_type='text/event-stream',
+            status=404
+        )
 
-    def generate_stream():
-        """生成SSE数据流"""
+    async def generate_stream():
+        """生成SSE数据流 (async generator)"""
         try:
-            from apps.chat.models import WorkChatSession, WorkChatMessage
-            session, _ = WorkChatSession.objects.get_or_create(
-                work=work,
-                user=user,
-                defaults={'session_id': str(uuid.uuid4())}
-            )
-
-            recent_messages = WorkChatMessage.objects.filter(
-                session=session
-            ).order_by('-created_at')[:10]
-            chat_history = [
-                {
-                    'role': msg.role,
-                    'content': msg.content
-                }
-                for msg in reversed(list(recent_messages))
-            ]
+            chat_history = await get_work_chat_history(work, user)
 
             from .services import ContextBuilder
-            context = ContextBuilder.build_work_overview_context(work)
+            context = await sync_to_async(ContextBuilder.build_work_overview_context)(work)
 
-            api_key = get_user_api_key(user)
+            api_key = await get_user_api_key_async(user)
             ai_service = AIService(api_key=api_key)
-
-            import asyncio
-            import threading
-            from queue import Queue
-
-            chunk_queue = Queue()
-            error_queue = Queue()
-
-            def run_in_thread():
-                try:
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-
-                    async def collect_chunks():
-                        async for chunk in ai_service.chat_with_ai_stream(context, message, chat_history, None, model):
-                            chunk_queue.put(chunk)
-                        chunk_queue.put(None)
-
-                    loop.run_until_complete(collect_chunks())
-                except Exception as e:
-                    error_queue.put(str(e))
-                    chunk_queue.put(None)
-                finally:
-                    loop.close()
-
-            thread = threading.Thread(target=run_in_thread)
-            thread.start()
 
             yield f'data: {json.dumps({"type": "start", "message": "AI作品聊天开始"})}\n\n'
 
             accumulated_response = ''
-            while True:
-                if not error_queue.empty():
-                    error = error_queue.get()
-                    yield f'data: {json.dumps({"type": "error", "message": f"AI聊天失败: {error}"})}\n\n'
-                    break
-
-                try:
-                    chunk = chunk_queue.get(timeout=1)
-                    if chunk is None:
-                        yield f'data: {json.dumps({"type": "end", "message": "AI聊天完成", "full_response": accumulated_response})}\n\n'
-                        break
-
+            try:
+                async for chunk in ai_service.chat_with_ai_stream(context, message, chat_history, None, model):
                     accumulated_response += chunk
                     yield f'data: {json.dumps({"type": "chunk", "content": chunk})}\n\n'
 
-                except:
-                    if not thread.is_alive():
-                        yield f'data: {json.dumps({"type": "end", "message": "AI聊天完成", "full_response": accumulated_response})}\n\n'
-                        break
-
-            thread.join(timeout=5)
+                yield f'data: {json.dumps({"type": "end", "message": "AI聊天完成", "full_response": accumulated_response})}\n\n'
+            except Exception as e:
+                logger.error(f"Work chat stream error during generation: {str(e)}")
+                yield f'data: {json.dumps({"type": "error", "message": f"AI聊天失败: {str(e)}"})}\n\n'
 
         except Exception as e:
             logger.error(f"Work chat stream error: {str(e)}")
@@ -372,128 +385,72 @@ def ai_work_chat_stream(request):
 
 
 @csrf_exempt
-def ai_summarize_stream(request):
-    """AI摘要端点 - SSE流式响应"""
+async def ai_summarize_stream(request):
+    """AI摘要端点 - SSE流式响应 (async version for ASGI)"""
     if request.method != 'GET':
         return HttpResponse(
             'data: {"type": "error", "message": "仅支持GET请求"}\n\n',
             content_type='text/event-stream'
         )
 
-    # Check authentication via token query parameter for EventSource compatibility
     user = None
     token = request.GET.get('token')
     if token:
-        from django.contrib.auth.models import AnonymousUser
-        from rest_framework.authtoken.models import Token
         try:
-            token_obj = Token.objects.get(key=token)
-            user = token_obj.user
-            request.user = user
-        except Token.DoesNotExist:
+            user = await get_token_user(token)
+        except Exception:
             return HttpResponse(
                 'data: {"type": "error", "message": "认证令牌无效"}\n\n',
                 content_type='text/event-stream',
                 status=401
             )
-    elif not request.user.is_authenticated:
+    elif hasattr(request, 'user') and request.user.is_authenticated:
+        user = request.user
+    else:
         return HttpResponse(
             'data: {"type": "error", "message": "需要登录"}\n\n',
             content_type='text/event-stream',
             status=401
         )
-    else:
-        user = request.user
-        
+
     work_id = request.GET.get('work_id')
     chapter_id = request.GET.get('chapter_id')
-    
+
     if not all([work_id, chapter_id]):
         return HttpResponse(
-            'data: {"type": "error", "message": "缺少必要参数"}\n\n', 
+            'data: {"type": "error", "message": "缺少必要参数"}\n\n',
             content_type='text/event-stream'
         )
-    
-    # 获取作品和章节
-    work = get_object_or_404(Work, id=work_id)
-    chapter = get_object_or_404(Chapter, id=chapter_id, work=work)
-    
-    def generate_stream():
-        """生成SSE数据流"""
+
+    try:
+        work, chapter = await get_work_and_chapter(work_id, chapter_id)
+    except Exception:
+        return HttpResponse(
+            'data: {"type": "error", "message": "作品或章节不存在"}\n\n',
+            content_type='text/event-stream',
+            status=404
+        )
+
+    async def generate_stream():
+        """生成SSE数据流 (async generator)"""
         try:
-            # Build context in sync environment
-            from .services import ContextBuilder
-            context = ContextBuilder.build_context(chapter, include_current_content=True)
-            
-            # 创建AI服务实例并开始流式生成
-            api_key = get_user_api_key(user)
+            api_key = await get_user_api_key_async(user)
             ai_service = AIService(api_key=api_key)
-            
-            # 运行异步生成器
-            import asyncio
-            import threading
-            from queue import Queue
-            
-            chunk_queue = Queue()
-            error_queue = Queue()
-            
-            def run_in_thread():
-                try:
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-                    
-                    async def collect_chunks():
-                        async for chunk in ai_service.generate_summary_stream(chapter):
-                            chunk_queue.put(chunk)
-                        chunk_queue.put(None)  # 结束标记
-                    
-                    loop.run_until_complete(collect_chunks())
-                except Exception as e:
-                    error_queue.put(str(e))
-                    chunk_queue.put(None)
-                finally:
-                    loop.close()
-            
-            # 启动线程
-            thread = threading.Thread(target=run_in_thread)
-            thread.start()
-            
-            # 发送初始事件
+
             yield f"data: {json.dumps({'type': 'start', 'message': 'AI摘要生成开始'})}\n\n"
-            
-            # 流式发送chunks
+
             accumulated_summary = ''
-            while True:
-                # 检查错误
-                if not error_queue.empty():
-                    error = error_queue.get()
-                    yield f"data: {json.dumps({'type': 'error', 'message': f'AI摘要生成失败: {error}'})}\n\n"
-                    break
-                
-                # 获取chunk
-                try:
-                    chunk = chunk_queue.get(timeout=1)
-                    if chunk is None:  # 结束标记
-                        # 保存摘要到章节
-                        chapter.summary = accumulated_summary
-                        chapter.save(update_fields=['summary'])
-                        
-                        yield f"data: {json.dumps({'type': 'end', 'message': 'AI摘要生成完成', 'summary': accumulated_summary})}\n\n"
-                        break
-                    
-                    # 累积摘要内容
+            try:
+                async for chunk in ai_service.generate_summary_stream(chapter):
                     accumulated_summary += chunk
-                    
-                    # 发送chunk
                     yield f"data: {json.dumps({'type': 'chunk', 'content': chunk})}\n\n"
-                    
-                except:
-                    # 检查线程是否还活着
-                    if not thread.is_alive():
-                        yield f"data: {json.dumps({'type': 'end', 'message': 'AI摘要生成完成', 'summary': accumulated_summary})}\n\n"
-                        break
-            
-            thread.join(timeout=5)  # 最多等待5秒
+
+                # Save summary to chapter
+                await save_chapter_summary(chapter, accumulated_summary)
+                yield f"data: {json.dumps({'type': 'end', 'message': 'AI摘要生成完成', 'summary': accumulated_summary})}\n\n"
+            except Exception as e:
+                logger.error(f"Stream AI summarize error during generation: {str(e)}")
+                yield f"data: {json.dumps({'type': 'error', 'message': f'AI摘要生成失败: {str(e)}'})}\n\n"
 
         except Exception as e:
             logger.error(f"Stream AI summarize error: {str(e)}")
@@ -504,109 +461,51 @@ def ai_summarize_stream(request):
         content_type='text/event-stream'
     )
     response['Cache-Control'] = 'no-cache'
-    response['X-Accel-Buffering'] = 'no'  # Disable nginx buffering
-    response['Access-Control-Allow-Origin'] = '*'  # CORS for SSE
+    response['X-Accel-Buffering'] = 'no'
+    response['Access-Control-Allow-Origin'] = '*'
     return response
 
 
-@api_view(['POST'])
-@permission_classes([IsAuthenticated])
-def ai_auto_edit(request):
-    """AI自动编辑端点 - 非流式响应"""
-    selected_text = request.data.get('selected_text')
-    work_id = request.data.get('work_id')
-    chapter_id = request.data.get('chapter_id')
-
-    if not all([selected_text, work_id, chapter_id]):
-        return Response(
-            {'error': '缺少必要参数'},
-            status=status.HTTP_400_BAD_REQUEST
-        )
-
-    # 获取作品和章节
-    work = get_object_or_404(Work, id=work_id, author=request.user)
-    chapter = get_object_or_404(Chapter, id=chapter_id, work=work)
-
-    try:
-        # Build context: synopsis + last 3 chapters
-        work = chapter.work
-        formatted_context = ""
-
-        # Add synopsis
-        if work.synopsis:
-            formatted_context += f"作品大纲：{work.synopsis}\n\n"
-
-        # Get last 3 chapters with full content
-        last_three_chapters = work.chapters.filter(
-            order__lt=chapter.order
-        ).order_by('-order')[:3]
-
-        if last_three_chapters:
-            formatted_context += "前文章节：\n\n"
-            # Reverse to show in chronological order
-            for ch in reversed(list(last_three_chapters)):
-                formatted_context += f"第{ch.chapter_number}章《{ch.title}》\n\n{ch.content or '(空章节)'}\n\n---\n\n"
-
-        api_key = get_user_api_key(request.user)
-        ai_service = AIService(api_key=api_key)
-        edited_text = run_async_ai_task(
-            ai_service.auto_edit(selected_text, formatted_context)
-        )
-
-        return Response({'edited_text': edited_text})
-
-    except Exception as e:
-        logger.error(f"AI auto-edit error: {str(e)}")
-        return Response(
-            {'error': f'AI自动编辑出错：{str(e)}'},
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR
-        )
-
-
 @csrf_exempt
-def ai_auto_edit_stream(request):
-    """AI自动编辑端点 - SSE流式响应，支持上下文自定义"""
+async def ai_auto_edit_stream(request):
+    """AI自动编辑端点 - SSE流式响应，支持上下文自定义 (async version for ASGI)"""
     if request.method != 'GET':
         return HttpResponse(
             'data: {"type": "error", "message": "仅支持GET请求"}\n\n',
             content_type='text/event-stream'
         )
 
-    # Check authentication
     user = None
     token = request.GET.get('token')
     if token:
-        from rest_framework.authtoken.models import Token
         try:
-            token_obj = Token.objects.get(key=token)
-            user = token_obj.user
-            request.user = user
-        except Token.DoesNotExist:
+            user = await get_token_user(token)
+        except Exception:
             return HttpResponse(
                 'data: {"type": "error", "message": "认证令牌无效"}\n\n',
                 content_type='text/event-stream',
                 status=401
             )
-    elif not request.user.is_authenticated:
+    elif hasattr(request, 'user') and request.user.is_authenticated:
+        user = request.user
+    else:
         return HttpResponse(
             'data: {"type": "error", "message": "需要登录"}\n\n',
             content_type='text/event-stream',
             status=401
         )
-    else:
-        user = request.user
 
     selected_text = request.GET.get('selected_text')
     work_id = request.GET.get('work_id')
     chapter_id = request.GET.get('chapter_id')
 
     # Context customization parameters
-    chapter_selection = request.GET.get('chapter_selection', 'past_3')  # 'all', 'past_3', 'custom', 'none'
+    chapter_selection = request.GET.get('chapter_selection', 'past_3')
     custom_chapter_count = request.GET.get('custom_chapter_count', '3')
-    selected_lore_ids = request.GET.get('selected_lore_ids', '')  # Comma-separated IDs
-    model = request.GET.get('model', 'deepseek-chat')  # Model selection
-    edit_requirement = request.GET.get('edit_requirement', '')  # Editing guide/requirement
-    style_id = request.GET.get('style_id', '')  # Optional writing style ID
+    selected_lore_ids = request.GET.get('selected_lore_ids', '')
+    model = request.GET.get('model', 'deepseek-chat')
+    edit_requirement = request.GET.get('edit_requirement', '')
+    style_id = request.GET.get('style_id', '')
 
     if not all([selected_text, work_id, chapter_id]):
         return HttpResponse(
@@ -614,143 +513,40 @@ def ai_auto_edit_stream(request):
             content_type='text/event-stream'
         )
 
-    work = get_object_or_404(Work, id=work_id)
-    chapter = get_object_or_404(Chapter, id=chapter_id, work=work)
+    try:
+        work, chapter = await get_work_and_chapter(work_id, chapter_id)
+    except Exception:
+        return HttpResponse(
+            'data: {"type": "error", "message": "作品或章节不存在"}\n\n',
+            content_type='text/event-stream',
+            status=404
+        )
 
-    def generate_stream():
-        """生成SSE数据流"""
+    async def generate_stream():
+        """生成SSE数据流 (async generator)"""
         try:
-            # Build context based on user selection
-            formatted_context = ""
+            # Build context
+            formatted_context = await build_auto_edit_context(
+                work, chapter, user, style_id, selected_lore_ids,
+                chapter_selection, custom_chapter_count
+            )
 
-            # Add writing style if selected
-            if style_id:
-                try:
-                    from apps.works.models import WritingStyle
-                    style = WritingStyle.objects.get(id=int(style_id), user=user)
-                    formatted_context += f"写作风格参考：\n\n{style.style_data}\n\n---\n\n"
-                except (WritingStyle.DoesNotExist, ValueError):
-                    # Style not found or invalid ID, continue without it
-                    pass
-
-            # Add synopsis
-            if work.synopsis:
-                formatted_context += f"作品大纲：{work.synopsis}\n\n"
-
-            # Add selected lore entries
-            if selected_lore_ids:
-                lore_ids = [int(id.strip()) for id in selected_lore_ids.split(',') if id.strip()]
-                if lore_ids:
-                    lore_entries = LoreEntry.objects.filter(id__in=lore_ids, work=work)
-                    if lore_entries:
-                        formatted_context += "世界观条目：\n\n"
-                        for entry in lore_entries:
-                            formatted_context += f"【{entry.name}】\n{entry.description}\n\n"
-                        formatted_context += "---\n\n"
-
-            # Add chapters based on selection
-            # First, get the count of available previous chapters
-            available_previous_count = work.chapters.filter(order__lt=chapter.order).count()
-
-            previous_chapters = []
-            if chapter_selection == 'none':
-                # No previous chapters
-                previous_chapters = []
-            elif chapter_selection == 'all':
-                # Get all previous chapters (no duplicates, ordered by chapter order)
-                previous_chapters = work.chapters.filter(
-                    order__lt=chapter.order
-                ).order_by('order')
-            elif chapter_selection == 'custom':
-                # Get custom number of previous chapters (capped at available)
-                try:
-                    count = int(custom_chapter_count)
-                    count = min(max(0, count), available_previous_count)  # Cap at available chapters, allow 0
-                    if count > 0:
-                        previous_chapters = work.chapters.filter(
-                            order__lt=chapter.order
-                        ).order_by('-order')[:count]
-                        previous_chapters = reversed(list(previous_chapters))
-                    else:
-                        previous_chapters = []
-                except:
-                    count = 3
-                    previous_chapters = work.chapters.filter(
-                        order__lt=chapter.order
-                    ).order_by('-order')[:count]
-                    previous_chapters = reversed(list(previous_chapters))
-            else:  # 'past_3' (default)
-                # Get last 3 chapters (or fewer if not enough available)
-                count = min(3, available_previous_count)
-                previous_chapters = work.chapters.filter(
-                    order__lt=chapter.order
-                ).order_by('-order')[:count]
-                previous_chapters = reversed(list(previous_chapters))
-
-            if previous_chapters and len(list(previous_chapters)) > 0:
-                formatted_context += "前文章节：\n\n"
-                for ch in previous_chapters:
-                    formatted_context += f"第{ch.chapter_number}章《{ch.title}》\n\n{ch.content or '(空章节)'}\n\n---\n\n"
-
-            # Add current chapter content at the end
-            if chapter.content:
-                formatted_context += f"当前章节《{chapter.title}》全文：\n\n{chapter.content}\n\n---\n\n"
-
-            # Create AI service and start streaming
-            api_key = get_user_api_key(user)
+            # Get API key and create AI service
+            api_key = await get_user_api_key_async(user)
             ai_service = AIService(api_key=api_key)
-
-            import asyncio
-            import threading
-            from queue import Queue
-
-            chunk_queue = Queue()
-            error_queue = Queue()
-
-            def run_in_thread():
-                try:
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-
-                    async def collect_chunks():
-                        async for chunk in ai_service.auto_edit_stream(selected_text, formatted_context, model, edit_requirement):
-                            chunk_queue.put(chunk)
-                        chunk_queue.put(None)  # End marker
-
-                    loop.run_until_complete(collect_chunks())
-                except Exception as e:
-                    error_queue.put(str(e))
-                    chunk_queue.put(None)
-                finally:
-                    loop.close()
-
-            thread = threading.Thread(target=run_in_thread)
-            thread.start()
 
             yield f'data: {json.dumps({"type": "start", "message": "AI自动编辑开始"})}\n\n'
 
             accumulated_text = ''
-            while True:
-                if not error_queue.empty():
-                    error = error_queue.get()
-                    yield f'data: {json.dumps({"type": "error", "message": f"AI自动编辑失败: {error}"})}\n\n'
-                    break
-
-                try:
-                    chunk = chunk_queue.get(timeout=1)
-                    if chunk is None:
-                        yield f'data: {json.dumps({"type": "end", "message": "AI自动编辑完成", "edited_text": accumulated_text})}\n\n'
-                        break
-
+            try:
+                async for chunk in ai_service.auto_edit_stream(selected_text, formatted_context, model, edit_requirement):
                     accumulated_text += chunk
                     yield f'data: {json.dumps({"type": "chunk", "content": chunk})}\n\n'
 
-                except:
-                    if not thread.is_alive():
-                        yield f'data: {json.dumps({"type": "end", "message": "AI自动编辑完成", "edited_text": accumulated_text})}\n\n'
-                        break
-
-            thread.join(timeout=5)
+                yield f'data: {json.dumps({"type": "end", "message": "AI自动编辑完成", "edited_text": accumulated_text})}\n\n'
+            except Exception as e:
+                logger.error(f"Stream auto-edit error during generation: {str(e)}")
+                yield f'data: {json.dumps({"type": "error", "message": f"AI自动编辑失败: {str(e)}"})}\n\n'
 
         except Exception as e:
             logger.error(f"Stream auto-edit error: {str(e)}")
