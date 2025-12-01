@@ -30,6 +30,30 @@ def get_user_api_key_async(user):
 
 
 @sync_to_async
+def get_user_ai_settings(user):
+    """获取用户的AI设置 (async version)"""
+    from apps.user_auth.models import UserSettings
+    try:
+        settings = UserSettings.objects.get(user=user)
+        return {
+            'temperature': settings.temperature,
+            'top_p': settings.top_p,
+            'max_tokens': settings.max_tokens,
+            'frequency_penalty': settings.frequency_penalty,
+            'presence_penalty': settings.presence_penalty,
+        }
+    except UserSettings.DoesNotExist:
+        # Return defaults if settings don't exist
+        return {
+            'temperature': 0.7,
+            'top_p': 1.0,
+            'max_tokens': 2000,
+            'frequency_penalty': 0.0,
+            'presence_penalty': 0.0,
+        }
+
+
+@sync_to_async
 def get_token_user(token_key):
     """Get user from token (async version)"""
     from rest_framework.authtoken.models import Token
@@ -265,8 +289,9 @@ async def ai_chat_stream(request):
             from .services import ContextBuilder
             context = await sync_to_async(ContextBuilder.build_context)(chapter)
 
-            # Get API key and create AI service
+            # Get API key and AI settings
             api_key = await get_user_api_key_async(user)
+            ai_settings = await get_user_ai_settings(user)
             ai_service = AIService(api_key=api_key)
 
             # Send start event
@@ -275,7 +300,14 @@ async def ai_chat_stream(request):
             # Stream chunks directly from async generator
             accumulated_response = ''
             try:
-                async for chunk in ai_service.chat_with_ai_stream(context, message, chat_history, chapter.id, model):
+                async for chunk in ai_service.chat_with_ai_stream(
+                    context, message, chat_history, chapter.id, model,
+                    temperature=ai_settings['temperature'],
+                    top_p=ai_settings['top_p'],
+                    max_tokens=ai_settings['max_tokens'],
+                    frequency_penalty=ai_settings['frequency_penalty'],
+                    presence_penalty=ai_settings['presence_penalty']
+                ):
                     accumulated_response += chunk
                     yield f'data: {json.dumps({"type": "chunk", "content": chunk})}\n\n'
 
@@ -355,13 +387,21 @@ async def ai_work_chat_stream(request):
             context = await sync_to_async(ContextBuilder.build_work_overview_context)(work)
 
             api_key = await get_user_api_key_async(user)
+            ai_settings = await get_user_ai_settings(user)
             ai_service = AIService(api_key=api_key)
 
             yield f'data: {json.dumps({"type": "start", "message": "AI作品聊天开始"})}\n\n'
 
             accumulated_response = ''
             try:
-                async for chunk in ai_service.chat_with_ai_stream(context, message, chat_history, None, model):
+                async for chunk in ai_service.chat_with_ai_stream(
+                    context, message, chat_history, None, model,
+                    temperature=ai_settings['temperature'],
+                    top_p=ai_settings['top_p'],
+                    max_tokens=ai_settings['max_tokens'],
+                    frequency_penalty=ai_settings['frequency_penalty'],
+                    presence_penalty=ai_settings['presence_penalty']
+                ):
                     accumulated_response += chunk
                     yield f'data: {json.dumps({"type": "chunk", "content": chunk})}\n\n'
 
@@ -507,7 +547,7 @@ async def ai_auto_edit_stream(request):
     edit_requirement = request.GET.get('edit_requirement', '')
     style_id = request.GET.get('style_id', '')
 
-    if not all([selected_text, work_id, chapter_id]):
+    if not all([work_id, chapter_id]):
         return HttpResponse(
             'data: {"type": "error", "message": "缺少必要参数"}\n\n',
             content_type='text/event-stream'
@@ -531,15 +571,23 @@ async def ai_auto_edit_stream(request):
                 chapter_selection, custom_chapter_count
             )
 
-            # Get API key and create AI service
+            # Get API key and AI settings
             api_key = await get_user_api_key_async(user)
+            ai_settings = await get_user_ai_settings(user)
             ai_service = AIService(api_key=api_key)
 
             yield f'data: {json.dumps({"type": "start", "message": "AI自动编辑开始"})}\n\n'
 
             accumulated_text = ''
             try:
-                async for chunk in ai_service.auto_edit_stream(selected_text, formatted_context, model, edit_requirement):
+                async for chunk in ai_service.auto_edit_stream(
+                    selected_text, formatted_context, model, edit_requirement,
+                    temperature=ai_settings['temperature'],
+                    top_p=ai_settings['top_p'],
+                    max_tokens=ai_settings['max_tokens'],
+                    frequency_penalty=ai_settings['frequency_penalty'],
+                    presence_penalty=ai_settings['presence_penalty']
+                ):
                     accumulated_text += chunk
                     yield f'data: {json.dumps({"type": "chunk", "content": chunk})}\n\n'
 

@@ -7,13 +7,14 @@ export default {
   theme: {
     extend: {
       colors: {
-        'dark-bg': '#0a0a0a',
-        'dark-surface': '#1a1a1a',
-        'dark-border': '#333333',
-        'dark-text': '#e0e0e0',
-        'dark-text-muted': '#a0a0a0',
-        'dark-primary': '#3b82f6',
-        'dark-secondary': '#64748b',
+        // Theme-aware colors using CSS variables
+        'dark-bg': 'var(--color-bg)',
+        'dark-surface': 'var(--color-surface)',
+        'dark-border': 'var(--color-border)',
+        'dark-text': 'var(--color-text)',
+        'dark-text-muted': 'var(--color-text-muted)',
+        'dark-primary': 'var(--color-primary)',
+        'dark-secondary': 'var(--color-secondary)',
       },
       fontFamily: {
         'chinese': ['Source Han Serif CN', 'serif'],

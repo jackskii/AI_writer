@@ -16,7 +16,7 @@ interface EditorPanelProps {
   onChange: (content: string) => void;
   work: Work;
   chapter: Chapter;
-  onSave?: () => void;
+  onSave?: (content?: string) => void;
 }
 
 const NOTE_COLORS = [
@@ -658,9 +658,10 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
     onChange(newContent);
 
     // Trigger immediate save after accepting auto edit
+    // Pass newContent directly to avoid race condition with async state update
     if (onSave) {
       setTimeout(() => {
-        onSave();
+        onSave(newContent);
       }, 0);
     }
 

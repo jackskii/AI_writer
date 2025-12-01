@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { X, ChevronLeft, ChevronRight, Square, Wand2, Check, RotateCcw, Settings } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { Textarea } from '../ui/Input';
@@ -54,6 +54,13 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
   // State for streaming
   const [isGenerating, setIsGenerating] = useState(false);
   const [eventSourceRef, setEventSourceRef] = useState<EventSource | null>(null);
+  const accumulatedTextRef = useRef<string>('');
+
+  // Helper to clean up trailing "---" and newline before it from auto-edit output
+  const cleanAutoEditOutput = (text: string): string => {
+    // Remove trailing "---" with optional newline before it
+    return text.replace(/\n?---\s*$/, '').trimEnd();
+  };
 
   // State for customize panel
   const [showCustomize, setShowCustomize] = useState(false);
@@ -172,20 +179,62 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
     }
   }, [loreEntries, initialOriginalText]);
 
+  // Real-time trigger detection as user types in originalText
+  useEffect(() => {
+    if (loreEntries.length === 0) return;
+
+    const newTriggeredIds: number[] = [];
+    loreEntries.forEach(entry => {
+      const allTriggers = [...entry.triggers, ...entry.extra_triggers];
+      const isTriggered = allTriggers.some(trigger =>
+        originalText.includes(trigger)
+      );
+      if (isTriggered) {
+        newTriggeredIds.push(entry.id);
+      }
+    });
+
+    // Find newly triggered entries (not already selected)
+    const newlyTriggered = newTriggeredIds.filter(id => !selectedLoreIds.includes(id));
+
+    if (newlyTriggered.length > 0) {
+      // Auto-select newly triggered entries (silently, without opening panel)
+      setSelectedLoreIds(prev => [...new Set([...prev, ...newlyTriggered])]);
+    }
+  }, [originalText, loreEntries]);
+
   // Handle generate auto edit
   const handleGenerateEdit = () => {
     if (isGenerating) {
-      // Stop current generation
+      // Stop current generation - version already exists, just clean up
       if (eventSourceRef) {
         eventSourceRef.close();
         setEventSourceRef(null);
       }
+
+      // Clean up the current version's text
+      const cleanedText = cleanAutoEditOutput(accumulatedTextRef.current);
+      setCurrentEditedText(cleanedText);
+      setEditedVersions(prev => {
+        const updated = [...prev];
+        if (updated.length > 0) {
+          updated[updated.length - 1] = { ...updated[updated.length - 1], text: cleanedText };
+        }
+        return updated;
+      });
+
       setIsGenerating(false);
       return;
     }
 
     setIsGenerating(true);
     setCurrentEditedText(''); // Clear current text
+    accumulatedTextRef.current = ''; // Reset accumulated text ref
+
+    // Create new version entry immediately before generation
+    const newIndex = editedVersions.length;
+    setEditedVersions(prev => [...prev, { text: '', timestamp: new Date() }]);
+    setCurrentVersionIndex(newIndex);
 
     const context: AutoEditContext = {
       chapterSelection,
@@ -200,23 +249,36 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
       originalText,
       context,
       (chunk: string) => {
+        accumulatedTextRef.current += chunk;
         setCurrentEditedText(prev => prev + chunk);
       },
       () => {
-        // On end
+        // On end - clean up text, version already exists
+        const cleanedText = cleanAutoEditOutput(accumulatedTextRef.current);
+        setCurrentEditedText(cleanedText);
+        setEditedVersions(prev => {
+          const updated = [...prev];
+          if (updated.length > 0) {
+            updated[updated.length - 1] = { ...updated[updated.length - 1], text: cleanedText };
+          }
+          return updated;
+        });
         setIsGenerating(false);
         setEventSourceRef(null);
-
-        // Add new version to list
-        setEditedVersions(prev => {
-          const newVersions = [...prev, { text: currentEditedText, timestamp: new Date() }];
-          setCurrentVersionIndex(newVersions.length - 1);
-          return newVersions;
-        });
       },
       (error: string) => {
-        // On error
+        // On error - clean up version with whatever text we have
         console.error('Auto edit error:', error);
+        const cleanedText = cleanAutoEditOutput(accumulatedTextRef.current);
+        if (cleanedText.trim()) {
+          setEditedVersions(prev => {
+            const updated = [...prev];
+            if (updated.length > 0) {
+              updated[updated.length - 1] = { ...updated[updated.length - 1], text: cleanedText };
+            }
+            return updated;
+          });
+        }
         setIsGenerating(false);
         setEventSourceRef(null);
       }

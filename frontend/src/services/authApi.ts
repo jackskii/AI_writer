@@ -93,14 +93,38 @@ export const authApi = {
     return response.data;
   },
 
-  updateSettings: async (data: { deepseek_api_key?: string }): Promise<{ message: string; data: UserSettings }> => {
+  updateSettings: async (data: Partial<UserSettingsUpdate>): Promise<{ message: string; data: UserSettings }> => {
     const response = await authAxios.put(`${API_BASE_URL}/api/auth/settings/update/`, data);
     return response.data;
   }
 };
 
 export interface UserSettings {
+  // API Settings
   masked_api_key: string;
   has_api_key: boolean;
+  api_provider: string;
+
+  // AI Settings
+  temperature: number;
+  top_p: number;
+  max_tokens: number;
+  frequency_penalty: number;
+  presence_penalty: number;
+
+  // Visual Settings
+  theme: 'dark' | 'light';
+
   updated_at: string;
+}
+
+export interface UserSettingsUpdate {
+  deepseek_api_key?: string;
+  api_provider?: string;
+  temperature?: number;
+  top_p?: number;
+  max_tokens?: number;
+  frequency_penalty?: number;
+  presence_penalty?: number;
+  theme?: 'dark' | 'light';
 }

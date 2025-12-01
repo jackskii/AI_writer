@@ -8,7 +8,22 @@ import base64
 class UserSettings(models.Model):
     """用户设置，包括加密存储的API密钥"""
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='settings')
+
+    # API Settings
     _encrypted_deepseek_api_key = models.TextField('DeepSeek API Key (加密)', blank=True, default='')
+    api_provider = models.CharField('API Provider', max_length=50, default='deepseek')
+
+    # AI Settings
+    temperature = models.FloatField('Temperature', default=0.7)
+    top_p = models.FloatField('Top P', default=1.0)
+    max_tokens = models.IntegerField('Max Tokens', default=2000)
+    frequency_penalty = models.FloatField('Frequency Penalty', default=0.0)
+    presence_penalty = models.FloatField('Presence Penalty', default=0.0)
+
+    # Visual Settings
+    THEME_CHOICES = [('dark', 'Dark'), ('light', 'Light')]
+    theme = models.CharField('Theme', max_length=20, choices=THEME_CHOICES, default='dark')
+
     created_at = models.DateTimeField('创建时间', auto_now_add=True)
     updated_at = models.DateTimeField('更新时间', auto_now=True)
 

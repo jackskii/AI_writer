@@ -84,9 +84,25 @@ class UserSettingsSerializer(serializers.ModelSerializer):
     masked_api_key = serializers.SerializerMethodField(read_only=True)
     has_api_key = serializers.SerializerMethodField(read_only=True)
 
+    # AI Settings with validation
+    temperature = serializers.FloatField(min_value=0.0, max_value=2.0, required=False)
+    top_p = serializers.FloatField(min_value=0.0, max_value=1.0, required=False)
+    max_tokens = serializers.IntegerField(min_value=100, max_value=8000, required=False)
+    frequency_penalty = serializers.FloatField(min_value=-2.0, max_value=2.0, required=False)
+    presence_penalty = serializers.FloatField(min_value=-2.0, max_value=2.0, required=False)
+
     class Meta:
         model = UserSettings
-        fields = ('deepseek_api_key', 'masked_api_key', 'has_api_key', 'updated_at')
+        fields = (
+            # API Settings
+            'deepseek_api_key', 'masked_api_key', 'has_api_key', 'api_provider',
+            # AI Settings
+            'temperature', 'top_p', 'max_tokens', 'frequency_penalty', 'presence_penalty',
+            # Visual Settings
+            'theme',
+            # Meta
+            'updated_at'
+        )
         read_only_fields = ('masked_api_key', 'has_api_key', 'updated_at')
 
     def get_masked_api_key(self, obj):
@@ -98,9 +114,15 @@ class UserSettingsSerializer(serializers.ModelSerializer):
         return obj.has_valid_api_key()
 
     def update(self, instance, validated_data):
-        """更新API密钥"""
+        """更新设置"""
+        # Handle API key separately (encrypted)
         if 'deepseek_api_key' in validated_data:
             api_key = validated_data.pop('deepseek_api_key')
             instance.deepseek_api_key = api_key
-            instance.save()
+
+        # Update all other fields
+        for field, value in validated_data.items():
+            setattr(instance, field, value)
+
+        instance.save()
         return instance

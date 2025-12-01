@@ -93,15 +93,15 @@ export const EditorPage: React.FC = () => {
     }
   }, [chapter, setCurrentChapter]);
 
-  // Auto-save function
-  const performAutoSave = useCallback(async (content: string) => {
-    // Check if content has changed using ref (no closure issues)
-    if (content === lastSaveContentRef.current) {
+  // Auto-save function - force param bypasses the unchanged check for manual saves
+  const performAutoSave = useCallback(async (content: string, force: boolean = false) => {
+    // Check if content has changed using ref (skip for forced/manual saves)
+    if (!force && content === lastSaveContentRef.current) {
       console.log('Skipping autosave - content unchanged', { content: content.substring(0, 50), lastSaved: lastSaveContentRef.current.substring(0, 50) });
       return;
     }
-    
-    console.log('Performing autosave with content length:', content.length, 'vs last saved:', lastSaveContentRef.current.length);
+
+    console.log('Performing save with content length:', content.length, 'vs last saved:', lastSaveContentRef.current.length, 'force:', force);
     try {
       setAutoSaving(true);
       const response = await chaptersApi.autoSave(workIdNum, chapterIdNum, content);
@@ -144,13 +144,16 @@ export const EditorPage: React.FC = () => {
     }, 5000);
   }, [performAutoSave]);
 
-  // Manual save
-  const handleManualSave = useCallback(() => {
+  // Manual save - accepts optional content to avoid race condition with async state updates
+  const handleManualSave = useCallback((contentToSave?: string) => {
     if (autoSaveTimerRef.current) {
       clearTimeout(autoSaveTimerRef.current);
       autoSaveTimerRef.current = null;
     }
-    performAutoSave(editorContent);
+    // Use provided content if available, otherwise fall back to current state
+    const content = contentToSave ?? editorContent;
+    // Force save for manual saves - always save even if content unchanged
+    performAutoSave(content, true);
   }, [performAutoSave, editorContent]);
 
   // Chapter title editing functions

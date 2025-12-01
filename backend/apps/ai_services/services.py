@@ -34,11 +34,16 @@ class DeepSeekAPI:
         model: str = None,
         stream: bool = True,
         max_tokens: int = None,
-        response_format: Optional[Dict] = None
+        response_format: Optional[Dict] = None,
+        temperature: float = None,
+        top_p: float = None,
+        frequency_penalty: float = None,
+        presence_penalty: float = None
     ) -> Dict:
         """Send chat completion request"""
         model = model or prompts.DEFAULT_MODEL
         max_tokens = max_tokens or prompts.DEFAULT_MAX_TOKENS
+        temperature = temperature if temperature is not None else prompts.DEFAULT_TEMPERATURE
 
         try:
             if stream:
@@ -47,10 +52,16 @@ class DeepSeekAPI:
                 stream_kwargs = {
                     "model": model,
                     "messages": messages,
-                    "temperature": prompts.DEFAULT_TEMPERATURE,
+                    "temperature": temperature,
                     "max_tokens": max_tokens,
                     "stream": True
                 }
+                if top_p is not None:
+                    stream_kwargs["top_p"] = top_p
+                if frequency_penalty is not None:
+                    stream_kwargs["frequency_penalty"] = frequency_penalty
+                if presence_penalty is not None:
+                    stream_kwargs["presence_penalty"] = presence_penalty
                 if response_format:
                     stream_kwargs["response_format"] = response_format
 
@@ -91,10 +102,16 @@ class DeepSeekAPI:
                 non_stream_kwargs = {
                     "model": model,
                     "messages": messages,
-                    "temperature": prompts.DEFAULT_TEMPERATURE,
+                    "temperature": temperature,
                     "max_tokens": max_tokens,
                     "stream": False
                 }
+                if top_p is not None:
+                    non_stream_kwargs["top_p"] = top_p
+                if frequency_penalty is not None:
+                    non_stream_kwargs["frequency_penalty"] = frequency_penalty
+                if presence_penalty is not None:
+                    non_stream_kwargs["presence_penalty"] = presence_penalty
                 if response_format:
                     non_stream_kwargs["response_format"] = response_format
 
@@ -127,20 +144,36 @@ class DeepSeekAPI:
         self,
         messages: List[Dict],
         model: str = None,
-        max_tokens: int = None
+        max_tokens: int = None,
+        stop: List[str] = None,
+        temperature: float = None,
+        top_p: float = None,
+        frequency_penalty: float = None,
+        presence_penalty: float = None
     ) -> AsyncGenerator[str, None]:
         """Send chat completion request and stream content chunks"""
         model = model or prompts.DEFAULT_MODEL
         max_tokens = max_tokens or prompts.DEFAULT_MAX_TOKENS
+        temperature = temperature if temperature is not None else prompts.DEFAULT_TEMPERATURE
 
         try:
-            stream_response = await self.client.chat.completions.create(
-                model=model,
-                messages=messages,
-                temperature=prompts.DEFAULT_TEMPERATURE,
-                max_tokens=max_tokens,
-                stream=True
-            )
+            kwargs = {
+                "model": model,
+                "messages": messages,
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+                "stream": True
+            }
+            if top_p is not None:
+                kwargs["top_p"] = top_p
+            if frequency_penalty is not None:
+                kwargs["frequency_penalty"] = frequency_penalty
+            if presence_penalty is not None:
+                kwargs["presence_penalty"] = presence_penalty
+            if stop:
+                kwargs["stop"] = stop
+
+            stream_response = await self.client.chat.completions.create(**kwargs)
 
             reasoning_started = False
             content_started = False
@@ -427,7 +460,12 @@ class AIService:
         user_message: str,
         chat_history: List[Dict] = None,
         chapter_id: int = None,
-        model: str = None
+        model: str = None,
+        temperature: float = None,
+        top_p: float = None,
+        max_tokens: int = None,
+        frequency_penalty: float = None,
+        presence_penalty: float = None
     ) -> AsyncGenerator[str, None]:
         """AI chat function - streaming version with chat history support"""
         # Use provided model or default to prompts.CHAT_MODEL
@@ -462,16 +500,35 @@ class AIService:
 
             logger.debug(f"Sending {len(messages)} messages to DeepSeek API for streaming with model {model}")
 
-            async for chunk in self.deepseek.chat_completion_stream(messages, model=model):
+            async for chunk in self.deepseek.chat_completion_stream(
+                messages,
+                model=model,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                top_p=top_p,
+                frequency_penalty=frequency_penalty,
+                presence_penalty=presence_penalty
+            ):
                 yield chunk
 
         except Exception as e:
             logger.error(f"Chat AI stream error for chapter {chapter_id}: {str(e)}", exc_info=True)
             raise Exception(f"{prompts.ERROR_CHAT_FAILED}: {str(e)}")
 
-    async def auto_edit_stream(self, selected_text: str, context: str = "", model: str = "deepseek-chat", edit_requirement: str = None) -> AsyncGenerator[str, None]:
+    async def auto_edit_stream(
+        self,
+        selected_text: str,
+        context: str = "",
+        model: str = "deepseek-chat",
+        edit_requirement: str = None,
+        temperature: float = None,
+        top_p: float = None,
+        max_tokens: int = None,
+        frequency_penalty: float = None,
+        presence_penalty: float = None
+    ) -> AsyncGenerator[str, None]:
         """AI auto-edit function - streaming version"""
-        logger.debug(f"Starting AI auto-edit stream for text: {selected_text[:50]}... with model: {model}")
+        logger.debug(f"Starting AI auto-edit stream for text: {selected_text[:50] if selected_text else '(empty)'}... with model: {model}")
 
         try:
             # Format the request with context and edit requirement
@@ -485,7 +542,17 @@ class AIService:
 
             logger.debug(f"Sending streaming auto-edit request to DeepSeek API with model: {model}")
 
-            async for chunk in self.deepseek.chat_completion_stream(messages, model=model):
+            # Use "---" as stop sequence to prevent AI from adding explanations
+            async for chunk in self.deepseek.chat_completion_stream(
+                messages,
+                model=model,
+                stop=["---"],
+                max_tokens=max_tokens,
+                temperature=temperature,
+                top_p=top_p,
+                frequency_penalty=frequency_penalty,
+                presence_penalty=presence_penalty
+            ):
                 yield chunk
 
         except Exception as e:

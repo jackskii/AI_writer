@@ -6,17 +6,20 @@ interface UIState {
   isAutoSaving: boolean;
   lastSaveTime: Date | null;
   editorContent: string;
-  
+
+  // Theme state
+  theme: 'dark' | 'light';
+
   // Loading states
   isLoading: boolean;
   loadingMessage: string;
-  
+
   // AI states
   isAIChatLoading: boolean;
   isAIContinueLoading: boolean;
   isAISuggestLoading: boolean;
   isAISummaryLoading: boolean;
-  
+
   // Modal states
   isCreateWorkModalOpen: boolean;
   isCreateChapterModalOpen: boolean;
@@ -24,7 +27,7 @@ interface UIState {
   selectedLoreEntry: LoreEntry | null;
   isSettingsModalOpen: boolean;
   settingsModalReason: string | null; // Why settings modal was opened
-  
+
   // Notifications
   notifications: Array<{
     id: string;
@@ -32,60 +35,86 @@ interface UIState {
     message: string;
     timestamp: Date;
   }>;
-  
+
   // Actions
   setAutoSaving: (saving: boolean) => void;
   setLastSaveTime: (time: Date | null) => void;
   setEditorContent: (content: string) => void;
-  
+
+  setTheme: (theme: 'dark' | 'light') => void;
+
   setLoading: (loading: boolean, message?: string) => void;
-  
+
   setAIChatLoading: (loading: boolean) => void;
   setAIContinueLoading: (loading: boolean) => void;
   setAISuggestLoading: (loading: boolean) => void;
   setAISummaryLoading: (loading: boolean) => void;
-  
+
   setCreateWorkModalOpen: (open: boolean) => void;
   setCreateChapterModalOpen: (open: boolean) => void;
   setLoreEntryModalOpen: (open: boolean, entry?: LoreEntry) => void;
   setSettingsModalOpen: (open: boolean, reason?: string) => void;
-  
+
   addNotification: (notification: Omit<UIState['notifications'][0], 'id' | 'timestamp'>) => void;
   removeNotification: (id: string) => void;
   clearNotifications: () => void;
 }
+
+// Helper to apply theme to document
+const applyTheme = (theme: 'dark' | 'light') => {
+  document.documentElement.setAttribute('data-theme', theme);
+};
+
+// Initialize theme from localStorage or default to dark
+const getInitialTheme = (): 'dark' | 'light' => {
+  const stored = localStorage.getItem('theme');
+  if (stored === 'light' || stored === 'dark') {
+    applyTheme(stored);
+    return stored;
+  }
+  applyTheme('dark');
+  return 'dark';
+};
 
 export const useUIStore = create<UIState>((set, get) => ({
   // Initial state
   isAutoSaving: false,
   lastSaveTime: null,
   editorContent: '',
-  
+
+  theme: getInitialTheme(),
+
   isLoading: false,
   loadingMessage: '',
-  
+
   isAIChatLoading: false,
   isAIContinueLoading: false,
   isAISuggestLoading: false,
   isAISummaryLoading: false,
-  
+
   isCreateWorkModalOpen: false,
   isCreateChapterModalOpen: false,
   isLoreEntryModalOpen: false,
   selectedLoreEntry: null,
   isSettingsModalOpen: false,
   settingsModalReason: null,
-  
+
   notifications: [],
-  
+
   // Actions
   setAutoSaving: (saving) => set({ isAutoSaving: saving }),
   setLastSaveTime: (time) => set({ lastSaveTime: time }),
   setEditorContent: (content) => set({ editorContent: content }),
-  
-  setLoading: (loading, message = '') => set({ 
-    isLoading: loading, 
-    loadingMessage: message 
+
+  setTheme: (theme) => {
+    applyTheme(theme);
+    localStorage.setItem('theme', theme);
+    set({ theme });
+  },
+
+  setLoading: (loading, message = '') => set({
+    isLoading: loading,
+    loadingMessage: message
   }),
   
   setAIChatLoading: (loading) => set({ isAIChatLoading: loading }),

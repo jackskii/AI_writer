@@ -53,7 +53,8 @@ AUTO_EDIT_SYSTEM_PROMPT = """你是一名写作助手，将根据用户的指令
 AUTO_EDIT_PREFILLS = {
     '增加细节': '给这段内容增加细节，比如补充角色台词，增加角色的对话和行为描述',
     '润色': '润色这段内容，使其更加流畅自然，改善用词和句式结构',
-    '修改': '按照我的要求修改这段内容:\n'
+    '修改': '按照我的要求修改这段内容:\n',
+    '续写': '根据上下文继续写作，延续当前的故事发展、文风和节奏'
 }
 
 # Default editing requirement
@@ -112,7 +113,7 @@ def format_auto_edit_request(
 
     Args:
         context_info: Story context information (synopsis, lore, summaries)
-        selected_text: The text to be edited
+        selected_text: The text to be edited (can be empty for pure generation)
         edit_requirement: Optional editing requirement/instruction (can be a key in AUTO_EDIT_PREFILLS or custom text)
 
     Returns:
@@ -127,10 +128,16 @@ def format_auto_edit_request(
     else:
         requirement_text = edit_requirement
 
-    return f"""{context_info}
+    # Handle empty selected_text for pure generation mode
+    if selected_text and selected_text.strip():
+        return f"""{context_info}
 
 需要修改的片段：
 {selected_text}
+
+指引：{requirement_text}"""
+    else:
+        return f"""{context_info}
 
 指引：{requirement_text}"""
 
