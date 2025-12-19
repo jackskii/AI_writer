@@ -80,7 +80,19 @@ class UserSerializer(serializers.ModelSerializer):
 
 
 class UserSettingsSerializer(serializers.ModelSerializer):
+    # API Keys - write-only for setting, separate for each provider
     deepseek_api_key = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    qwen_api_key = serializers.CharField(write_only=True, required=False, allow_blank=True)
+
+    # Masked API keys - read-only for display
+    masked_deepseek_api_key = serializers.SerializerMethodField(read_only=True)
+    masked_qwen_api_key = serializers.SerializerMethodField(read_only=True)
+
+    # Has API key flags - read-only
+    has_deepseek_api_key = serializers.SerializerMethodField(read_only=True)
+    has_qwen_api_key = serializers.SerializerMethodField(read_only=True)
+
+    # Legacy fields for backward compatibility
     masked_api_key = serializers.SerializerMethodField(read_only=True)
     has_api_key = serializers.SerializerMethodField(read_only=True)
 
@@ -95,7 +107,11 @@ class UserSettingsSerializer(serializers.ModelSerializer):
         model = UserSettings
         fields = (
             # API Settings
-            'deepseek_api_key', 'masked_api_key', 'has_api_key', 'api_provider',
+            'api_provider',
+            'deepseek_api_key', 'masked_deepseek_api_key', 'has_deepseek_api_key',
+            'qwen_api_key', 'masked_qwen_api_key', 'has_qwen_api_key',
+            # Legacy fields
+            'masked_api_key', 'has_api_key',
             # AI Settings
             'temperature', 'top_p', 'max_tokens', 'frequency_penalty', 'presence_penalty',
             # Visual Settings
@@ -103,22 +119,51 @@ class UserSettingsSerializer(serializers.ModelSerializer):
             # Meta
             'updated_at'
         )
-        read_only_fields = ('masked_api_key', 'has_api_key', 'updated_at')
+        read_only_fields = (
+            'masked_deepseek_api_key', 'masked_qwen_api_key',
+            'has_deepseek_api_key', 'has_qwen_api_key',
+            'masked_api_key', 'has_api_key',
+            'updated_at'
+        )
 
+    # DeepSeek API key methods
+    def get_masked_deepseek_api_key(self, obj):
+        """返回脱敏后的DeepSeek API密钥"""
+        return obj.get_masked_api_key_for_provider('deepseek')
+
+    def get_has_deepseek_api_key(self, obj):
+        """返回是否有有效的DeepSeek API密钥"""
+        return obj.has_api_key_for_provider('deepseek')
+
+    # Qwen API key methods
+    def get_masked_qwen_api_key(self, obj):
+        """返回脱敏后的Qwen API密钥"""
+        return obj.get_masked_api_key_for_provider('qwen')
+
+    def get_has_qwen_api_key(self, obj):
+        """返回是否有有效的Qwen API密钥"""
+        return obj.has_api_key_for_provider('qwen')
+
+    # Legacy methods (for current provider)
     def get_masked_api_key(self, obj):
-        """返回脱敏后的API密钥"""
+        """返回当前provider脱敏后的API密钥"""
         return obj.get_masked_api_key()
 
     def get_has_api_key(self, obj):
-        """返回是否有有效的API密钥"""
+        """返回当前provider是否有有效的API密钥"""
         return obj.has_valid_api_key()
 
     def update(self, instance, validated_data):
         """更新设置"""
-        # Handle API key separately (encrypted)
+        # Handle DeepSeek API key separately (encrypted)
         if 'deepseek_api_key' in validated_data:
             api_key = validated_data.pop('deepseek_api_key')
             instance.deepseek_api_key = api_key
+
+        # Handle Qwen API key separately (encrypted)
+        if 'qwen_api_key' in validated_data:
+            api_key = validated_data.pop('qwen_api_key')
+            instance.qwen_api_key = api_key
 
         # Update all other fields
         for field, value in validated_data.items():

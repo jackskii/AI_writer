@@ -28,7 +28,7 @@ class ChapterSerializer(serializers.ModelSerializer):
             'summary', 'word_count', 'created_at', 
             'updated_at', 'last_autosave'
         ]
-        read_only_fields = ['work', 'act_name', 'act_order', 'created_at', 'updated_at', 'last_autosave']
+        read_only_fields = ['work', 'order', 'chapter_number', 'act_name', 'act_order', 'created_at', 'updated_at', 'last_autosave']
 
 
 class WorkSerializer(serializers.ModelSerializer):

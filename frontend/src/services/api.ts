@@ -168,13 +168,16 @@ export const autoEditApi = {
 export const chatApi = {
   getHistory: (workId: number, chapterId: number) =>
     api.get<{ session_id: string; messages: ChatMessage[] }>(`/chat/${workId}/${chapterId}/`),
-  
+
   saveMessage: (workId: number, chapterId: number, role: string, content: string) =>
     api.post<ChatMessage>(`/chat/${workId}/${chapterId}/save/`, {
       role,
       content,
     }),
-  
+
+  deleteMessage: (workId: number, chapterId: number, messageId: string) =>
+    api.delete(`/chat/${workId}/${chapterId}/message/${messageId}/`),
+
   clearHistory: (workId: number, chapterId: number) =>
     api.delete(`/chat/${workId}/${chapterId}/clear/`),
 
@@ -186,6 +189,9 @@ export const chatApi = {
       role,
       content,
     }),
+
+  deleteWorkMessage: (workId: number, messageId: string) =>
+    api.delete(`/chat/work/${workId}/message/${messageId}/`),
 
   clearWorkHistory: (workId: number) =>
     api.delete(`/chat/work/${workId}/clear/`),
@@ -281,7 +287,7 @@ export const aiApi = {
   getPrefills: () => api.get<{ prefills: Record<string, string> }>('/ai/prefills/'),
 
   // Streaming version of auto edit
-  autoEditStream: (
+  autoEditStream: async (
     workId: number,
     chapterId: number,
     selectedText: string,
@@ -292,89 +298,143 @@ export const aiApi = {
       model: 'deepseek-chat' | 'deepseek-reasoner';
       editRequirement?: string;
       styleId?: number;
+      useSummaries?: boolean;
     },
     onChunk: (chunk: string) => void,
     onStart?: () => void,
     onEnd?: (editedText: string) => void,
-    onError?: (error: string) => void
+    onError?: (error: string) => void,
+    signal?: AbortSignal
   ) => {
-    const params = new URLSearchParams({
-      work_id: workId.toString(),
-      chapter_id: chapterId.toString(),
+    // Build request body
+    const requestBody: Record<string, string | number | boolean> = {
+      work_id: workId,
+      chapter_id: chapterId,
       selected_text: selectedText,
       chapter_selection: context.chapterSelection,
-      model: context.model,
-    });
+    };
+
+    // Only pass model if explicitly set to non-default (like reasoning mode)
+    if (context.model && context.model !== 'deepseek-chat') {
+      requestBody.model = context.model;
+    }
 
     if (context.customChapterCount) {
-      params.append('custom_chapter_count', context.customChapterCount.toString());
+      requestBody.custom_chapter_count = context.customChapterCount;
     }
 
     if (context.selectedLoreEntries.length > 0) {
-      params.append('selected_lore_ids', context.selectedLoreEntries.join(','));
+      requestBody.selected_lore_ids = context.selectedLoreEntries.join(',');
     }
 
     if (context.editRequirement) {
-      params.append('edit_requirement', context.editRequirement);
+      requestBody.edit_requirement = context.editRequirement;
     }
 
     if (context.styleId) {
-      params.append('style_id', context.styleId.toString());
+      requestBody.style_id = context.styleId;
     }
 
-    // Add token for authentication since EventSource can't send headers
+    if (context.useSummaries) {
+      requestBody.use_summaries = true;
+    }
+
+    // Add token for authentication
     const authStorage = localStorage.getItem('auth-storage');
     if (authStorage) {
       try {
         const parsedStorage = JSON.parse(authStorage);
         const token = parsedStorage?.state?.token;
         if (token) {
-          params.append('token', token);
+          requestBody.token = token;
         }
       } catch (e) {
         console.error('Failed to parse auth storage:', e);
       }
     }
 
-    const eventSource = new EventSource(`${API_BASE_URL}/ai/auto-edit/stream/?${params.toString()}`, {
-      withCredentials: true
-    });
+    try {
+      // Use fetch with POST for SSE streaming
+      const response = await fetch(`${API_BASE_URL}/ai/auto-edit/stream/`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(requestBody),
+        credentials: 'include',
+        signal: signal,
+      });
 
-    eventSource.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-
-        switch (data.type) {
-          case 'start':
-            onStart?.();
-            break;
-          case 'chunk':
-            onChunk(data.content);
-            break;
-          case 'end':
-            onEnd?.(data.edited_text || '');
-            eventSource.close();
-            break;
-          case 'error':
-            onError?.(data.message);
-            eventSource.close();
-            break;
-        }
-      } catch (error) {
-        console.error('Error parsing SSE data:', error);
-        onError?.('Error parsing server response');
-        eventSource.close();
+      if (!response.ok) {
+        onError?.(`HTTP error! status: ${response.status}`);
+        return;
       }
-    };
 
-    eventSource.onerror = (error) => {
-      console.error('EventSource error:', error);
+      // Read response as stream
+      const reader = response.body?.getReader();
+      if (!reader) {
+        onError?.('Failed to get response reader');
+        return;
+      }
+
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      // Read stream chunks
+      while (true) {
+        const { done, value } = await reader.read();
+
+        if (done) {
+          break;
+        }
+
+        // Decode chunk and add to buffer
+        buffer += decoder.decode(value, { stream: true });
+
+        // Process complete SSE messages (split by double newline)
+        const messages = buffer.split('\n\n');
+        buffer = messages.pop() || ''; // Keep incomplete message in buffer
+
+        for (const message of messages) {
+          if (!message.trim()) continue;
+
+          // Parse SSE message (format: "data: {...}")
+          const dataMatch = message.match(/^data: (.+)$/m);
+          if (!dataMatch) continue;
+
+          try {
+            const data = JSON.parse(dataMatch[1]);
+
+            switch (data.type) {
+              case 'start':
+                onStart?.();
+                break;
+              case 'chunk':
+                onChunk(data.content);
+                break;
+              case 'end':
+                onEnd?.(data.edited_text || '');
+                return;
+              case 'error':
+                onError?.(data.message);
+                return;
+            }
+          } catch (error) {
+            console.error('Error parsing SSE data:', error);
+            onError?.('Error parsing server response');
+            return;
+          }
+        }
+      }
+    } catch (error) {
+      // Don't report error if request was aborted
+      if (error instanceof Error && error.name === 'AbortError') {
+        console.log('Auto-edit stream aborted');
+        return;
+      }
+      console.error('Fetch error:', error);
       onError?.('Connection error occurred');
-      eventSource.close();
-    };
-
-    // Return the EventSource so it can be closed manually if needed
-    return eventSource;
+    }
   },
 
   // Streaming version of chat
@@ -392,8 +452,12 @@ export const aiApi = {
       work_id: workId.toString(),
       chapter_id: chapterId.toString(),
       message: message,
-      model: model,
     });
+
+    // Only pass model if explicitly set to non-default (like reasoning mode)
+    if (model && model !== 'deepseek-chat') {
+      params.append('model', model);
+    }
 
     // Add token for authentication since EventSource can't send headers
     const authStorage = localStorage.getItem('auth-storage');
@@ -467,8 +531,12 @@ export const aiApi = {
     const params = new URLSearchParams({
       work_id: workId.toString(),
       message: message,
-      model: model,
     });
+
+    // Only pass model if explicitly set to non-default (like reasoning mode)
+    if (model && model !== 'deepseek-chat') {
+      params.append('model', model);
+    }
 
     const authStorage = localStorage.getItem('auth-storage');
     if (authStorage) {

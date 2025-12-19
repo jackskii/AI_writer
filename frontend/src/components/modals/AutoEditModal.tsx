@@ -17,8 +17,9 @@ interface AutoEditModalProps {
     context: AutoEditContext,
     onChunk: (chunk: string) => void,
     onEnd: () => void,
-    onError: (error: string) => void
-  ) => EventSource | null;
+    onError: (error: string) => void,
+    signal?: AbortSignal
+  ) => Promise<void>;
 }
 
 export interface AutoEditContext {
@@ -28,6 +29,7 @@ export interface AutoEditContext {
   model: 'deepseek-chat' | 'deepseek-reasoner';
   editRequirement?: string; // Editing requirement/instruction
   styleId?: number; // Optional writing style ID
+  useSummaries?: boolean; // Use chapter summaries instead of full content
 }
 
 interface AutoEditVersion {
@@ -53,7 +55,7 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
 
   // State for streaming
   const [isGenerating, setIsGenerating] = useState(false);
-  const [eventSourceRef, setEventSourceRef] = useState<EventSource | null>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
   const accumulatedTextRef = useRef<string>('');
 
   // Helper to clean up trailing "---" and newline before it from auto-edit output
@@ -66,6 +68,7 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
   const [showCustomize, setShowCustomize] = useState(false);
   const [chapterSelection, setChapterSelection] = useState<'all' | 'past_3' | 'custom' | 'none'>('past_3');
   const [customChapterCount, setCustomChapterCount] = useState(3);
+  const [useSummaries, setUseSummaries] = useState(false);
   const [loreEntries, setLoreEntries] = useState<LoreEntry[]>([]);
   const [selectedLoreIds, setSelectedLoreIds] = useState<number[]>([]);
   const [loreCurrentPage, setLoreCurrentPage] = useState(1);
@@ -81,7 +84,18 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
 
   // Writing styles
   const [styles, setStyles] = useState<WritingStyle[]>([]);
-  const [selectedStyleId, setSelectedStyleId] = useState<number | null>(null);
+  const [selectedStyleId, setSelectedStyleId] = useState<number | null>(() => {
+    const saved = localStorage.getItem('autoEdit_selectedStyleId');
+    return saved ? parseInt(saved, 10) : null;
+  });
+
+  // All chapters for accurate prompt length calculation
+  const [allChapters, setAllChapters] = useState<Chapter[]>([]);
+
+  // Track selected prefill key for persistence
+  const [selectedPrefillKey, setSelectedPrefillKey] = useState<string>(() => {
+    return localStorage.getItem('autoEdit_selectedPrefillKey') || '修改';
+  });
 
   // Load prefills from backend on mount
   useEffect(() => {
@@ -90,11 +104,11 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
         const { aiApi } = await import('../../services/api');
         const response = await aiApi.getPrefills();
         setPrefills(response.data.prefills);
-        // Set default to '修改' prefill
-        setEditRequirement(response.data.prefills['修改'] || '');
+        // Use saved prefill key or default to '修改'
+        const savedKey = localStorage.getItem('autoEdit_selectedPrefillKey') || '修改';
+        setEditRequirement(response.data.prefills[savedKey] || response.data.prefills['修改'] || '');
       } catch (error) {
         console.error('Failed to load prefills:', error);
-        // Fallback to empty
         setPrefills({});
       } finally {
         setIsLoadingPrefills(false);
@@ -122,6 +136,23 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
     }
   }, [isOpen]);
 
+  // Load all chapters when modal opens for accurate prompt length calculation
+  useEffect(() => {
+    if (isOpen && work?.id) {
+      const loadChapters = async () => {
+        try {
+          const { chaptersApi } = await import('../../services/api');
+          const response = await chaptersApi.list(work.id);
+          setAllChapters(response.data);
+        } catch (error) {
+          console.error('Failed to load chapters:', error);
+          setAllChapters([]);
+        }
+      };
+      loadChapters();
+    }
+  }, [isOpen, work?.id]);
+
   // Reset state when modal opens
   useEffect(() => {
     if (isOpen && !isLoadingPrefills) {
@@ -130,11 +161,18 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
       setCurrentVersionIndex(-1);
       setCurrentEditedText('');
       setIsGenerating(false);
-      setEditRequirement(prefills['修改'] || '');
+      setEditRequirement(prefills[selectedPrefillKey] || prefills['修改'] || '');
       loadLoreEntries();
       preselectTriggeredLoreEntries();
     }
   }, [isOpen, initialOriginalText, isLoadingPrefills, prefills]);
+
+  // Update edit requirement when prefill selection changes (without resetting modal)
+  useEffect(() => {
+    if (isOpen && !isLoadingPrefills) {
+      setEditRequirement(prefills[selectedPrefillKey] || prefills['修改'] || '');
+    }
+  }, [selectedPrefillKey, isOpen, isLoadingPrefills, prefills]);
 
   // Load lore entries for the work
   const loadLoreEntries = async () => {
@@ -204,12 +242,12 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
   }, [originalText, loreEntries]);
 
   // Handle generate auto edit
-  const handleGenerateEdit = () => {
+  const handleGenerateEdit = async () => {
     if (isGenerating) {
-      // Stop current generation - version already exists, just clean up
-      if (eventSourceRef) {
-        eventSourceRef.close();
-        setEventSourceRef(null);
+      // Stop current generation - abort the request
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+        abortControllerRef.current = null;
       }
 
       // Clean up the current version's text
@@ -242,10 +280,15 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
       selectedLoreEntries: selectedLoreIds,
       model: selectedModel,
       editRequirement: editRequirement.trim() || '修改',
-      styleId: selectedStyleId || undefined
+      styleId: selectedStyleId || undefined,
+      useSummaries: useSummaries
     };
 
-    const eventSource = onGenerateEdit(
+    // Create abort controller for this request
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
+
+    await onGenerateEdit(
       originalText,
       context,
       (chunk: string) => {
@@ -264,7 +307,7 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
           return updated;
         });
         setIsGenerating(false);
-        setEventSourceRef(null);
+        abortControllerRef.current = null;
       },
       (error: string) => {
         // On error - clean up version with whatever text we have
@@ -280,13 +323,10 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
           });
         }
         setIsGenerating(false);
-        setEventSourceRef(null);
-      }
+        abortControllerRef.current = null;
+      },
+      abortController.signal
     );
-
-    if (eventSource) {
-      setEventSourceRef(eventSource);
-    }
   };
 
   // Handle version navigation
@@ -331,6 +371,17 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
     onClose();
   };
 
+  // Handle close - with confirmation if there's unsaved work
+  const handleClose = () => {
+    if (editedVersions.length > 0) {
+      if (confirm('你有未保存的编辑内容。确定要关闭吗？')) {
+        onClose();
+      }
+    } else {
+      onClose();
+    }
+  };
+
   // Handle lore entry toggle
   const toggleLoreEntry = (id: number) => {
     setSelectedLoreIds(prev =>
@@ -346,45 +397,59 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
     loreCurrentPage * LORE_PAGE_SIZE
   );
 
-  // Calculate estimated prompt character count
+  // Calculate actual prompt character count using real data
   const calculatePromptLength = (): number => {
     let length = 0;
 
-    // Add work synopsis
+    // Add work synopsis (actual)
     if (work.synopsis) {
       length += work.synopsis.length + 20; // +20 for "作品大纲：" etc
     }
 
-    // Add selected lore entries
+    // Add selected lore entries (actual)
     const selectedLore = safeLoreeEntries.filter(entry => selectedLoreIds.includes(entry.id));
     selectedLore.forEach(entry => {
       length += entry.name.length + entry.description.length + 30; // +30 for formatting
     });
 
-    // Calculate actual number of previous chapters available
-    // chapter_number is 1-based, so previous chapters = chapter_number - 1
-    const availablePreviousChapters = Math.max(0, chapter.chapter_number - 1);
+    // Calculate previous chapters using actual word_count data
+    const previousChapters = allChapters
+      .filter(ch => ch.chapter_number < chapter.chapter_number)
+      .sort((a, b) => b.chapter_number - a.chapter_number);
 
-    // Determine how many chapters will actually be included
-    let chaptersToInclude = 0;
+    let chaptersToInclude: Chapter[] = [];
     if (chapterSelection === 'none') {
-      chaptersToInclude = 0;
+      chaptersToInclude = [];
     } else if (chapterSelection === 'all') {
-      chaptersToInclude = availablePreviousChapters;
+      chaptersToInclude = previousChapters;
     } else if (chapterSelection === 'past_3') {
-      chaptersToInclude = Math.min(3, availablePreviousChapters);
+      chaptersToInclude = previousChapters.slice(0, 3);
     } else if (chapterSelection === 'custom') {
-      chaptersToInclude = Math.min(customChapterCount, availablePreviousChapters);
+      chaptersToInclude = previousChapters.slice(0, customChapterCount);
     }
 
-    // Estimate chapter content (5000 chars per chapter average)
-    length += chaptersToInclude * 5000;
+    // Use actual word_count from fetched chapters
+    if (useSummaries) {
+      // Summaries are much shorter - use actual summary length or estimate
+      chaptersToInclude.forEach(ch => {
+        length += (ch.summary?.length || 200) + 50; // +50 for chapter title formatting
+      });
+    } else {
+      chaptersToInclude.forEach(ch => {
+        // word_count is Chinese characters, so length ≈ word_count
+        // Add formatting overhead per chapter
+        length += (ch.word_count || 0) + 50;
+      });
+    }
 
-    // Add current chapter estimate (assume average chapter is ~5000 chars)
-    length += 5000;
+    // Add current chapter content (actual)
+    length += chapter.content?.length || 0;
 
-    // Add original text
+    // Add original text (actual)
     length += originalText.length;
+
+    // Add edit requirement (actual)
+    length += editRequirement.length;
 
     // Add system prompt and formatting overhead
     length += 500;
@@ -408,7 +473,7 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
             {initialOriginalText ? '自动编辑' : 'AI 生成文本'}
           </h2>
           <button
-            onClick={onClose}
+            onClick={handleClose}
             className="text-dark-text-muted hover:text-dark-text transition-colors"
           >
             <X size={24} />
@@ -421,7 +486,15 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
             <span className="text-sm font-medium text-dark-text">写作风格:</span>
             <select
               value={selectedStyleId || ''}
-              onChange={(e) => setSelectedStyleId(e.target.value ? parseInt(e.target.value) : null)}
+              onChange={(e) => {
+                const newStyleId = e.target.value ? parseInt(e.target.value) : null;
+                setSelectedStyleId(newStyleId);
+                if (newStyleId) {
+                  localStorage.setItem('autoEdit_selectedStyleId', newStyleId.toString());
+                } else {
+                  localStorage.removeItem('autoEdit_selectedStyleId');
+                }
+              }}
               className="flex-1 bg-dark-surface border border-dark-border rounded px-3 py-1.5 text-sm text-dark-text focus:outline-none focus:ring-2 focus:ring-dark-primary"
             >
               <option value="">无风格 (默认)</option>
@@ -529,6 +602,20 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
                     </div>
                   )}
                 </div>
+
+                {/* Use Summaries Toggle */}
+                {chapterSelection !== 'none' && (
+                  <label className="flex items-center gap-2 mt-3 pt-3 border-t border-dark-border">
+                    <input
+                      type="checkbox"
+                      checked={useSummaries}
+                      onChange={(e) => setUseSummaries(e.target.checked)}
+                      className="text-dark-primary"
+                    />
+                    <span className="text-sm text-dark-text">使用章节摘要代替全文</span>
+                    <span className="text-xs text-dark-text-muted">(减少token用量)</span>
+                  </label>
+                )}
               </div>
 
               {/* Lore Entries Selection */}
@@ -603,9 +690,13 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
                     {Object.keys(prefills).map(key => (
                       <button
                         key={key}
-                        onClick={() => setEditRequirement(prefills[key])}
+                        onClick={() => {
+                          setEditRequirement(prefills[key]);
+                          setSelectedPrefillKey(key);
+                          localStorage.setItem('autoEdit_selectedPrefillKey', key);
+                        }}
                         className={`px-3 py-1 text-sm rounded transition-colors ${
-                          editRequirement === prefills[key]
+                          selectedPrefillKey === key
                             ? 'bg-dark-primary text-white'
                             : 'bg-dark-bg text-dark-text border border-dark-border hover:border-dark-primary'
                         }`}
@@ -619,6 +710,7 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
                     onChange={(e) => setEditRequirement(e.target.value)}
                     className="font-mono text-sm resize-none h-full"
                     placeholder="输入编辑要求..."
+                    maxLength={50000}
                   />
                 </div>
               </div>

@@ -6,6 +6,7 @@ from apps.works.models import Work, Chapter, LoreEntry
 from apps.chat.models import AIRequest
 from .models import Suggestion
 from . import prompts
+from .providers import get_provider, LLMProvider, PROVIDER_CONFIG
 import logging
 from openai import AsyncOpenAI
 
@@ -291,6 +292,19 @@ class ContextBuilder:
         return previous_chapters
 
     @staticmethod
+    def _get_recent_chapter_summaries(chapter: Chapter, count: int = 3) -> List[str]:
+        """Get summaries from the most recent chapters before this one"""
+        chapters = chapter.work.chapters.filter(
+            order__lt=chapter.order
+        ).exclude(summary__isnull=True).exclude(summary='').order_by('-order')[:count]
+
+        summaries = []
+        for ch in reversed(list(chapters)):
+            summaries.append(f"第{ch.chapter_number}章《{ch.title}》摘要：{ch.summary}")
+
+        return summaries
+
+    @staticmethod
     def build_summary_context(chapter: Chapter) -> str:
         """Build context specifically for chapter summarization (work synopsis + last 3 chapter summaries)"""
         work = chapter.work
@@ -311,8 +325,18 @@ class ContextBuilder:
 class AIService:
     """AI Service Manager"""
 
-    def __init__(self, api_key: str = None):
-        self.deepseek = DeepSeekAPI(api_key=api_key)
+    def __init__(self, api_key: str = None, provider_name: str = 'deepseek'):
+        self.provider_name = provider_name
+        # Use provider abstraction for supported providers
+        if provider_name in PROVIDER_CONFIG:
+            self.provider = get_provider(provider_name, api_key)
+        else:
+            # Fallback to DeepSeek for backward compatibility
+            self.provider = get_provider('deepseek', api_key)
+
+        # Keep deepseek reference for backward compatibility with existing code
+        # that specifically uses deepseek-reasoner (like style analysis)
+        self.deepseek = DeepSeekAPI(api_key=api_key) if provider_name == 'deepseek' else None
 
     def _format_context_for_user(self, context: Dict) -> str:
         """Format context information for user message"""
@@ -388,12 +412,12 @@ class AIService:
         ]
 
         try:
-            response = await self.deepseek.chat_completion(
+            response = await self.provider.chat_completion(
                 messages,
-                stream=False,
-                response_format={'type': 'json_object'}
+                model=prompts.DEFAULT_MODEL,
+                temperature=prompts.DEFAULT_TEMPERATURE
             )
-            content = response["choices"][0]["message"]["content"]
+            content = response
 
             # Parse JSON response
             try:
@@ -448,7 +472,7 @@ class AIService:
         ]
 
         try:
-            async for chunk in self.deepseek.chat_completion_stream(messages, model=prompts.CHAT_MODEL):
+            async for chunk in self.provider.chat_completion_stream(messages):
                 yield chunk
         except Exception as e:
             logger.error(f"Generate summary stream error: {str(e)}")
@@ -468,10 +492,9 @@ class AIService:
         presence_penalty: float = None
     ) -> AsyncGenerator[str, None]:
         """AI chat function - streaming version with chat history support"""
-        # Use provided model or default to prompts.CHAT_MODEL
-        model = model or prompts.CHAT_MODEL
+        # Use provided model or let provider determine default
         scope = context.get('context_scope', 'chapter')
-        logger.debug(f"Starting AI chat stream for scope {scope} (chapter {chapter_id}) with model {model}: {user_message[:50]}...")
+        logger.debug(f"Starting AI chat stream for scope {scope} (chapter {chapter_id}) with model {model or 'provider default'}: {user_message[:50]}...")
 
         try:
             logger.debug(f"Using provided context with {len(context.get('lore_entries', []))} lore entries")
@@ -498,9 +521,9 @@ class AIService:
             # Add current user message
             messages.append({"role": "user", "content": user_message})
 
-            logger.debug(f"Sending {len(messages)} messages to DeepSeek API for streaming with model {model}")
+            logger.debug(f"Sending {len(messages)} messages to {self.provider.provider_name} API for streaming with model {model or 'provider default'}")
 
-            async for chunk in self.deepseek.chat_completion_stream(
+            async for chunk in self.provider.chat_completion_stream(
                 messages,
                 model=model,
                 max_tokens=max_tokens,
@@ -519,7 +542,7 @@ class AIService:
         self,
         selected_text: str,
         context: str = "",
-        model: str = "deepseek-chat",
+        model: str = None,  # Let provider determine default model
         edit_requirement: str = None,
         temperature: float = None,
         top_p: float = None,
@@ -528,7 +551,7 @@ class AIService:
         presence_penalty: float = None
     ) -> AsyncGenerator[str, None]:
         """AI auto-edit function - streaming version"""
-        logger.debug(f"Starting AI auto-edit stream for text: {selected_text[:50] if selected_text else '(empty)'}... with model: {model}")
+        logger.debug(f"Starting AI auto-edit stream for text: {selected_text[:50] if selected_text else '(empty)'}... with model: {model or 'provider default'}")
 
         try:
             # Format the request with context and edit requirement
@@ -540,13 +563,13 @@ class AIService:
                 {"role": "user", "content": user_message}
             ]
 
-            logger.debug(f"Sending streaming auto-edit request to DeepSeek API with model: {model}")
+            logger.debug(f"Sending streaming auto-edit request to {self.provider.provider_name} API with model: {model or 'provider default'}")
 
-            # Use "---" as stop sequence to prevent AI from adding explanations
-            async for chunk in self.deepseek.chat_completion_stream(
+            # Use provider's streaming method
+            # Note: stop sequences may not be supported by all providers
+            async for chunk in self.provider.chat_completion_stream(
                 messages,
                 model=model,
-                stop=["---"],
                 max_tokens=max_tokens,
                 temperature=temperature,
                 top_p=top_p,
@@ -627,20 +650,25 @@ class AIService:
                 {"role": "user", "content": analysis_prompt}
             ]
 
-            logger.debug("Sending style analysis request to DeepSeek API with deepseek-reasoner model")
+            logger.debug(f"Sending style analysis request to {self.provider.provider_name} API")
 
-            # Use deepseek-reasoner model for analysis with JSON response format
-            # Set max_tokens to 64000 to ensure complete output
-            response = await self.deepseek.chat_completion(
+            # Use reasoning model if available, otherwise use default model
+            if self.provider.supports_reasoning and self.provider.reasoning_model:
+                model = self.provider.reasoning_model
+                logger.debug(f"Using reasoning model: {model}")
+            else:
+                model = self.provider.default_model
+                logger.debug(f"Provider does not support reasoning, using default model: {model}")
+
+            # Use provider's chat_completion method
+            response = await self.provider.chat_completion(
                 messages,
-                model="deepseek-reasoner",
-                stream=False,
-                max_tokens=64000,
-                response_format={"type": "json_object"}
+                model=model,
+                max_tokens=64000
             )
 
-            # Extract JSON from response
-            content = response["choices"][0]["message"]["content"]
+            # Extract content from response (provider returns string directly)
+            content = response
 
             # Parse JSON (handle case where reasoning is included)
             # If content has reasoning sections, extract just the JSON part
@@ -749,20 +777,25 @@ class AIService:
                 {"role": "user", "content": analysis_prompt}
             ]
 
-            logger.debug("Sending NSFW style analysis request to DeepSeek API with deepseek-reasoner model")
+            logger.debug(f"Sending NSFW style analysis request to {self.provider.provider_name} API")
 
-            # Use deepseek-reasoner model for analysis with JSON response format
-            # Set max_tokens to 64000 to ensure complete output
-            response = await self.deepseek.chat_completion(
+            # Use reasoning model if available, otherwise use default model
+            if self.provider.supports_reasoning and self.provider.reasoning_model:
+                model = self.provider.reasoning_model
+                logger.debug(f"Using reasoning model: {model}")
+            else:
+                model = self.provider.default_model
+                logger.debug(f"Provider does not support reasoning, using default model: {model}")
+
+            # Use provider's chat_completion method
+            response = await self.provider.chat_completion(
                 messages,
-                model="deepseek-reasoner",
-                stream=False,
-                max_tokens=64000,
-                response_format={"type": "json_object"}
+                model=model,
+                max_tokens=64000
             )
 
-            # Extract JSON from response
-            content = response["choices"][0]["message"]["content"]
+            # Extract content from response (provider returns string directly)
+            content = response
 
             # Parse JSON (handle case where reasoning is included)
             # If content has reasoning sections, extract just the JSON part

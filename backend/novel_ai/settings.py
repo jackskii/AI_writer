@@ -213,6 +213,9 @@ CHANNEL_LAYERS = {
 # Note: API keys are now stored per-user in UserSettings model
 DEEPSEEK_API_BASE = os.environ.get('DEEPSEEK_API_BASE', 'https://api.deepseek.com/v1')
 
+# Qwen API Configuration (Alibaba Cloud DashScope)
+QWEN_API_BASE = os.environ.get('QWEN_API_BASE', 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1')
+
 # Auto-save settings
 AUTO_SAVE_INTERVAL = 5  # seconds
 SUGGESTION_TRIGGER_WORDS = 300  # words before triggering auto-suggestion

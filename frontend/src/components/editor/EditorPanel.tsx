@@ -610,14 +610,15 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
   };
 
   // Handle auto edit modal generate
-  const handleAutoEditGenerate = (
+  const handleAutoEditGenerate = async (
     originalText: string,
     context: AutoEditContext,
     onChunk: (chunk: string) => void,
     onEnd: () => void,
-    onError: (error: string) => void
-  ): EventSource | null => {
-    return aiApi.autoEditStream(
+    onError: (error: string) => void,
+    signal?: AbortSignal
+  ): Promise<void> => {
+    await aiApi.autoEditStream(
       work.id,
       chapter.id,
       originalText,
@@ -626,7 +627,7 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
       () => {
         console.log('Auto edit stream started');
       },
-      (_editedText: string) => {
+      () => {
         console.log('Auto edit stream completed');
         onEnd();
       },
@@ -637,7 +638,8 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
           message: `自动编辑失败: ${error}`
         });
         onError(error);
-      }
+      },
+      signal
     );
   };
 
@@ -983,32 +985,28 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
 
       // Call streaming auto-edit API
       let streamedText = '';
-      await new Promise<void>((resolve, reject) => {
-        aiApi.autoEditStream(
-          work.id,
-          chapter.id,
-          autoEdit.original_text,
-          {
-            chapterSelection: 'past_3',  // Use past 3 chapters for context
-            selectedLoreEntries: [],      // Could retrieve saved lore IDs from autoEdit if stored
-            model: 'deepseek-chat'
-          },
-          (chunk) => {
-            streamedText += chunk;
-          },
-          () => {
-            console.log('Auto-edit stream started');
-          },
-          (_editedText) => {
-            console.log('New auto-edit completed');
-            resolve();
-          },
-          (error) => {
-            console.error('Auto-edit stream error:', error);
-            reject(new Error(error));
-          }
-        );
-      });
+      await aiApi.autoEditStream(
+        work.id,
+        chapter.id,
+        autoEdit.original_text,
+        {
+          chapterSelection: 'past_3',  // Use past 3 chapters for context
+          selectedLoreEntries: [],      // Could retrieve saved lore IDs from autoEdit if stored
+          model: 'deepseek-chat'
+        },
+        (chunk) => {
+          streamedText += chunk;
+        },
+        () => {
+          console.log('Auto-edit stream started');
+        },
+        () => {
+          console.log('New auto-edit completed');
+        },
+        (error) => {
+          console.error('Auto-edit stream error:', error);
+        }
+      );
 
       const finalEditedText = streamedText;
 

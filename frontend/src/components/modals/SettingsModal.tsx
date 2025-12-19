@@ -31,12 +31,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     visual: true
   });
 
-  // API Key management
-  const [apiKey, setApiKey] = useState('');
+  // API Key management - per provider
+  const [deepseekApiKey, setDeepseekApiKey] = useState('');
+  const [qwenApiKey, setQwenApiKey] = useState('');
   const [showApiKey, setShowApiKey] = useState(false);
-  const [maskedApiKey, setMaskedApiKey] = useState('');
-  const [hasApiKey, setHasApiKey] = useState(false);
-  const [apiProvider, setApiProvider] = useState('deepseek');
+  const [maskedDeepseekApiKey, setMaskedDeepseekApiKey] = useState('');
+  const [maskedQwenApiKey, setMaskedQwenApiKey] = useState('');
+  const [hasDeepseekApiKey, setHasDeepseekApiKey] = useState(false);
+  const [hasQwenApiKey, setHasQwenApiKey] = useState(false);
+  const [apiProvider, setApiProvider] = useState<'deepseek' | 'qwen'>('deepseek');
 
   // AI Settings
   const [temperature, setTemperature] = useState(0.7);
@@ -50,6 +53,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [isSaving, setIsSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [changesApplied, setChangesApplied] = useState(false);
 
   // Original settings for comparison
   const [originalSettings, setOriginalSettings] = useState<Partial<UserSettings>>({});
@@ -57,11 +61,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   // Load settings function
   const loadSettings = useCallback(async () => {
     setIsLoadingSettings(true);
+    setChangesApplied(false);
+    setSaveMessage(null);
     try {
       const settings = await authApi.getSettings();
-      setMaskedApiKey(settings.masked_api_key);
-      setHasApiKey(settings.has_api_key);
-      setApiProvider(settings.api_provider || 'deepseek');
+      // Per-provider API key info
+      setMaskedDeepseekApiKey(settings.masked_deepseek_api_key || '');
+      setMaskedQwenApiKey(settings.masked_qwen_api_key || '');
+      setHasDeepseekApiKey(settings.has_deepseek_api_key || false);
+      setHasQwenApiKey(settings.has_qwen_api_key || false);
+      setApiProvider((settings.api_provider as 'deepseek' | 'qwen') || 'deepseek');
       setTemperature(settings.temperature);
       setTopP(settings.top_p);
       setMaxTokens(settings.max_tokens);
@@ -75,6 +84,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
       // Store original settings
       setOriginalSettings({
+        api_provider: settings.api_provider,
         temperature: settings.temperature,
         top_p: settings.top_p,
         max_tokens: settings.max_tokens,
@@ -113,28 +123,40 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   // Check for unsaved changes
   useEffect(() => {
     const hasChanges =
+      apiProvider !== originalSettings.api_provider ||
       temperature !== originalSettings.temperature ||
       topP !== originalSettings.top_p ||
       maxTokens !== originalSettings.max_tokens ||
       frequencyPenalty !== originalSettings.frequency_penalty ||
       presencePenalty !== originalSettings.presence_penalty ||
       theme !== originalSettings.theme ||
-      apiKey.trim() !== '';
+      deepseekApiKey.trim() !== '' ||
+      qwenApiKey.trim() !== '';
 
     setHasUnsavedChanges(hasChanges);
-  }, [temperature, topP, maxTokens, frequencyPenalty, presencePenalty, theme, apiKey, originalSettings]);
+  }, [apiProvider, temperature, topP, maxTokens, frequencyPenalty, presencePenalty, theme, deepseekApiKey, qwenApiKey, originalSettings]);
 
-  const handleSaveSettings = async () => {
+  const handleApplyChanges = async () => {
     setIsSaving(true);
     setSaveMessage(null);
 
     try {
       const updateData: Record<string, string | number> = {};
 
-      // Only include changed values
-      if (apiKey.trim()) {
-        updateData.deepseek_api_key = apiKey;
+      // Include provider if changed
+      if (apiProvider !== originalSettings.api_provider) {
+        updateData.api_provider = apiProvider;
       }
+
+      // Include API keys if entered (per provider)
+      if (deepseekApiKey.trim()) {
+        updateData.deepseek_api_key = deepseekApiKey;
+      }
+      if (qwenApiKey.trim()) {
+        updateData.qwen_api_key = qwenApiKey;
+      }
+
+      // Only include changed values
       if (temperature !== originalSettings.temperature) {
         updateData.temperature = temperature;
       }
@@ -163,13 +185,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       const response = await authApi.updateSettings(updateData);
 
       // Update local state with new values
-      setMaskedApiKey(response.data.masked_api_key);
-      setHasApiKey(response.data.has_api_key);
-      setApiKey('');
+      setMaskedDeepseekApiKey(response.data.masked_deepseek_api_key || '');
+      setMaskedQwenApiKey(response.data.masked_qwen_api_key || '');
+      setHasDeepseekApiKey(response.data.has_deepseek_api_key || false);
+      setHasQwenApiKey(response.data.has_qwen_api_key || false);
+      setDeepseekApiKey('');
+      setQwenApiKey('');
       setShowApiKey(false);
 
       // Update original settings
       setOriginalSettings({
+        api_provider: response.data.api_provider,
         temperature: response.data.temperature,
         top_p: response.data.top_p,
         max_tokens: response.data.max_tokens,
@@ -178,13 +204,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         theme: response.data.theme
       });
 
-      setSaveMessage({ type: 'success', text: '设置已保存' });
+      setSaveMessage({ type: 'success', text: '设置已应用' });
       setHasUnsavedChanges(false);
+      setChangesApplied(true);
 
       setTimeout(() => setSaveMessage(null), 3000);
     } catch (error: unknown) {
-      console.error('Failed to save settings:', error);
-      const errorMessage = error instanceof Error ? error.message : '设置保存失败';
+      console.error('Failed to apply settings:', error);
+      const errorMessage = error instanceof Error ? error.message : '设置应用失败';
       const axiosError = error as { response?: { data?: { error?: string } } };
       setSaveMessage({
         type: 'error',
@@ -193,6 +220,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     } finally {
       setIsSaving(false);
     }
+  };
+
+  const handleSave = () => {
+    onClose();
   };
 
   const toggleSection = (section: keyof ExpandedSections) => {
@@ -256,71 +287,121 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       <label className="text-sm text-dark-text-muted">API 提供商</label>
                       <select
                         value={apiProvider}
-                        disabled
-                        className="w-full px-3 py-2 bg-dark-bg border border-dark-border rounded-lg text-dark-text text-sm cursor-not-allowed opacity-60"
+                        onChange={(e) => setApiProvider(e.target.value as 'deepseek' | 'qwen')}
+                        className="w-full px-3 py-2 bg-dark-bg border border-dark-border rounded-lg text-dark-text text-sm focus:outline-none focus:border-dark-primary"
                       >
                         <option value="deepseek">DeepSeek</option>
+                        <option value="qwen">Qwen (通义千问)</option>
                       </select>
-                      <p className="text-xs text-dark-text-muted">目前仅支持 DeepSeek</p>
+                      <p className="text-xs text-dark-text-muted">选择您要使用的AI服务提供商</p>
                     </div>
 
-                    {/* Current API Key Status */}
-                    {hasApiKey && (
-                      <div className="bg-dark-bg border border-dark-border rounded-lg p-3">
+                    {/* API Key Section - shows based on selected provider */}
+                    {apiProvider === 'deepseek' ? (
+                      <div className="space-y-3 p-3 rounded-lg border border-dark-primary bg-dark-primary/5">
                         <div className="flex items-center justify-between">
-                          <div>
-                            <p className="text-xs text-dark-text-muted mb-1">当前密钥</p>
-                            <p className="text-sm text-dark-text font-mono">{maskedApiKey}</p>
-                          </div>
-                          <div className="flex items-center gap-1">
-                            <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-                            <span className="text-xs text-green-500">已配置</span>
-                          </div>
+                          <span className="text-sm font-medium text-dark-text">DeepSeek API 密钥</span>
+                          {hasDeepseekApiKey && (
+                            <div className="flex items-center gap-1">
+                              <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                              <span className="text-xs text-green-500">已配置</span>
+                            </div>
+                          )}
                         </div>
-                      </div>
-                    )}
 
-                    {!hasApiKey && (
-                      <div className="bg-yellow-900/20 border border-yellow-700/30 rounded-lg p-3">
-                        <p className="text-sm text-yellow-300">
-                          未配置API密钥。使用AI功能前需要配置DeepSeek API密钥。
+                        {hasDeepseekApiKey && (
+                          <p className="text-sm text-dark-text font-mono">{maskedDeepseekApiKey}</p>
+                        )}
+
+                        <div className="relative">
+                          <Input
+                            type={showApiKey ? 'text' : 'password'}
+                            value={deepseekApiKey}
+                            onChange={(e) => setDeepseekApiKey(e.target.value)}
+                            placeholder={hasDeepseekApiKey ? '输入新密钥以更新...' : 'sk-...'}
+                            className="bg-dark-bg border-dark-border font-mono text-sm pr-10"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowApiKey(!showApiKey)}
+                            className="absolute right-2 top-1/2 -translate-y-1/2 text-dark-text-muted hover:text-dark-text"
+                          >
+                            {showApiKey ? <EyeOff size={16} /> : <Eye size={16} />}
+                          </button>
+                        </div>
+                        <p className="text-xs text-dark-text-muted">
+                          获取密钥：
+                          <a
+                            href="https://platform.deepseek.com/api_keys"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-dark-primary hover:underline ml-1"
+                          >
+                            DeepSeek官网
+                          </a>
                         </p>
+
+                        {!hasDeepseekApiKey && !deepseekApiKey.trim() && (
+                          <div className="bg-yellow-900/20 border border-yellow-700/30 rounded-lg p-3 mt-2">
+                            <p className="text-sm text-yellow-300">
+                              未配置API密钥。使用AI功能前需要配置API密钥。
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="space-y-3 p-3 rounded-lg border border-dark-primary bg-dark-primary/5">
+                        <div className="flex items-center justify-between">
+                          <span className="text-sm font-medium text-dark-text">Qwen (通义千问) API 密钥</span>
+                          {hasQwenApiKey && (
+                            <div className="flex items-center gap-1">
+                              <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                              <span className="text-xs text-green-500">已配置</span>
+                            </div>
+                          )}
+                        </div>
+
+                        {hasQwenApiKey && (
+                          <p className="text-sm text-dark-text font-mono">{maskedQwenApiKey}</p>
+                        )}
+
+                        <div className="relative">
+                          <Input
+                            type={showApiKey ? 'text' : 'password'}
+                            value={qwenApiKey}
+                            onChange={(e) => setQwenApiKey(e.target.value)}
+                            placeholder={hasQwenApiKey ? '输入新密钥以更新...' : 'sk-...'}
+                            className="bg-dark-bg border-dark-border font-mono text-sm pr-10"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowApiKey(!showApiKey)}
+                            className="absolute right-2 top-1/2 -translate-y-1/2 text-dark-text-muted hover:text-dark-text"
+                          >
+                            {showApiKey ? <EyeOff size={16} /> : <Eye size={16} />}
+                          </button>
+                        </div>
+                        <p className="text-xs text-dark-text-muted">
+                          获取密钥：
+                          <a
+                            href="https://dashscope.console.aliyun.com/apiKey"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-dark-primary hover:underline ml-1"
+                          >
+                            阿里云DashScope
+                          </a>
+                        </p>
+
+                        {!hasQwenApiKey && !qwenApiKey.trim() && (
+                          <div className="bg-yellow-900/20 border border-yellow-700/30 rounded-lg p-3 mt-2">
+                            <p className="text-sm text-yellow-300">
+                              未配置API密钥。使用AI功能前需要配置API密钥。
+                            </p>
+                          </div>
+                        )}
                       </div>
                     )}
-
-                    {/* API Key Input */}
-                    <div className="space-y-2">
-                      <label className="text-sm text-dark-text-muted">
-                        {hasApiKey ? '更新 API 密钥' : '输入 API 密钥'}
-                      </label>
-                      <div className="relative">
-                        <Input
-                          type={showApiKey ? 'text' : 'password'}
-                          value={apiKey}
-                          onChange={(e) => setApiKey(e.target.value)}
-                          placeholder="sk-..."
-                          className="bg-dark-bg border-dark-border font-mono text-sm pr-10"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => setShowApiKey(!showApiKey)}
-                          className="absolute right-2 top-1/2 -translate-y-1/2 text-dark-text-muted hover:text-dark-text"
-                        >
-                          {showApiKey ? <EyeOff size={16} /> : <Eye size={16} />}
-                        </button>
-                      </div>
-                      <p className="text-xs text-dark-text-muted">
-                        API密钥将被加密存储。获取密钥：
-                        <a
-                          href="https://platform.deepseek.com/api_keys"
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-dark-primary hover:underline ml-1"
-                        >
-                          DeepSeek官网
-                        </a>
-                      </p>
-                    </div>
                   </div>
                 )}
               </div>
@@ -348,7 +429,18 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     <div className="space-y-2">
                       <div className="flex items-center justify-between">
                         <label className="text-sm text-dark-text">Temperature</label>
-                        <span className="text-sm text-dark-primary font-mono">{temperature.toFixed(2)}</span>
+                        <input
+                          type="number"
+                          min="0"
+                          max="2"
+                          step="0.01"
+                          value={temperature}
+                          onChange={(e) => {
+                            const val = parseFloat(e.target.value);
+                            if (!isNaN(val)) setTemperature(Math.min(2, Math.max(0, val)));
+                          }}
+                          className="w-20 px-2 py-1 text-sm text-center font-mono bg-transparent rounded text-dark-primary transition-all duration-200 outline-none hover:bg-white/5 hover:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.1)] focus:bg-white/10 focus:shadow-[inset_0_0_0_1px_rgba(59,130,246,0.5)]"
+                        />
                       </div>
                       <input
                         type="range"
@@ -366,7 +458,18 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     <div className="space-y-2">
                       <div className="flex items-center justify-between">
                         <label className="text-sm text-dark-text">Top P</label>
-                        <span className="text-sm text-dark-primary font-mono">{topP.toFixed(2)}</span>
+                        <input
+                          type="number"
+                          min="0"
+                          max="1"
+                          step="0.01"
+                          value={topP}
+                          onChange={(e) => {
+                            const val = parseFloat(e.target.value);
+                            if (!isNaN(val)) setTopP(Math.min(1, Math.max(0, val)));
+                          }}
+                          className="w-20 px-2 py-1 text-sm text-center font-mono bg-transparent rounded text-dark-primary transition-all duration-200 outline-none hover:bg-white/5 hover:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.1)] focus:bg-white/10 focus:shadow-[inset_0_0_0_1px_rgba(59,130,246,0.5)]"
+                        />
                       </div>
                       <input
                         type="range"
@@ -384,7 +487,18 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     <div className="space-y-2">
                       <div className="flex items-center justify-between">
                         <label className="text-sm text-dark-text">Max Tokens</label>
-                        <span className="text-sm text-dark-primary font-mono">{maxTokens}</span>
+                        <input
+                          type="number"
+                          min="100"
+                          max="8000"
+                          step="100"
+                          value={maxTokens}
+                          onChange={(e) => {
+                            const val = parseInt(e.target.value);
+                            if (!isNaN(val)) setMaxTokens(Math.min(8000, Math.max(100, val)));
+                          }}
+                          className="w-20 px-2 py-1 text-sm text-center font-mono bg-transparent rounded text-dark-primary transition-all duration-200 outline-none hover:bg-white/5 hover:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.1)] focus:bg-white/10 focus:shadow-[inset_0_0_0_1px_rgba(59,130,246,0.5)]"
+                        />
                       </div>
                       <input
                         type="range"
@@ -402,7 +516,18 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     <div className="space-y-2">
                       <div className="flex items-center justify-between">
                         <label className="text-sm text-dark-text">Frequency Penalty</label>
-                        <span className="text-sm text-dark-primary font-mono">{frequencyPenalty.toFixed(2)}</span>
+                        <input
+                          type="number"
+                          min="-2"
+                          max="2"
+                          step="0.01"
+                          value={frequencyPenalty}
+                          onChange={(e) => {
+                            const val = parseFloat(e.target.value);
+                            if (!isNaN(val)) setFrequencyPenalty(Math.min(2, Math.max(-2, val)));
+                          }}
+                          className="w-20 px-2 py-1 text-sm text-center font-mono bg-transparent rounded text-dark-primary transition-all duration-200 outline-none hover:bg-white/5 hover:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.1)] focus:bg-white/10 focus:shadow-[inset_0_0_0_1px_rgba(59,130,246,0.5)]"
+                        />
                       </div>
                       <input
                         type="range"
@@ -420,7 +545,18 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     <div className="space-y-2">
                       <div className="flex items-center justify-between">
                         <label className="text-sm text-dark-text">Presence Penalty</label>
-                        <span className="text-sm text-dark-primary font-mono">{presencePenalty.toFixed(2)}</span>
+                        <input
+                          type="number"
+                          min="-2"
+                          max="2"
+                          step="0.01"
+                          value={presencePenalty}
+                          onChange={(e) => {
+                            const val = parseFloat(e.target.value);
+                            if (!isNaN(val)) setPresencePenalty(Math.min(2, Math.max(-2, val)));
+                          }}
+                          className="w-20 px-2 py-1 text-sm text-center font-mono bg-transparent rounded text-dark-primary transition-all duration-200 outline-none hover:bg-white/5 hover:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.1)] focus:bg-white/10 focus:shadow-[inset_0_0_0_1px_rgba(59,130,246,0.5)]"
+                        />
                       </div>
                       <input
                         type="range"
@@ -503,22 +639,29 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               <div className="flex justify-end gap-3 pt-2">
                 <Button
                   variant="outline"
-                  onClick={onClose}
-                >
-                  取消
-                </Button>
-                <Button
-                  onClick={handleSaveSettings}
+                  onClick={handleApplyChanges}
                   disabled={isSaving || !hasUnsavedChanges}
                 >
                   {isSaving ? (
                     <div className="flex items-center gap-2">
                       <LoadingSpinner size="sm" />
-                      保存中
+                      应用中
                     </div>
                   ) : (
-                    '保存设置'
+                    '应用更改'
                   )}
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={onClose}
+                >
+                  关闭
+                </Button>
+                <Button
+                  onClick={handleSave}
+                  disabled={!changesApplied}
+                >
+                  保存
                 </Button>
               </div>
             </>

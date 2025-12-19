@@ -101,9 +101,19 @@ export const authApi = {
 
 export interface UserSettings {
   // API Settings
+  api_provider: string;
+
+  // DeepSeek API
+  masked_deepseek_api_key: string;
+  has_deepseek_api_key: boolean;
+
+  // Qwen API
+  masked_qwen_api_key: string;
+  has_qwen_api_key: boolean;
+
+  // Legacy fields (for current provider)
   masked_api_key: string;
   has_api_key: boolean;
-  api_provider: string;
 
   // AI Settings
   temperature: number;
@@ -119,12 +129,20 @@ export interface UserSettings {
 }
 
 export interface UserSettingsUpdate {
+  // Provider selection
+  api_provider?: 'deepseek' | 'qwen';
+
+  // API Keys (per provider)
   deepseek_api_key?: string;
-  api_provider?: string;
+  qwen_api_key?: string;
+
+  // AI Settings
   temperature?: number;
   top_p?: number;
   max_tokens?: number;
   frequency_penalty?: number;
   presence_penalty?: number;
+
+  // Visual Settings
   theme?: 'dark' | 'light';
 }

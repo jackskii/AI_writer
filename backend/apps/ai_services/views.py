@@ -23,10 +23,11 @@ def get_user_api_key_async(user):
     """获取用户的API密钥 (async version)"""
     from apps.user_auth.models import UserSettings
     settings = UserSettings.objects.get(user=user)
-    api_key = settings.deepseek_api_key
+    api_key = settings.get_api_key_for_provider()
+    provider = settings.api_provider
     if not api_key:
         raise ValueError("API密钥未配置")
-    return api_key
+    return api_key, provider
 
 
 @sync_to_async
@@ -41,6 +42,7 @@ def get_user_ai_settings(user):
             'max_tokens': settings.max_tokens,
             'frequency_penalty': settings.frequency_penalty,
             'presence_penalty': settings.presence_penalty,
+            'provider': settings.api_provider,
         }
     except UserSettings.DoesNotExist:
         # Return defaults if settings don't exist
@@ -50,6 +52,7 @@ def get_user_ai_settings(user):
             'max_tokens': 2000,
             'frequency_penalty': 0.0,
             'presence_penalty': 0.0,
+            'provider': 'deepseek',
         }
 
 
@@ -102,7 +105,7 @@ def save_chapter_summary(chapter, summary):
 
 
 @sync_to_async
-def build_auto_edit_context(work, chapter, user, style_id, selected_lore_ids, chapter_selection, custom_chapter_count):
+def build_auto_edit_context(work, chapter, user, style_id, selected_lore_ids, chapter_selection, custom_chapter_count, use_summaries=False):
     """Build context for auto-edit (async version)"""
     formatted_context = ""
 
@@ -155,9 +158,16 @@ def build_auto_edit_context(work, chapter, user, style_id, selected_lore_ids, ch
         previous_chapters = list(reversed(previous_chapters))
 
     if previous_chapters:
-        formatted_context += "前文章节：\n\n"
-        for ch in previous_chapters:
-            formatted_context += f"第{ch.chapter_number}章《{ch.title}》\n\n{ch.content or '(空章节)'}\n\n---\n\n"
+        if use_summaries:
+            formatted_context += "前文章节摘要：\n\n"
+            for ch in previous_chapters:
+                summary_text = ch.summary or '(无摘要)'
+                formatted_context += f"第{ch.chapter_number}章《{ch.title}》摘要：{summary_text}\n\n"
+            formatted_context += "---\n\n"
+        else:
+            formatted_context += "前文章节：\n\n"
+            for ch in previous_chapters:
+                formatted_context += f"第{ch.chapter_number}章《{ch.title}》\n\n{ch.content or '(空章节)'}\n\n---\n\n"
 
     # Add current chapter content at the end
     if chapter.content:
@@ -167,14 +177,15 @@ def build_auto_edit_context(work, chapter, user, style_id, selected_lore_ids, ch
 
 
 def get_user_api_key(user):
-    """获取用户的API密钥"""
+    """获取用户的API密钥和provider"""
     try:
         from apps.user_auth.models import UserSettings
         settings = UserSettings.objects.get(user=user)
-        api_key = settings.deepseek_api_key
+        api_key = settings.get_api_key_for_provider()
+        provider = settings.api_provider
         if not api_key:
             raise ValueError("API密钥未配置")
-        return api_key
+        return api_key, provider
     except UserSettings.DoesNotExist:
         raise ValueError("用户设置不存在，请先配置API密钥")
     except Exception as e:
@@ -209,8 +220,8 @@ def ai_suggest(request):
     chapter = get_object_or_404(Chapter, id=chapter_id, work=work)
     
     try:
-        api_key = get_user_api_key(request.user)
-        ai_service = AIService(api_key=api_key)
+        api_key, provider = get_user_api_key(request.user)
+        ai_service = AIService(api_key=api_key, provider_name=provider)
         suggestions = run_async_ai_task(
             ai_service.generate_suggestions(chapter, target_text)
         )
@@ -261,7 +272,7 @@ async def ai_chat_stream(request):
     work_id = request.GET.get('work_id')
     chapter_id = request.GET.get('chapter_id')
     message = request.GET.get('message')
-    model = request.GET.get('model', 'deepseek-chat')
+    model = request.GET.get('model')  # Let provider determine default model
 
     if not all([work_id, chapter_id, message]):
         return HttpResponse(
@@ -290,9 +301,9 @@ async def ai_chat_stream(request):
             context = await sync_to_async(ContextBuilder.build_context)(chapter)
 
             # Get API key and AI settings
-            api_key = await get_user_api_key_async(user)
+            api_key, provider = await get_user_api_key_async(user)
             ai_settings = await get_user_ai_settings(user)
-            ai_service = AIService(api_key=api_key)
+            ai_service = AIService(api_key=api_key, provider_name=provider)
 
             # Send start event
             yield f'data: {json.dumps({"type": "start", "message": "AI聊天开始"})}\n\n'
@@ -361,7 +372,7 @@ async def ai_work_chat_stream(request):
 
     work_id = request.GET.get('work_id')
     message = request.GET.get('message')
-    model = request.GET.get('model', 'deepseek-chat')
+    model = request.GET.get('model')  # Let provider determine default model
 
     if not all([work_id, message]):
         return HttpResponse(
@@ -386,9 +397,9 @@ async def ai_work_chat_stream(request):
             from .services import ContextBuilder
             context = await sync_to_async(ContextBuilder.build_work_overview_context)(work)
 
-            api_key = await get_user_api_key_async(user)
+            api_key, provider = await get_user_api_key_async(user)
             ai_settings = await get_user_ai_settings(user)
-            ai_service = AIService(api_key=api_key)
+            ai_service = AIService(api_key=api_key, provider_name=provider)
 
             yield f'data: {json.dumps({"type": "start", "message": "AI作品聊天开始"})}\n\n'
 
@@ -474,8 +485,8 @@ async def ai_summarize_stream(request):
     async def generate_stream():
         """生成SSE数据流 (async generator)"""
         try:
-            api_key = await get_user_api_key_async(user)
-            ai_service = AIService(api_key=api_key)
+            api_key, provider = await get_user_api_key_async(user)
+            ai_service = AIService(api_key=api_key, provider_name=provider)
 
             yield f"data: {json.dumps({'type': 'start', 'message': 'AI摘要生成开始'})}\n\n"
 
@@ -509,14 +520,24 @@ async def ai_summarize_stream(request):
 @csrf_exempt
 async def ai_auto_edit_stream(request):
     """AI自动编辑端点 - SSE流式响应，支持上下文自定义 (async version for ASGI)"""
-    if request.method != 'GET':
+    if request.method != 'POST':
         return HttpResponse(
-            'data: {"type": "error", "message": "仅支持GET请求"}\n\n',
+            'data: {"type": "error", "message": "仅支持POST请求"}\n\n',
+            content_type='text/event-stream'
+        )
+
+    # Parse request body
+    try:
+        body = json.loads(request.body.decode('utf-8'))
+    except Exception:
+        return HttpResponse(
+            'data: {"type": "error", "message": "无效的请求数据"}\n\n',
             content_type='text/event-stream'
         )
 
     user = None
-    token = request.GET.get('token')
+    # Token can be in query params (for compatibility) or in body
+    token = request.GET.get('token') or body.get('token')
     if token:
         try:
             user = await get_token_user(token)
@@ -535,17 +556,18 @@ async def ai_auto_edit_stream(request):
             status=401
         )
 
-    selected_text = request.GET.get('selected_text')
-    work_id = request.GET.get('work_id')
-    chapter_id = request.GET.get('chapter_id')
+    selected_text = body.get('selected_text')
+    work_id = body.get('work_id')
+    chapter_id = body.get('chapter_id')
 
     # Context customization parameters
-    chapter_selection = request.GET.get('chapter_selection', 'past_3')
-    custom_chapter_count = request.GET.get('custom_chapter_count', '3')
-    selected_lore_ids = request.GET.get('selected_lore_ids', '')
-    model = request.GET.get('model', 'deepseek-chat')
-    edit_requirement = request.GET.get('edit_requirement', '')
-    style_id = request.GET.get('style_id', '')
+    chapter_selection = body.get('chapter_selection', 'past_3')
+    custom_chapter_count = body.get('custom_chapter_count', '3')
+    selected_lore_ids = body.get('selected_lore_ids', '')
+    model = body.get('model')  # Let provider determine default model
+    edit_requirement = body.get('edit_requirement', '')
+    style_id = body.get('style_id', '')
+    use_summaries = body.get('use_summaries', False)
 
     if not all([work_id, chapter_id]):
         return HttpResponse(
@@ -568,13 +590,13 @@ async def ai_auto_edit_stream(request):
             # Build context
             formatted_context = await build_auto_edit_context(
                 work, chapter, user, style_id, selected_lore_ids,
-                chapter_selection, custom_chapter_count
+                chapter_selection, custom_chapter_count, use_summaries
             )
 
             # Get API key and AI settings
-            api_key = await get_user_api_key_async(user)
+            api_key, provider = await get_user_api_key_async(user)
             ai_settings = await get_user_ai_settings(user)
-            ai_service = AIService(api_key=api_key)
+            ai_service = AIService(api_key=api_key, provider_name=provider)
 
             yield f'data: {json.dumps({"type": "start", "message": "AI自动编辑开始"})}\n\n'
 
@@ -652,8 +674,8 @@ def ai_auto_describe_entry(request):
         context_text = "\n\n---\n\n".join(context_parts)
 
         # 调用AI生成描述
-        api_key = get_user_api_key(request.user)
-        ai_service = AIService(api_key=api_key)
+        api_key, provider = get_user_api_key(request.user)
+        ai_service = AIService(api_key=api_key, provider_name=provider)
 
         prompt = f"""基于以下章节内容，为"{entry_name}"创建一个详细的世界观条目描述。
 
@@ -674,10 +696,10 @@ def ai_auto_describe_entry(request):
         ]
 
         response = run_async_ai_task(
-            ai_service.deepseek.chat_completion(messages, stream=False)
+            ai_service.provider.chat_completion(messages)
         )
 
-        description = response["choices"][0]["message"]["content"]
+        description = response
 
         return Response({
             'description': description,

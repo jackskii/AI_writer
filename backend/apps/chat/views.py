@@ -105,11 +105,51 @@ def save_chat_message(request, work_id, chapter_id):
 
 @api_view(['DELETE'])
 @permission_classes([IsAuthenticated])
+def delete_chat_message(request, work_id, chapter_id, message_id):
+    """删除单条消息及其之后的所有消息"""
+    work = get_object_or_404(Work, id=work_id, author=request.user)
+    chapter = get_object_or_404(Chapter, id=chapter_id, work=work)
+
+    try:
+        # 获取会话
+        session = ChatSession.objects.filter(
+            work=work,
+            chapter=chapter,
+            user=request.user
+        ).first()
+
+        if not session:
+            return Response(
+                {'error': '聊天会话不存在'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        # 获取要删除的消息
+        message = get_object_or_404(ChatMessage, id=message_id, session=session)
+
+        # 删除该消息及其之后的所有消息
+        ChatMessage.objects.filter(
+            session=session,
+            created_at__gte=message.created_at
+        ).delete()
+
+        return Response({'message': '消息已删除'})
+
+    except Exception as e:
+        logger.error(f"Delete chat message error: {str(e)}")
+        return Response(
+            {'error': f'删除消息失败：{str(e)}'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+@api_view(['DELETE'])
+@permission_classes([IsAuthenticated])
 def clear_chat_history(request, work_id, chapter_id):
     """清空聊天历史"""
     work = get_object_or_404(Work, id=work_id, author=request.user)
     chapter = get_object_or_404(Chapter, id=chapter_id, work=work)
-    
+
     try:
         # 删除聊天会话（会级联删除所有消息）
         ChatSession.objects.filter(
@@ -117,13 +157,13 @@ def clear_chat_history(request, work_id, chapter_id):
             chapter=chapter,
             user=request.user
         ).delete()
-        
+
         return Response({'message': '聊天历史已清空'})
-    
+
     except Exception as e:
         logger.error(f"Clear chat history error: {str(e)}")
         return Response(
-            {'error': f'清空聊天历史失败：{str(e)}'}, 
+            {'error': f'清空聊天历史失败：{str(e)}'},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
 
@@ -204,6 +244,44 @@ def save_work_chat_message(request, work_id):
         logger.error(f"Save work chat message error: {str(e)}")
         return Response(
             {'error': f'保存聊天消息失败：{str(e)}'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+@api_view(['DELETE'])
+@permission_classes([IsAuthenticated])
+def delete_work_chat_message(request, work_id, message_id):
+    """删除作品聊天单条消息及其之后的所有消息"""
+    work = get_object_or_404(Work, id=work_id, author=request.user)
+
+    try:
+        # 获取会话
+        session = WorkChatSession.objects.filter(
+            work=work,
+            user=request.user
+        ).first()
+
+        if not session:
+            return Response(
+                {'error': '聊天会话不存在'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        # 获取要删除的消息
+        message = get_object_or_404(WorkChatMessage, id=message_id, session=session)
+
+        # 删除该消息及其之后的所有消息
+        WorkChatMessage.objects.filter(
+            session=session,
+            created_at__gte=message.created_at
+        ).delete()
+
+        return Response({'message': '消息已删除'})
+
+    except Exception as e:
+        logger.error(f"Delete work chat message error: {str(e)}")
+        return Response(
+            {'error': f'删除消息失败：{str(e)}'},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
 

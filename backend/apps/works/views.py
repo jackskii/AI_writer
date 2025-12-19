@@ -9,14 +9,15 @@ from .serializers import WorkSerializer, WorkDetailSerializer, ActSerializer, Ch
 
 
 def get_user_api_key(user):
-    """获取用户的API密钥"""
+    """获取用户的API密钥和provider"""
     try:
         from apps.user_auth.models import UserSettings
         settings = UserSettings.objects.get(user=user)
-        api_key = settings.deepseek_api_key
+        api_key = settings.get_api_key_for_provider()
+        provider = settings.api_provider
         if not api_key:
             raise ValueError("API密钥未配置")
-        return api_key
+        return api_key, provider
     except UserSettings.DoesNotExist:
         raise ValueError("用户设置不存在，请先配置API密钥")
     except Exception as e:
@@ -61,19 +62,29 @@ class ActViewSet(viewsets.ModelViewSet):
 class ChapterViewSet(viewsets.ModelViewSet):
     serializer_class = ChapterSerializer
     permission_classes = [IsAuthenticated]
+    pagination_class = None  # Show all chapters without pagination
 
     def get_queryset(self):
         work_id = self.kwargs.get('work_pk')
         work = get_object_or_404(Work, id=work_id, author=self.request.user)
         return Chapter.objects.filter(work=work)
 
-    def _renumber_chapters_in_act(self, act):
-        """重新编号指定act中的所有章节"""
-        chapters = act.chapters.all().order_by('chapter_number')
+    def _renumber_all_chapters(self, work):
+        """重新编号整个作品的所有章节，使其连续编号"""
+        # Get all chapters ordered by their global order
+        chapters = Chapter.objects.filter(work=work).order_by('order')
+
+        # Batch update to minimize database queries
+        updates = []
         for index, chapter in enumerate(chapters):
-            if chapter.chapter_number != index + 1:
-                chapter.chapter_number = index + 1
-                chapter.save(update_fields=['chapter_number'])
+            new_number = index + 1
+            if chapter.chapter_number != new_number:
+                chapter.chapter_number = new_number
+                updates.append(chapter)
+
+        # Bulk update if there are changes
+        if updates:
+            Chapter.objects.bulk_update(updates, ['chapter_number'])
 
     def perform_create(self, serializer):
         work_id = self.kwargs.get('work_pk')
@@ -94,19 +105,30 @@ class ChapterViewSet(viewsets.ModelViewSet):
                 raise ValidationError(f"Act {act.id} does not belong to work {work.id}")
 
         # Auto-set order to the next available number globally (across all acts)
-        next_order = work.chapters.count() + 1
+        # Use Chapter.objects directly to avoid any caching from work.chapters
+        from django.db.models import Max
+        from django.db import transaction
 
-        # Calculate chapter_number within the act
-        chapter_number = act.chapters.count() + 1
+        with transaction.atomic():
+            # Lock the work to prevent race conditions when calculating order
+            Work.objects.select_for_update().get(pk=work.pk)
 
-        serializer.save(work=work, act=act, order=next_order, chapter_number=chapter_number)
+            # Query directly from Chapter model to get fresh data
+            max_order = Chapter.objects.filter(work=work).aggregate(Max('order'))['order__max'] or 0
+            next_order = max_order + 1
+
+            # Temporarily set chapter_number to order (will be renumbered)
+            serializer.save(work=work, act=act, order=next_order, chapter_number=next_order)
+
+        # Renumber all chapters to ensure continuous numbering
+        self._renumber_all_chapters(work)
 
     def perform_destroy(self, instance):
-        """删除章节后重新编号该act中的其他章节"""
-        act = instance.act
+        """删除章节后重新编号所有章节"""
+        work = instance.work
         super().perform_destroy(instance)
-        # 重新编号该act中的所有章节
-        self._renumber_chapters_in_act(act)
+        # 重新编号整个作品的所有章节
+        self._renumber_all_chapters(work)
 
     @action(detail=True, methods=['patch'])
     def autosave(self, request, work_pk=None, pk=None):
@@ -132,8 +154,8 @@ class ChapterViewSet(viewsets.ModelViewSet):
 
         try:
             from apps.ai_services.services import AIService, run_async_ai_task
-            api_key = get_user_api_key(request.user)
-            ai_service = AIService(api_key=api_key)
+            api_key, provider = get_user_api_key(request.user)
+            ai_service = AIService(api_key=api_key, provider_name=provider)
             summary = run_async_ai_task(
                 ai_service.generate_summary(chapter)
             )
@@ -175,11 +197,32 @@ class ChapterViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        # 更新章节号（在该act内的顺序）
-        for index, chapter_id in enumerate(chapter_ids):
-            chapter = chapters.get(id=chapter_id)
-            chapter.chapter_number = index + 1
-            chapter.save(update_fields=['chapter_number'])
+        from django.db import transaction
+
+        with transaction.atomic():
+            # Get the minimum order value for this act's chapters
+            # to determine where to start the reordering
+            act_chapters = Chapter.objects.filter(work=work, act=act).order_by('order')
+            if act_chapters.exists():
+                min_order = act_chapters.first().order
+
+                # Update order values for the reordered chapters
+                chapters_dict = {ch.id: ch for ch in chapters}
+                for index, chapter_id in enumerate(chapter_ids):
+                    chapter = chapters_dict[chapter_id]
+                    chapter.order = min_order + index
+                    chapter.save(update_fields=['order'])
+
+                # Now we need to fix the order values for chapters in other acts
+                # to ensure they remain sequential without gaps
+                all_chapters = list(Chapter.objects.filter(work=work).order_by('act__order', 'order'))
+                for i, chapter in enumerate(all_chapters):
+                    if chapter.order != i + 1:
+                        chapter.order = i + 1
+                        chapter.save(update_fields=['order'])
+
+            # Renumber all chapters to ensure continuous numbering
+            self._renumber_all_chapters(work)
 
         return Response({'status': 'success', 'updated': len(chapter_ids)})
 
@@ -241,8 +284,8 @@ class WritingStyleViewSet(viewsets.ModelViewSet):
             )
 
         try:
-            api_key = get_user_api_key(request.user)
-            ai_service = AIService(api_key=api_key)
+            api_key, provider = get_user_api_key(request.user)
+            ai_service = AIService(api_key=api_key, provider_name=provider)
             analysis_result = run_async_ai_task(
                 ai_service.analyze_writing_style(text_sample)
             )
@@ -290,8 +333,8 @@ class WritingStyleViewSet(viewsets.ModelViewSet):
             )
 
         try:
-            api_key = get_user_api_key(request.user)
-            ai_service = AIService(api_key=api_key)
+            api_key, provider = get_user_api_key(request.user)
+            ai_service = AIService(api_key=api_key, provider_name=provider)
             analysis_result = run_async_ai_task(
                 ai_service.analyze_nsfw_writing_style(text_sample)
             )

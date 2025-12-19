@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, Save, MessageCircle, Settings, Palette } from 'lucide-react';
+import { ArrowLeft, Save, MessageCircle, Settings, Palette, Pencil } from 'lucide-react';
 import { worksApi, chaptersApi } from '../services/api';
 import { useWorkStore } from '../stores/useWorkStore';
 import { useUIStore } from '../stores/useUIStore';
@@ -263,16 +263,22 @@ export const EditorPage: React.FC = () => {
                   onChange={(e) => setChapterTitleInput(e.target.value)}
                   onBlur={handleSaveTitle}
                   onKeyDown={handleTitleKeyDown}
-                  className="text-base font-semibold text-dark-text bg-transparent border-none outline-none focus:ring-0 px-0"
+                  className="text-base font-semibold text-dark-text bg-dark-bg border border-dark-border rounded px-2 py-0.5 outline-none focus:ring-1 focus:ring-dark-primary"
                   autoFocus
                 />
               ) : (
-                <button
-                  onClick={handleStartEditingTitle}
-                  className="text-base font-semibold text-dark-text hover:text-dark-primary transition-colors text-left"
-                >
-                  {currentChapterData?.title || '未命名章节'}
-                </button>
+                <div className="flex items-center gap-2">
+                  <span className="text-base font-semibold text-dark-text">
+                    {currentChapterData?.title || '未命名章节'}
+                  </span>
+                  <button
+                    onClick={handleStartEditingTitle}
+                    className="p-1 text-dark-text-muted hover:text-dark-primary hover:bg-dark-surface rounded transition-colors"
+                    title="编辑标题"
+                  >
+                    <Pencil size={14} />
+                  </button>
+                </div>
               )}
             </div>
           </div>

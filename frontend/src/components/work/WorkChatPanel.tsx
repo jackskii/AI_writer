@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Send, Bot, User, Square, Settings } from 'lucide-react';
+import { Send, Bot, User, Square, Settings, Trash2, RotateCcw } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { aiApi, chatApi } from '../../services/api';
 import { Button } from '../ui/Button';
@@ -54,19 +54,27 @@ export const WorkChatPanel: React.FC<WorkChatPanelProps> = ({ work }) => {
       inputRef.current.style.height = 'auto';
     }
 
-    const userMessage: ChatMessage = {
-      id: `${Date.now()}_user`,
-      role: 'user',
-      content: message,
-      timestamp: new Date().toISOString(),
-    };
-    setMessages((prev) => [...prev, userMessage]);
-
+    // Save user message to backend first and get real ID
+    let userMessage: ChatMessage;
     try {
-      await chatApi.saveWorkMessage(work.id, 'user', message);
+      const response = await chatApi.saveWorkMessage(work.id, 'user', message);
+      userMessage = {
+        id: response.data.id,
+        role: 'user',
+        content: message,
+        timestamp: response.data.timestamp,
+      };
     } catch (error) {
       console.error('Failed to save work chat user message:', error);
+      // Fallback: use temporary ID if save fails
+      userMessage = {
+        id: `${Date.now()}_user`,
+        role: 'user',
+        content: message,
+        timestamp: new Date().toISOString(),
+      };
     }
+    setMessages((prev) => [...prev, userMessage]);
 
     try {
       if (streamEventSourceRef.current) {
@@ -86,14 +94,6 @@ export const WorkChatPanel: React.FC<WorkChatPanelProps> = ({ work }) => {
           console.log('Work chat streaming started');
         },
         async (fullResponse: string) => {
-          const aiResponse: ChatMessage = {
-            id: `${Date.now()}_ai`,
-            role: 'assistant',
-            content: fullResponse,
-            timestamp: new Date().toISOString(),
-          };
-
-          setMessages((prev) => [...prev, aiResponse]);
           setIsStreamingChat(false);
           setStreamingMessage('');
           if (streamEventSourceRef.current) {
@@ -102,9 +102,24 @@ export const WorkChatPanel: React.FC<WorkChatPanelProps> = ({ work }) => {
           }
 
           try {
-            await chatApi.saveWorkMessage(work.id, 'assistant', fullResponse);
+            const response = await chatApi.saveWorkMessage(work.id, 'assistant', fullResponse);
+            const aiResponse: ChatMessage = {
+              id: response.data.id,
+              role: 'assistant',
+              content: fullResponse,
+              timestamp: response.data.timestamp,
+            };
+            setMessages((prev) => [...prev, aiResponse]);
           } catch (error) {
             console.error('Failed to save work chat AI response:', error);
+            // Fallback: add with temporary ID if save fails
+            const aiResponse: ChatMessage = {
+              id: `${Date.now()}_ai`,
+              role: 'assistant',
+              content: fullResponse,
+              timestamp: new Date().toISOString(),
+            };
+            setMessages((prev) => [...prev, aiResponse]);
           }
         },
         (error: string) => {
@@ -159,7 +174,7 @@ export const WorkChatPanel: React.FC<WorkChatPanelProps> = ({ work }) => {
     }
   };
 
-  const handleStopGeneration = () => {
+  const handleStopGeneration = async () => {
     if (streamEventSourceRef.current) {
       streamEventSourceRef.current.close();
       streamEventSourceRef.current = null;
@@ -167,25 +182,37 @@ export const WorkChatPanel: React.FC<WorkChatPanelProps> = ({ work }) => {
 
     // Save whatever we have so far
     if (streamingMessage) {
-      const aiResponse: ChatMessage = {
-        id: `${Date.now()}_ai`,
-        role: 'assistant',
-        content: streamingMessage,
-        timestamp: new Date().toISOString()
-      };
+      const messageContent = streamingMessage;
+      setIsStreamingChat(false);
+      setStreamingMessage('');
 
-      setMessages(prev => [...prev, aiResponse]);
-
-      // Save to backend
+      // Save to backend and get real ID
       if (work?.id) {
-        chatApi.saveWorkMessage(work.id, 'assistant', streamingMessage).catch(error => {
+        try {
+          const response = await chatApi.saveWorkMessage(work.id, 'assistant', messageContent);
+          const aiResponse: ChatMessage = {
+            id: response.data.id,
+            role: 'assistant',
+            content: messageContent,
+            timestamp: response.data.timestamp
+          };
+          setMessages(prev => [...prev, aiResponse]);
+        } catch (error) {
           console.error('Failed to save stopped work message:', error);
-        });
+          // Fallback: add with temporary ID if save fails
+          const aiResponse: ChatMessage = {
+            id: `${Date.now()}_ai`,
+            role: 'assistant',
+            content: messageContent,
+            timestamp: new Date().toISOString()
+          };
+          setMessages(prev => [...prev, aiResponse]);
+        }
       }
+    } else {
+      setIsStreamingChat(false);
+      setStreamingMessage('');
     }
-
-    setIsStreamingChat(false);
-    setStreamingMessage('');
   };
 
   const handleClearChat = async () => {
@@ -201,6 +228,108 @@ export const WorkChatPanel: React.FC<WorkChatPanelProps> = ({ work }) => {
     }
   };
 
+  const handleDeleteMessage = async (messageId: string) => {
+    if (!confirm('确定要删除此消息及之后的所有消息吗？')) return;
+
+    if (!work?.id) return;
+
+    try {
+      await chatApi.deleteWorkMessage(work.id, messageId);
+
+      // Remove the message and all subsequent messages from local state
+      const messageIndex = messages.findIndex(m => m.id === messageId);
+      if (messageIndex !== -1) {
+        setMessages(prev => prev.slice(0, messageIndex));
+      }
+    } catch (error) {
+      console.error('Failed to delete work message:', error);
+    }
+  };
+
+  const handleRegenerateMessage = async (messageId: string) => {
+    if (!work?.id) return;
+
+    // Find the message to regenerate
+    const messageIndex = messages.findIndex(m => m.id === messageId);
+    if (messageIndex === -1 || messageIndex === 0) return;
+
+    // Get the previous user message
+    const previousMessage = messages[messageIndex - 1];
+    if (previousMessage.role !== 'user') return;
+
+    try {
+      // Delete this AI message and all subsequent messages
+      await chatApi.deleteWorkMessage(work.id, messageId);
+
+      // Remove from local state
+      setMessages(prev => prev.slice(0, messageIndex));
+
+      // Resend the previous user message to trigger new AI response
+      const userMessageContent = previousMessage.content;
+
+      if (streamEventSourceRef.current) {
+        streamEventSourceRef.current.close();
+        streamEventSourceRef.current = null;
+      }
+      setIsStreamingChat(true);
+      setStreamingMessage('');
+
+      const eventSource = aiApi.workChatStream(
+        work.id,
+        userMessageContent,
+        (chunk: string) => {
+          setStreamingMessage((prev) => prev + chunk);
+        },
+        () => {
+          console.log('Regenerate work chat streaming started');
+        },
+        async (fullResponse: string) => {
+          setIsStreamingChat(false);
+          setStreamingMessage('');
+          if (streamEventSourceRef.current) {
+            streamEventSourceRef.current.close();
+            streamEventSourceRef.current = null;
+          }
+
+          try {
+            const response = await chatApi.saveWorkMessage(work.id, 'assistant', fullResponse);
+            const aiResponse: ChatMessage = {
+              id: response.data.id,
+              role: 'assistant',
+              content: fullResponse,
+              timestamp: response.data.timestamp,
+            };
+            setMessages((prev) => [...prev, aiResponse]);
+          } catch (error) {
+            console.error('Failed to save regenerated work response:', error);
+            // Fallback: add with temporary ID if save fails
+            const aiResponse: ChatMessage = {
+              id: `${Date.now()}_ai`,
+              role: 'assistant',
+              content: fullResponse,
+              timestamp: new Date().toISOString(),
+            };
+            setMessages((prev) => [...prev, aiResponse]);
+          }
+        },
+        (error: string) => {
+          console.error('Regenerate work chat streaming error:', error);
+          setIsStreamingChat(false);
+          setStreamingMessage('');
+          if (streamEventSourceRef.current) {
+            streamEventSourceRef.current.close();
+            streamEventSourceRef.current = null;
+          }
+        },
+        selectedModel
+      );
+
+      streamEventSourceRef.current = eventSource;
+    } catch (error) {
+      console.error('Failed to regenerate work message:', error);
+    }
+  };
+
   useEffect(() => {
     const loadHistory = async () => {
       if (!work?.id) return;
@@ -212,14 +341,28 @@ export const WorkChatPanel: React.FC<WorkChatPanelProps> = ({ work }) => {
         if (history.length > 0) {
           setMessages(history);
         } else {
-          const greeting: ChatMessage = {
-            id: 'work-greeting',
-            role: 'assistant',
-            content: `你好！我是你的作品顾问。我已阅读《${work.title}》的大纲、世界观与章节摘要，可以与你讨论整体故事节奏、角色弧光或未来剧情方向。你想先聊哪一部分？`,
-            timestamp: new Date().toISOString(),
-          };
-          setMessages([greeting]);
-          await chatApi.saveWorkMessage(work.id, 'assistant', greeting.content);
+          const greetingContent = `你好！我是你的作品顾问。我已阅读《${work.title}》的大纲、世界观与章节摘要，可以与你讨论整体故事节奏、角色弧光或未来剧情方向。你想先聊哪一部分？`;
+
+          try {
+            const response = await chatApi.saveWorkMessage(work.id, 'assistant', greetingContent);
+            const greeting: ChatMessage = {
+              id: response.data.id,
+              role: 'assistant',
+              content: greetingContent,
+              timestamp: response.data.timestamp,
+            };
+            setMessages([greeting]);
+          } catch (error) {
+            console.error('Failed to save work greeting:', error);
+            // Fallback: show greeting with temporary ID if save fails
+            const greeting: ChatMessage = {
+              id: 'work-greeting',
+              role: 'assistant',
+              content: greetingContent,
+              timestamp: new Date().toISOString(),
+            };
+            setMessages([greeting]);
+          }
         }
       } catch (error) {
         console.error('Failed to load work chat history:', error);
@@ -322,13 +465,52 @@ export const WorkChatPanel: React.FC<WorkChatPanelProps> = ({ work }) => {
             </div>
 
             <div className={`w-full ${message.role === 'user' ? 'bg-dark-secondary/40' : 'bg-dark-surface'} border border-dark-border rounded-lg p-3 mb-1`}>
-              <div className="prose prose-sm prose-invert max-w-none text-dark-text">
-                <ReactMarkdown>{message.content}</ReactMarkdown>
-              </div>
+              {message.role === 'assistant' ? (
+                <div className="prose prose-sm prose-invert max-w-none text-dark-text">
+                  <ReactMarkdown>{message.content}</ReactMarkdown>
+                </div>
+              ) : (
+                <div className="whitespace-pre-wrap text-sm text-dark-text">
+                  {message.content}
+                </div>
+              )}
             </div>
 
-            <div className={`text-xs opacity-70 mb-4 ${message.role === 'user' ? 'text-right' : 'text-left'} text-dark-text-muted`}>
-              {new Date(message.timestamp).toLocaleString()}
+            {/* Timestamp and Action Buttons */}
+            <div className={`flex items-center gap-2 mb-4 ${
+              message.role === 'user'
+                ? 'justify-end'
+                : 'justify-start'
+            }`}>
+              <div className={`text-xs opacity-70 ${
+                message.role === 'user'
+                  ? 'text-dark-text-muted'
+                  : 'text-dark-text-muted'
+              }`}>
+                {new Date(message.timestamp).toLocaleString()}
+              </div>
+
+              {/* Action buttons */}
+              <div className="flex items-center gap-1">
+                {message.role === 'assistant' && (
+                  <button
+                    onClick={() => handleRegenerateMessage(message.id)}
+                    disabled={isStreamingChat}
+                    className="p-1 rounded hover:bg-dark-bg text-dark-text-muted hover:text-dark-text transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    title="重新生成"
+                  >
+                    <RotateCcw size={12} />
+                  </button>
+                )}
+                <button
+                  onClick={() => handleDeleteMessage(message.id)}
+                  disabled={isStreamingChat}
+                  className="p-1 rounded hover:bg-dark-bg text-dark-text-muted hover:text-red-400 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  title="删除此消息及之后的消息"
+                >
+                  <Trash2 size={12} />
+                </button>
+              </div>
             </div>
           </div>
         ))}
