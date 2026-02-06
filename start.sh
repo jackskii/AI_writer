@@ -28,7 +28,7 @@ ALLOWED_HOSTS=${ALLOWED_HOSTS:-0.0.0.0,localhost,127.0.0.1,backend}
 DEBUG=${DEBUG:-True}
 DEEPSEEK_API_BASE=${DEEPSEEK_API_BASE:-https://api.deepseek.com/v1}
 FRONTEND_URL=${FRONTEND_URL:-http://0.0.0.0:3000}
-VITE_API_URL=${VITE_API_URL:-http://0.0.0.0:8001/api}
+VITE_API_URL=${VITE_API_URL:-/api}
 
 # Create network if not exists
 echo "📡 Creating network..."
@@ -111,7 +111,7 @@ docker run -d \
     -v media_volume:/app/media \
     --restart unless-stopped \
     novel_ai_backend \
-    /bin/bash -c "chmod +x /app/entrypoint.sh && /app/entrypoint.sh daphne -b 0.0.0.0 -p 8000 novel_ai.asgi:application"
+    /bin/bash -c "bash /app/entrypoint.sh daphne -b 0.0.0.0 -p 8000 novel_ai.asgi:application"
 
 # Build and start Frontend
 echo "🔧 Building frontend..."
