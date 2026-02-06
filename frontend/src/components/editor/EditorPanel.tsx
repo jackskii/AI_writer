@@ -17,6 +17,8 @@ interface EditorPanelProps {
   work: Work;
   chapter: Chapter;
   onSave?: (content?: string) => void;
+  onAutoEditOutput?: (output: string) => void;
+  isMobile?: boolean;
 }
 
 const NOTE_COLORS = [
@@ -33,7 +35,9 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
   onChange,
   work,
   chapter,
-  onSave
+  onSave,
+  onAutoEditOutput,
+  isMobile = false
 }) => {
   // ALL HOOKS MUST BE CALLED BEFORE ANY EARLY RETURNS
   const editorRef = useRef<HTMLTextAreaElement | null>(null);
@@ -645,6 +649,17 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
 
   // Handle auto edit modal accept
   const handleAutoEditAccept = (editedText: string) => {
+    // On mobile, send output to parent for tab display instead of directly applying
+    if (isMobile && onAutoEditOutput) {
+      onAutoEditOutput(editedText);
+      addNotification({
+        type: 'success',
+        message: '自动编辑完成，请查看"自动编辑"标签页'
+      });
+      return;
+    }
+
+    // Desktop behavior: apply directly
     // Set flag to prevent auto-adjustment
     isManualUpdateRef.current = true;
 
@@ -1184,8 +1199,8 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
       <div className="h-full flex flex-col bg-dark-bg">
       {/* Editor Area with Inline Notes */}
       <div className="flex-1 flex">
-        {/* Notes Margin */}
-        <div className="w-80 border-r border-gray-300 bg-gray-50 dark:bg-dark-surface dark:border-dark-border">
+        {/* Notes Margin - Hidden on mobile */}
+        <div className={`w-80 border-r border-gray-300 bg-gray-50 dark:bg-dark-surface dark:border-dark-border ${isMobile ? 'hidden' : 'hidden md:block'}`}>
           {/* Notes Header */}
           <div className="sticky top-0 bg-gray-50 dark:bg-dark-surface border-b border-gray-200 dark:border-dark-border p-3">
             <div className="flex items-center justify-between">

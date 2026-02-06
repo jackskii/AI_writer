@@ -3,10 +3,11 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, Save, MessageCircle, Settings, Palette, Pencil } from 'lucide-react';
+import { ArrowLeft, Save, MessageCircle, Settings, Palette, Pencil, FileText, Wand2, Monitor } from 'lucide-react';
 import { worksApi, chaptersApi } from '../services/api';
 import { useWorkStore } from '../stores/useWorkStore';
 import { useUIStore } from '../stores/useUIStore';
+import { useMobile, toggleDesktopMode, isDesktopModeForced } from '../hooks/useMobile';
 import { Button } from '../components/ui/Button';
 import { LoadingScreen } from '../components/ui/Loading';
 import { UserMenu } from '../components/ui/UserMenu';
@@ -17,6 +18,9 @@ import { SettingsModal } from '../components/modals/SettingsModal';
 import { StyleManagerModal } from '../components/modals/StyleManagerModal';
 import { CreateStyleModal } from '../components/modals/CreateStyleModal';
 import type { Work } from '../types';
+
+// Mobile tab type
+type MobileTab = 'editor' | 'chat' | 'autoedit';
 
 export const EditorPage: React.FC = () => {
   const { workId, chapterId } = useParams<{ workId: string; chapterId: string }>();
@@ -37,6 +41,9 @@ export const EditorPage: React.FC = () => {
     setLastSaveTime
   } = useUIStore();
 
+  // Mobile detection
+  const isMobile = useMobile();
+
   // Use local state for editor content instead of problematic Zustand store
   const [editorContent, setEditorContent] = useState('');
   const [isEditingChapterTitle, setIsEditingChapterTitle] = useState(false);
@@ -44,6 +51,11 @@ export const EditorPage: React.FC = () => {
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [isStyleManagerOpen, setIsStyleManagerOpen] = useState(false);
   const [isCreateStyleOpen, setIsCreateStyleOpen] = useState(false);
+
+  // Mobile-specific state
+  const [mobileTab, setMobileTab] = useState<MobileTab>('editor');
+  const [autoEditOutput, setAutoEditOutput] = useState<string>('');
+  const [hasAutoEditOutput, setHasAutoEditOutput] = useState(false);
   
   const lastSaveContentRef = useRef('');
   const autoSaveTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -201,6 +213,35 @@ export const EditorPage: React.FC = () => {
     }
   };
 
+  // Handle auto edit output for mobile tab
+  const handleAutoEditOutput = useCallback((output: string) => {
+    setAutoEditOutput(output);
+    setHasAutoEditOutput(!!output);
+    if (output && isMobile) {
+      setMobileTab('autoedit');
+    }
+  }, [isMobile]);
+
+  // Handle accepting auto edit output on mobile
+  const handleAcceptAutoEdit = useCallback(() => {
+    if (autoEditOutput) {
+      // Insert at cursor position or append to content
+      const newContent = editorContent + autoEditOutput;
+      setEditorContent(newContent);
+      handleContentChange(newContent);
+      setAutoEditOutput('');
+      setHasAutoEditOutput(false);
+      setMobileTab('editor');
+    }
+  }, [autoEditOutput, editorContent, handleContentChange]);
+
+  // Handle rejecting auto edit output on mobile
+  const handleRejectAutoEdit = useCallback(() => {
+    setAutoEditOutput('');
+    setHasAutoEditOutput(false);
+    setMobileTab('editor');
+  }, []);
+
   // Cleanup timer on unmount
   useEffect(() => {
     return () => {
@@ -238,8 +279,8 @@ export const EditorPage: React.FC = () => {
 
   return (
     <div className="h-screen bg-dark-bg flex flex-col">
-      {/* Header */}
-      <header className="flex-shrink-0 border-b border-dark-border bg-dark-surface">
+      {/* Header - Desktop */}
+      <header className="flex-shrink-0 border-b border-dark-border bg-dark-surface hidden md:block">
         <div className="flex items-center justify-between px-6 py-2">
           <div className="flex items-center gap-4">
             <Button
@@ -317,8 +358,56 @@ export const EditorPage: React.FC = () => {
         </div>
       </header>
 
-      {/* Main Editor Area */}
-      <div className="flex-1 flex min-h-0">
+      {/* Header - Mobile (simplified) */}
+      <header className="flex-shrink-0 border-b border-dark-border bg-dark-surface md:hidden">
+        <div className="flex items-center justify-between px-3 py-2">
+          <div className="flex items-center gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => navigate(`/works/${workId}`)}
+              className="p-1"
+            >
+              <ArrowLeft size={20} />
+            </Button>
+            <span className="text-sm font-medium text-dark-text truncate max-w-[120px]">
+              {currentChapterData?.title || '未命名章节'}
+            </span>
+          </div>
+
+          <div className="flex items-center gap-1">
+            <AutoSaveIndicator />
+            <Button
+              size="sm"
+              onClick={handleManualSave}
+              disabled={isAutoSaving}
+              className="p-2"
+            >
+              <Save size={18} />
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={toggleDesktopMode}
+              className="p-2"
+              title={isDesktopModeForced() ? '切换到移动版' : '切换到桌面版'}
+            >
+              <Monitor size={18} />
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setIsSettingsModalOpen(true)}
+              className="p-2"
+            >
+              <Settings size={18} />
+            </Button>
+          </div>
+        </div>
+      </header>
+
+      {/* Main Editor Area - Desktop */}
+      <div className="flex-1 hidden md:flex min-h-0">
         {/* Left Panel - Editor */}
         <div className="flex-1 flex flex-col">
           <EditorPanel
@@ -327,6 +416,7 @@ export const EditorPage: React.FC = () => {
             work={currentWorkData}
             chapter={currentChapterData}
             onSave={handleManualSave}
+            onAutoEditOutput={handleAutoEditOutput}
           />
         </div>
 
@@ -346,6 +436,128 @@ export const EditorPage: React.FC = () => {
               />
             </div>
           </div>
+        </div>
+      </div>
+
+      {/* Main Editor Area - Mobile (tabbed) */}
+      <div className="flex-1 flex flex-col md:hidden min-h-0 pb-[60px]">
+        {/* Editor Tab Content */}
+        {mobileTab === 'editor' && (
+          <div className="flex-1 flex flex-col min-h-0">
+            <EditorPanel
+              content={editorContent}
+              onChange={handleContentChange}
+              work={currentWorkData}
+              chapter={currentChapterData}
+              onSave={handleManualSave}
+              onAutoEditOutput={handleAutoEditOutput}
+              isMobile={true}
+            />
+          </div>
+        )}
+
+        {/* Chat Tab Content */}
+        {mobileTab === 'chat' && (
+          <div className="flex-1 flex flex-col min-h-0">
+            <div className="flex-shrink-0 px-4 py-3 border-b border-dark-border bg-dark-surface">
+              <div className="flex items-center gap-2 text-sm font-medium text-dark-text">
+                <MessageCircle size={16} />
+                AI 助手
+              </div>
+            </div>
+            <div className="flex-1 min-h-0">
+              <ChatPanel 
+                work={currentWorkData}
+                chapter={currentChapterData}
+              />
+            </div>
+          </div>
+        )}
+
+        {/* AutoEdit Tab Content */}
+        {mobileTab === 'autoedit' && (
+          <div className="flex-1 flex flex-col min-h-0 bg-dark-surface">
+            <div className="flex-shrink-0 px-4 py-3 border-b border-dark-border">
+              <div className="flex items-center gap-2 text-sm font-medium text-dark-text">
+                <Wand2 size={16} />
+                自动编辑结果
+              </div>
+            </div>
+            <div className="flex-1 overflow-y-auto p-4">
+              {hasAutoEditOutput ? (
+                <div className="chinese-text text-dark-text whitespace-pre-wrap leading-relaxed">
+                  {autoEditOutput}
+                </div>
+              ) : (
+                <div className="flex flex-col items-center justify-center h-full text-dark-text-muted">
+                  <Wand2 size={48} className="mb-4 opacity-50" />
+                  <p>暂无自动编辑内容</p>
+                  <p className="text-xs mt-2">在编辑器中选择文本并使用自动编辑功能</p>
+                </div>
+              )}
+            </div>
+            {hasAutoEditOutput && (
+              <div className="flex-shrink-0 p-4 border-t border-dark-border bg-dark-bg">
+                <div className="flex gap-3">
+                  <Button
+                    variant="outline"
+                    className="flex-1 text-red-400 border-red-400 hover:bg-red-400 hover:text-white"
+                    onClick={handleRejectAutoEdit}
+                  >
+                    放弃
+                  </Button>
+                  <Button
+                    className="flex-1 bg-green-600 hover:bg-green-700"
+                    onClick={handleAcceptAutoEdit}
+                  >
+                    接受并插入
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Mobile Bottom Tab Bar */}
+      <div className="fixed bottom-0 left-0 right-0 md:hidden bg-dark-surface border-t border-dark-border safe-area-bottom">
+        <div className="flex h-[60px]">
+          <button
+            onClick={() => setMobileTab('editor')}
+            className={`flex-1 flex flex-col items-center justify-center gap-1 transition-colors ${
+              mobileTab === 'editor' 
+                ? 'text-dark-primary bg-dark-primary/10' 
+                : 'text-dark-text-muted'
+            }`}
+          >
+            <FileText size={20} />
+            <span className="text-xs">编辑</span>
+          </button>
+          <button
+            onClick={() => setMobileTab('chat')}
+            className={`flex-1 flex flex-col items-center justify-center gap-1 transition-colors ${
+              mobileTab === 'chat' 
+                ? 'text-dark-primary bg-dark-primary/10' 
+                : 'text-dark-text-muted'
+            }`}
+          >
+            <MessageCircle size={20} />
+            <span className="text-xs">AI助手</span>
+          </button>
+          <button
+            onClick={() => setMobileTab('autoedit')}
+            className={`flex-1 flex flex-col items-center justify-center gap-1 transition-colors relative ${
+              mobileTab === 'autoedit' 
+                ? 'text-dark-primary bg-dark-primary/10' 
+                : 'text-dark-text-muted'
+            }`}
+          >
+            <Wand2 size={20} />
+            <span className="text-xs">自动编辑</span>
+            {hasAutoEditOutput && (
+              <span className="absolute top-2 right-1/4 w-2 h-2 bg-green-500 rounded-full" />
+            )}
+          </button>
         </div>
       </div>
 
