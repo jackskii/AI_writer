@@ -31,7 +31,9 @@ authAxios.interceptors.request.use(
   }
 );
 
-const API_BASE_URL = import.meta.env.VITE_API_URL?.replace('/api', '') || 'http://127.0.0.1:8001';
+// Handle both relative URLs (/api) and absolute URLs (http://...)
+const envUrl = import.meta.env.VITE_API_URL || '/api';
+const API_BASE_URL = envUrl.startsWith('/') ? '' : envUrl.replace('/api', '');
 
 export interface User {
   id: number;
