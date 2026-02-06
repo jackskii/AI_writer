@@ -24,7 +24,8 @@ DB_PASSWORD=${DB_PASSWORD:-novel_password}
 BACKEND_PORT=${BACKEND_PORT:-8001}
 FRONTEND_PORT=${FRONTEND_PORT:-3000}
 SECRET_KEY=${SECRET_KEY:-your-secret-key-change-this}
-ALLOWED_HOSTS=${ALLOWED_HOSTS:-0.0.0.0,localhost,127.0.0.1,backend}
+# Use * to allow all hosts (or set specific hosts in .env)
+ALLOWED_HOSTS=${ALLOWED_HOSTS:-*}
 DEBUG=${DEBUG:-True}
 DEEPSEEK_API_BASE=${DEEPSEEK_API_BASE:-https://api.deepseek.com/v1}
 FRONTEND_URL=${FRONTEND_URL:-http://0.0.0.0:3000}
