@@ -594,11 +594,112 @@ export const aiApi = {
     return eventSource;
   },
 
-  autoDescribeEntry: (workId: number, entryName: string) =>
-    api.post<{ description: string }>('/ai/auto-describe-entry/', {
-      entry_name: entryName,
+  // Streaming auto describe entry
+  autoDescribeEntry: async (
+    workId: number,
+    entryName: string,
+    onChunk: (chunk: string) => void,
+    onStart?: (usedChapters: Array<{chapter_number: number, title: string}>) => void,
+    onEnd?: (description: string, usedChapters: Array<{chapter_number: number, title: string}>) => void,
+    onError?: (error: string) => void
+  ) => {
+    // Build request body
+    const requestBody: Record<string, string | number> = {
       work_id: workId,
-    }),
+      entry_name: entryName,
+    };
+
+    // Add token for authentication
+    const authStorage = localStorage.getItem('auth-storage');
+    if (authStorage) {
+      try {
+        const parsedStorage = JSON.parse(authStorage);
+        const token = parsedStorage?.state?.token;
+        if (token) {
+          requestBody.token = token;
+        }
+      } catch (e) {
+        console.error('Failed to parse auth storage:', e);
+      }
+    }
+
+    try {
+      // Use fetch with POST for SSE streaming
+      const response = await fetch(`${API_BASE_URL}/ai/auto-describe-entry/`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(requestBody),
+        credentials: 'include',
+      });
+
+      if (!response.ok) {
+        onError?.(`HTTP error! status: ${response.status}`);
+        return;
+      }
+
+      // Read response as stream
+      const reader = response.body?.getReader();
+      if (!reader) {
+        onError?.('Failed to get response reader');
+        return;
+      }
+
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      // Read stream chunks
+      while (true) {
+        const { done, value } = await reader.read();
+
+        if (done) {
+          break;
+        }
+
+        // Decode chunk and add to buffer
+        buffer += decoder.decode(value, { stream: true });
+
+        // Process complete SSE messages (split by double newline)
+        const messages = buffer.split('\n\n');
+        buffer = messages.pop() || ''; // Keep incomplete message in buffer
+
+        for (const message of messages) {
+          if (!message.trim()) continue;
+
+          // Parse SSE message (format: "data: {...}")
+          const dataMatch = message.match(/^data: (.+)$/m);
+          if (!dataMatch) continue;
+
+          try {
+            const data = JSON.parse(dataMatch[1]);
+
+            switch (data.type) {
+              case 'start':
+                onStart?.(data.used_chapters || []);
+                break;
+              case 'chunk':
+                onChunk(data.content);
+                break;
+              case 'end':
+                onEnd?.(data.description || '', data.used_chapters || []);
+                return;
+              case 'error':
+                onError?.(data.message);
+                return;
+            }
+          } catch (error) {
+            console.error('Error parsing SSE data:', error);
+            onError?.('Error parsing server response');
+            return;
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Fetch error:', error);
+      onError?.('Connection error occurred');
+    }
+  },
 };
 
 // 写作风格相关 API

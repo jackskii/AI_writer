@@ -582,69 +582,38 @@ class AIService:
             logger.error(f"Auto-edit stream error: {str(e)}", exc_info=True)
             raise Exception(f"{prompts.ERROR_AUTO_EDIT_FAILED}: {str(e)}")
 
+    async def auto_describe_entry_stream(
+        self,
+        entry_name: str,
+        context_text: str
+    ) -> AsyncGenerator[str, None]:
+        """AI auto-describe entry function - streaming version"""
+        logger.debug(f"Starting AI auto-describe stream for entry: {entry_name}")
+
+        try:
+            # Format the request using prompts.py
+            user_message = prompts.format_auto_describe_request(entry_name, context_text)
+
+            messages = [
+                {"role": "user", "content": user_message}
+            ]
+
+            logger.debug(f"Sending streaming auto-describe request to {self.provider.provider_name} API")
+
+            async for chunk in self.provider.chat_completion_stream(messages):
+                yield chunk
+
+        except Exception as e:
+            logger.error(f"Auto-describe stream error: {str(e)}", exc_info=True)
+            raise Exception(f"{prompts.ERROR_AUTO_DESCRIBE_FAILED}: {str(e)}")
+
     async def analyze_writing_style(self, text_sample: str) -> Dict:
         """分析文本样本的写作风格 - 使用deepseek-reasoner模型"""
         logger.debug(f"Starting writing style analysis for text of length: {len(text_sample)}")
 
         try:
-            # Construct analysis prompt with strict JSON schema enforcement
-            analysis_prompt = f"""你是一位专业的写作风格分析师。请根据以下文本样本，提取并生成一份可复用的写作风格指南。这份指南将用于指导AI模仿这种风格进行创作。
-
-重要原则：
-1. 生成通用的风格描述，不要包含具体角色名字、地名、情节等样本特定内容
-2. 提取可迁移的写作技巧、句式模式、用词习惯等
-3. 示例句要足够长且完整（至少50-100字），能充分展现该维度的风格特征
-4. 示例要有代表性，让AI能从中学习到具体的写作模式
-
-文本样本：
-{text_sample}
-
-请从以下维度提取写作风格：
-
-1. **句式特点**：句子长度偏好、结构复杂度、特殊句式使用规律（如倒装、排比、反问等）
-2. **词汇风格**：用词倾向（口语/书面语、古典/现代、简洁/华丽）、特色词汇类型、修饰语使用习惯
-3. **节奏韵律**：叙述节奏快慢、段落长短控制、信息密度、张弛有度的手法
-4. **对话风格**：对话呈现方式、语气特点、对话标签使用、对话与叙述的比例
-5. **描写手法**：描写详略程度、感官运用偏好、比喻修辞习惯、环境/心理/动作描写特色
-
-输出要求：
-- 总体描述：100-150字，概括这种风格的整体特征、可能的文学流派/类型、风格相近的知名作家
-- 每个维度：详细描述（150-200字）+ 3-5个示例句（每个示例50-100字）
-- 示例必须从原文摘取，但要去除具体人名、地名（可用"他/她"、"某地"等替代）
-
-必须返回完整的JSON，包含overall字段和所有5个维度。
-
-请严格按照以下JSON格式返回：
-{{
-  "overall": "这种风格整体呈现...（100-150字的总体描述，包括流派、类型、相似作家等）",
-  "perspectives": [
-    {{
-      "name": "句式特点",
-      "description": "详细描述句式风格的通用特征...",
-      "examples": ["示例句1（50-100字，已去除具体人名地名）", "示例句2", "示例句3", "示例句4", "示例句5"]
-    }},
-    {{
-      "name": "词汇风格",
-      "description": "详细描述用词习惯...",
-      "examples": ["示例句1", "示例句2", "示例句3", "示例句4", "示例句5"]
-    }},
-    {{
-      "name": "节奏韵律",
-      "description": "详细描述节奏控制...",
-      "examples": ["示例句1", "示例句2", "示例句3", "示例句4", "示例句5"]
-    }},
-    {{
-      "name": "对话风格",
-      "description": "详细描述对话特点...",
-      "examples": ["示例句1", "示例句2", "示例句3", "示例句4", "示例句5"]
-    }},
-    {{
-      "name": "描写手法",
-      "description": "详细描述描写方式...",
-      "examples": ["示例句1", "示例句2", "示例句3", "示例句4", "示例句5"]
-    }}
-  ]
-}}"""
+            # Use prompt from prompts.py
+            analysis_prompt = prompts.format_style_analysis_request(text_sample)
 
             messages = [
                 {"role": "user", "content": analysis_prompt}
@@ -706,72 +675,8 @@ class AIService:
         logger.debug(f"Starting NSFW writing style analysis for text of length: {len(text_sample)}")
 
         try:
-            # Construct NSFW analysis prompt with strict JSON schema enforcement
-            analysis_prompt = f"""你是一位专业的成人文学写作风格分析师。请根据以下NSFW文本样本，提取并生成一份可复用的情色写作风格指南。这份指南将用于指导AI模仿这种风格进行NSFW内容创作。
-
-重要原则：
-1. 生成通用的风格描述，不要包含具体角色名字、关系、情节等样本特定内容
-2. 提取可迁移的情色描写技巧、用词习惯、节奏控制等写作模式
-3. 示例句要足够长且完整（至少50-100字），能充分展现该维度的风格特征和尺度
-4. 示例要有代表性，让AI能从中学习到具体的情色描写手法
-5. 保留原文的露骨程度和用词风格（委婉/直白），这是风格的核心特征
-
-文本样本：
-{text_sample}
-
-请从以下维度提取写作风格：
-
-1. **情欲描写**：情欲场景的描写手法、尺度把握（委婉/露骨）、感官刺激呈现方式、场景推进节奏
-2. **身体描写**：身体部位描写的详略程度、用词风格（优美/粗俗）、触感表现手法、敏感部位描写习惯
-3. **动作描写**：亲密动作的描写细节程度、动作节奏快慢、动词选择倾向、动态感营造技巧
-4. **对话风格**：情色对话的语气特点、用词直白程度、喘息呻吟的表现方式、对话推进情欲的手法
-5. **氛围营造**：情欲氛围的铺垫方式、情绪递进节奏、高潮前后的节奏控制、环境渲染手法
-6. **心理描写**：欲望/羞耻/快感等心理的刻画深度、内心独白风格、心理与生理反应的结合方式
-
-输出要求：
-- 总体描述：100-150字，概括这种NSFW风格的整体特征、尺度定位（软色情/硬核）、可能的题材类型、风格相近的作家/作品
-- 每个维度：详细描述（150-200字）+ 3-5个示例句（每个示例50-100字，保留完整的情色描写）
-- 示例必须从原文摘取，但要去除具体人名、关系称呼（可用"他/她"、"对方"等替代）
-- 示例必须保留原文的露骨程度和情色用词，这是学习风格的关键
-
-必须返回完整的JSON，包含overall字段和所有6个维度。
-
-请严格按照以下JSON格式返回：
-{{
-  "overall": "这种NSFW风格整体呈现...（100-150字的总体描述，包括尺度、题材、相似作品等）",
-  "perspectives": [
-    {{
-      "name": "情欲描写",
-      "description": "详细描述情欲场景风格的通用特征...",
-      "examples": ["示例句1（50-100字，保留完整情色内容，已去除具体人名）", "示例句2", "示例句3", "示例句4", "示例句5"]
-    }},
-    {{
-      "name": "身体描写",
-      "description": "详细描述身体描写习惯...",
-      "examples": ["示例句1", "示例句2", "示例句3", "示例句4", "示例句5"]
-    }},
-    {{
-      "name": "动作描写",
-      "description": "详细描述动作描写方式...",
-      "examples": ["示例句1", "示例句2", "示例句3", "示例句4", "示例句5"]
-    }},
-    {{
-      "name": "对话风格",
-      "description": "详细描述对话特点...",
-      "examples": ["示例句1", "示例句2", "示例句3", "示例句4", "示例句5"]
-    }},
-    {{
-      "name": "氛围营造",
-      "description": "详细描述氛围控制...",
-      "examples": ["示例句1", "示例句2", "示例句3", "示例句4", "示例句5"]
-    }},
-    {{
-      "name": "心理描写",
-      "description": "详细描述心理刻画...",
-      "examples": ["示例句1", "示例句2", "示例句3", "示例句4", "示例句5"]
-    }}
-  ]
-}}"""
+            # Use prompt from prompts.py
+            analysis_prompt = prompts.format_nsfw_style_analysis_request(text_sample)
 
             messages = [
                 {"role": "user", "content": analysis_prompt}

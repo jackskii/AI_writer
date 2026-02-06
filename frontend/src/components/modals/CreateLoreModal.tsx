@@ -100,14 +100,36 @@ export const CreateLoreModal: React.FC<CreateLoreModalProps> = ({
 
     setIsGeneratingDescription(true);
     setUsedChapters([]); // Clear previous chapters
+    setDescription(''); // Clear previous description for streaming
+
     try {
-      const response = await aiApi.autoDescribeEntry(workId, name.trim());
-      setDescription(response.data.description);
-      setUsedChapters((response.data as any).used_chapters || []);
+      await aiApi.autoDescribeEntry(
+        workId,
+        name.trim(),
+        // onChunk - append each chunk to description
+        (chunk: string) => {
+          setDescription(prev => prev + chunk);
+        },
+        // onStart - set used chapters when available
+        (chapters) => {
+          setUsedChapters(chapters);
+        },
+        // onEnd - generation complete
+        (finalDescription, chapters) => {
+          setDescription(finalDescription);
+          setUsedChapters(chapters);
+          setIsGeneratingDescription(false);
+        },
+        // onError - handle errors
+        (error: string) => {
+          console.error('Failed to generate description:', error);
+          alert(`生成描述失败: ${error}`);
+          setIsGeneratingDescription(false);
+        }
+      );
     } catch (error) {
       console.error('Failed to generate description:', error);
       alert('生成描述失败，请稍后重试');
-    } finally {
       setIsGeneratingDescription(false);
     }
   };

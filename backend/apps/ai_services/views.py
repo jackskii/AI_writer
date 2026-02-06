@@ -632,97 +632,129 @@ async def ai_auto_edit_stream(request):
     return response
 
 
-@api_view(['POST'])
-@permission_classes([IsAuthenticated])
-def ai_auto_describe_entry(request):
-    """AI自动生成条目描述 - 基于章节内容"""
-    entry_name = request.data.get('entry_name')
-    work_id = request.data.get('work_id')
+@sync_to_async
+def get_work_for_user(work_id, user):
+    """Get work for user (async version)"""
+    return Work.objects.get(id=work_id, author=user)
+
+
+@sync_to_async
+def search_chapters_with_entry(work, entry_name):
+    """Search chapters containing entry name (async version)"""
+    from django.db.models import Q
+    chapters = work.chapters.filter(
+        Q(content__icontains=entry_name) | Q(title__icontains=entry_name)
+    ).order_by('order')[:5]
+    
+    # Build context and used chapters info
+    context_parts = []
+    used_chapters_info = []
+    for chapter in chapters:
+        context_parts.append(f"### 第{chapter.chapter_number}章《{chapter.title}》\n\n{chapter.content}")
+        used_chapters_info.append({
+            'chapter_number': chapter.chapter_number,
+            'title': chapter.title
+        })
+    
+    context_text = "\n\n---\n\n".join(context_parts)
+    return context_text, used_chapters_info
+
+
+@csrf_exempt
+async def ai_auto_describe_entry(request):
+    """AI自动生成条目描述 - SSE流式响应 (async version for ASGI)"""
+    if request.method != 'POST':
+        return HttpResponse(
+            'data: {"type": "error", "message": "仅支持POST请求"}\n\n',
+            content_type='text/event-stream'
+        )
+
+    # Parse request body
+    try:
+        body = json.loads(request.body.decode('utf-8'))
+    except Exception:
+        return HttpResponse(
+            'data: {"type": "error", "message": "无效的请求数据"}\n\n',
+            content_type='text/event-stream'
+        )
+
+    user = None
+    # Token can be in query params (for compatibility) or in body
+    token = request.GET.get('token') or body.get('token')
+    if token:
+        try:
+            user = await get_token_user(token)
+        except Exception:
+            return HttpResponse(
+                'data: {"type": "error", "message": "认证令牌无效"}\n\n',
+                content_type='text/event-stream',
+                status=401
+            )
+    elif hasattr(request, 'user') and request.user.is_authenticated:
+        user = request.user
+    else:
+        return HttpResponse(
+            'data: {"type": "error", "message": "需要登录"}\n\n',
+            content_type='text/event-stream',
+            status=401
+        )
+
+    entry_name = body.get('entry_name')
+    work_id = body.get('work_id')
 
     if not all([entry_name, work_id]):
-        return Response(
-            {'error': '缺少必要参数'},
-            status=status.HTTP_400_BAD_REQUEST
+        return HttpResponse(
+            'data: {"type": "error", "message": "缺少必要参数"}\n\n',
+            content_type='text/event-stream'
         )
 
-    # 获取作品
-    work = get_object_or_404(Work, id=work_id, author=request.user)
-
+    # Get work
     try:
-        # 搜索包含条目名称的章节（前5章）
-        from django.db.models import Q
-        chapters_with_entry = work.chapters.filter(
-            Q(content__icontains=entry_name) | Q(title__icontains=entry_name)
-        ).order_by('order')[:5]
-
-        if not chapters_with_entry:
-            return Response({
-                'description': f'"{entry_name}" 尚未在故事中出现。',
-                'used_chapters': []
-            })
-
-        # 构建上下文：章节内容，并记录使用的章节
-        context_parts = []
-        used_chapters_info = []
-        for chapter in chapters_with_entry:
-            context_parts.append(f"### 第{chapter.chapter_number}章《{chapter.title}》\n\n{chapter.content}")
-            used_chapters_info.append({
-                'chapter_number': chapter.chapter_number,
-                'title': chapter.title
-            })
-
-        context_text = "\n\n---\n\n".join(context_parts)
-
-        # 调用AI生成描述
-        api_key, provider = get_user_api_key(request.user)
-        ai_service = AIService(api_key=api_key, provider_name=provider)
-
-        prompt = f"""你是一位客观的角色记录员。请严格基于我提供的文本资料，提取并整理人物信息。
-
-**文本资料：**
-{context_text}
-
-**需要描述的人物：** {entry_name}
-
-**指令（请严格遵守）：**
-1. 只从资料中提取直接描述信息，不进行任何总结、分析或推断
-2. 完全按照以下格式输出，不添加任何额外文字：
-
-[名字]-[年龄（如果资料提及）]-[可受孕人分数（如果资料提及）]
-外观：[直接描述外貌，不使用比喻]
-性格：[直接描述性格特征]
-人物简介：[简述身份背景和角色的故事情节]
-人际关系：[按“角色名：关系”格式列出，每行一个，最多写五个。若无明确信息则写“无明确信息”]
-
-3. 具体规则：
-   - 不使用markdown格式
-   - 总字数不超过500字
-   - 外观描述：直接描述特征，如"黑色短发、身高180cm、左脸有疤痕"
-   - 性格描述：仅列出资料中明确提到的性格词汇
-   - 人物简介：仅陈述资料中明确提及的身份、职业、背景事实
-   - 绝对不分析角色作用、象征意义或剧情重要性
-
-开始描述：
-"""
-
-        messages = [
-            {"role": "user", "content": prompt}
-        ]
-
-        response = run_async_ai_task(
-            ai_service.provider.chat_completion(messages)
+        work = await get_work_for_user(work_id, user)
+    except Exception:
+        return HttpResponse(
+            'data: {"type": "error", "message": "作品不存在"}\n\n',
+            content_type='text/event-stream',
+            status=404
         )
 
-        description = response
+    async def generate_stream():
+        """生成SSE数据流 (async generator)"""
+        try:
+            # Search chapters with entry name
+            context_text, used_chapters_info = await search_chapters_with_entry(work, entry_name)
 
-        return Response({
-            'description': description,
-            'used_chapters': used_chapters_info
-        })
+            if not context_text:
+                not_found_msg = f'"{entry_name}" 尚未在故事中出现。'
+                yield f'data: {json.dumps({"type": "end", "message": "生成完成", "description": not_found_msg, "used_chapters": []})}\n\n'
+                return
 
-    except Exception as e:
-        logger.error(f"AI auto-describe entry error: {str(e)}")
-        return Response(
-            {'error': f'AI生成描述失败：{str(e)}'},
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR
-        )
+            # Get API key
+            api_key, provider = await get_user_api_key_async(user)
+            ai_service = AIService(api_key=api_key, provider_name=provider)
+
+            yield f'data: {json.dumps({"type": "start", "message": "AI描述生成开始", "used_chapters": used_chapters_info})}\n\n'
+
+            accumulated_description = ''
+            try:
+                async for chunk in ai_service.auto_describe_entry_stream(entry_name, context_text):
+                    accumulated_description += chunk
+                    yield f'data: {json.dumps({"type": "chunk", "content": chunk})}\n\n'
+
+                yield f'data: {json.dumps({"type": "end", "message": "AI描述生成完成", "description": accumulated_description, "used_chapters": used_chapters_info})}\n\n'
+            except Exception as e:
+                logger.error(f"Stream auto-describe error during generation: {str(e)}")
+                yield f'data: {json.dumps({"type": "error", "message": f"AI描述生成失败: {str(e)}"})}\n\n'
+
+        except Exception as e:
+            logger.error(f"Stream auto-describe error: {str(e)}")
+            yield f'data: {json.dumps({"type": "error", "message": f"AI描述生成失败: {str(e)}"})}\n\n'
+
+    response = StreamingHttpResponse(
+        generate_stream(),
+        content_type='text/event-stream'
+    )
+    response['Cache-Control'] = 'no-cache'
+    response['X-Accel-Buffering'] = 'no'
+    response['Access-Control-Allow-Origin'] = '*'
+    return response
