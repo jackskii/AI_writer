@@ -7,6 +7,7 @@ import type { Faction, LoreEntry } from '../../types';
 
 interface FactionSectionProps {
   faction: Faction;
+  isCollapsed: boolean;
   loreEntries: LoreEntry[];
   onToggleCollapse: (factionId: number) => void;
   onUpdateFaction: (factionId: number, name: string, description: string) => void;
@@ -18,6 +19,7 @@ interface FactionSectionProps {
 
 export const FactionSection: React.FC<FactionSectionProps> = ({
   faction,
+  isCollapsed,
   loreEntries,
   onToggleCollapse,
   onUpdateFaction,
@@ -68,7 +70,7 @@ export const FactionSection: React.FC<FactionSectionProps> = ({
         onClick={() => onToggleCollapse(faction.id)}
       >
         <div className="flex items-center gap-3">
-          {faction.is_collapsed ? (
+          {isCollapsed ? (
             <ChevronRight size={20} className="text-dark-text-muted" />
           ) : (
             <ChevronDown size={20} className="text-dark-text-muted" />
@@ -105,7 +107,7 @@ export const FactionSection: React.FC<FactionSectionProps> = ({
       </div>
 
       {/* Faction Description */}
-      {!faction.is_collapsed && (
+      {!isCollapsed && (
         <div className="px-4 pb-2 border-t border-dark-border">
           {isEditingDescription ? (
             <div className="pt-3">
@@ -135,7 +137,7 @@ export const FactionSection: React.FC<FactionSectionProps> = ({
       )}
 
       {/* Lore Entries */}
-      {!faction.is_collapsed && (
+      {!isCollapsed && (
         <CardContent className="pt-0">
           {loreEntries.length === 0 ? (
             <div className="text-center py-6 text-dark-text-muted text-sm">

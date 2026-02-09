@@ -3,11 +3,11 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, Save, MessageCircle, Settings, Palette, Pencil, FileText, Monitor } from 'lucide-react';
+import { ArrowLeft, Save, MessageCircle, Settings, Palette, Pencil, FileText } from 'lucide-react';
 import { worksApi, chaptersApi } from '../services/api';
 import { useWorkStore } from '../stores/useWorkStore';
 import { useUIStore } from '../stores/useUIStore';
-import { useMobile, toggleDesktopMode, isDesktopModeForced } from '../hooks/useMobile';
+import { useMobile } from '../hooks/useMobile';
 import { Button } from '../components/ui/Button';
 import { LoadingScreen } from '../components/ui/Loading';
 import { UserMenu } from '../components/ui/UserMenu';
@@ -353,15 +353,6 @@ export const EditorPage: React.FC = () => {
               className="p-2"
             >
               <Save size={18} />
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={toggleDesktopMode}
-              className="p-2"
-              title={isDesktopModeForced() ? '切换到移动版' : '切换到桌面版'}
-            >
-              <Monitor size={18} />
             </Button>
             <Button
               variant="ghost"

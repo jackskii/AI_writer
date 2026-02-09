@@ -49,6 +49,7 @@ export const WorkDetailPage: React.FC = () => {
   const [synopsisContent, setSynopsisContent] = useState('');
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [titleContent, setTitleContent] = useState('');
+  const [collapsedFactions, setCollapsedFactions] = useState<Set<number>>(new Set());
 
   const workIdNum = parseInt(workId!);
   const queryClient = useQueryClient();
@@ -116,12 +117,6 @@ export const WorkDetailPage: React.FC = () => {
     }
   });
 
-  const toggleFactionCollapseMutation = useMutation({
-    mutationFn: (factionId: number) => factionsApi.toggleCollapse(workIdNum, factionId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['factions', workIdNum] });
-    }
-  });
 
   // Act mutations
   const updateActNameMutation = useMutation({
@@ -309,7 +304,17 @@ export const WorkDetailPage: React.FC = () => {
     }
   };
 
-  const handleToggleFactionCollapse = (factionId: number) => toggleFactionCollapseMutation.mutate(factionId);
+  const handleToggleFactionCollapse = (factionId: number) => {
+    setCollapsedFactions(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(factionId)) {
+        newSet.delete(factionId);
+      } else {
+        newSet.add(factionId);
+      }
+      return newSet;
+    });
+  };
   const handleUpdateFaction = (factionId: number, name: string, description: string) => updateFactionMutation.mutate({ factionId, name, description });
   const handleDeleteFaction = (factionId: number) => {
     if (confirm('确定要删除这个阵营吗？')) deleteFactionMutation.mutate(factionId);
@@ -510,7 +515,7 @@ export const WorkDetailPage: React.FC = () => {
             ) : (
               <div className="space-y-4">
                 {sortedFactions.map((faction) => (
-                  <FactionSection key={faction.id} faction={faction} loreEntries={getLoreEntriesForFaction(faction.id)} onToggleCollapse={handleToggleFactionCollapse} onUpdateFaction={handleUpdateFaction} onDeleteFaction={handleDeleteFaction} onAddCharacter={(factionId) => handleCreateLore(factionId)} onEditLoreEntry={handleEditLoreEntry} onDeleteLoreEntry={handleDeleteLoreEntry} />
+                  <FactionSection key={faction.id} faction={faction} isCollapsed={collapsedFactions.has(faction.id)} loreEntries={getLoreEntriesForFaction(faction.id)} onToggleCollapse={handleToggleFactionCollapse} onUpdateFaction={handleUpdateFaction} onDeleteFaction={handleDeleteFaction} onAddCharacter={(factionId) => handleCreateLore(factionId)} onEditLoreEntry={handleEditLoreEntry} onDeleteLoreEntry={handleDeleteLoreEntry} />
                 ))}
                 <div className="flex justify-center pt-4">
                   <Button onClick={handleCreateFaction} variant="outline" className="flex items-center gap-2"><Plus size={18} />新建阵营</Button>
