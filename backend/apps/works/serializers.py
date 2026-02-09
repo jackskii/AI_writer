@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Work, Act, Chapter, LoreEntry, WritingStyle
+from .models import Work, Act, Chapter, Faction, LoreEntry, WritingStyle
 
 
 class ActSerializer(serializers.ModelSerializer):
@@ -54,17 +54,50 @@ class WorkDetailSerializer(WorkSerializer):
         fields = WorkSerializer.Meta.fields + ['chapters', 'acts']
 
 
+class FactionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Faction
+        fields = [
+            'id', 'work', 'name', 'description',
+            'is_default', 'faction_type', 'order', 'is_collapsed',
+            'created_at', 'updated_at'
+        ]
+        read_only_fields = ['work', 'is_default', 'faction_type', 'created_at', 'updated_at']
+
+
 class LoreEntrySerializer(serializers.ModelSerializer):
     all_triggers = serializers.ReadOnlyField()
+    factions = serializers.PrimaryKeyRelatedField(
+        many=True,
+        queryset=Faction.objects.all(),
+        required=False
+    )
 
     class Meta:
         model = LoreEntry
         fields = [
             'id', 'work', 'name', 'description',
             'triggers', 'extra_triggers', 'all_triggers',
-            'created_at', 'updated_at'
+            'factions', 'created_at', 'updated_at'
         ]
         read_only_fields = ['work', 'created_at', 'updated_at']
+    
+    def validate_factions(self, value):
+        """Validate that all factions belong to the same work"""
+        if not value:
+            return value
+        
+        # Get the work from the view context
+        view = self.context.get('view')
+        if view and hasattr(view, 'kwargs'):
+            work_id = view.kwargs.get('work_pk')
+            if work_id:
+                for faction in value:
+                    if faction.work_id != int(work_id):
+                        raise serializers.ValidationError(
+                            f"Faction {faction.id} does not belong to this work"
+                        )
+        return value
 
 
 class WritingStyleSerializer(serializers.ModelSerializer):

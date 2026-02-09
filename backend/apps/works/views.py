@@ -4,8 +4,9 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
-from .models import Work, Act, Chapter, LoreEntry, WritingStyle
-from .serializers import WorkSerializer, WorkDetailSerializer, ActSerializer, ChapterSerializer, LoreEntrySerializer, WritingStyleSerializer
+from django.db import models
+from .models import Work, Act, Chapter, Faction, LoreEntry, WritingStyle
+from .serializers import WorkSerializer, WorkDetailSerializer, ActSerializer, ChapterSerializer, FactionSerializer, LoreEntrySerializer, WritingStyleSerializer
 
 
 def get_user_api_key(user):
@@ -228,19 +229,134 @@ class ChapterViewSet(viewsets.ModelViewSet):
 
 
 
-class LoreEntryViewSet(viewsets.ModelViewSet):
-    serializer_class = LoreEntrySerializer
+class FactionViewSet(viewsets.ModelViewSet):
+    """阵营管理"""
+    serializer_class = FactionSerializer
     permission_classes = [IsAuthenticated]
+    pagination_class = None  # Return all factions without pagination
 
     def get_queryset(self):
         work_id = self.kwargs.get('work_pk')
         work = get_object_or_404(Work, id=work_id, author=self.request.user)
-        return LoreEntry.objects.filter(work=work)
+        # Order: 无归属 (top) → normal factions (by order) → 世界观 (bottom)
+        return Faction.objects.filter(work=work).order_by(
+            models.Case(
+                models.When(faction_type='no_faction', then=models.Value(0)),      # First
+                models.When(faction_type='worldbuilding', then=models.Value(2)),   # Last
+                default=models.Value(1),                                            # Middle (normal)
+                output_field=models.IntegerField(),
+            ),
+            'order'
+        )
 
     def perform_create(self, serializer):
         work_id = self.kwargs.get('work_pk')
         work = get_object_or_404(Work, id=work_id, author=self.request.user)
-        serializer.save(work=work)
+        
+        # Get the next order number for normal factions
+        max_order = Faction.objects.filter(
+            work=work,
+            faction_type='normal'
+        ).aggregate(models.Max('order'))['order__max'] or 0
+        
+        serializer.save(
+            work=work,
+            order=max_order + 1,
+            is_default=False,
+            faction_type='normal'
+        )
+
+    def perform_destroy(self, instance):
+        """Only allow deleting non-default factions"""
+        if instance.is_default:
+            from rest_framework.exceptions import PermissionDenied
+            raise PermissionDenied("Cannot delete default factions")
+        
+        # Move lore entries from this faction to "no_faction"
+        work = instance.work
+        no_faction = Faction.objects.filter(
+            work=work,
+            faction_type='no_faction'
+        ).first()
+        
+        if no_faction:
+            for lore_entry in instance.lore_entries.all():
+                lore_entry.factions.remove(instance)
+                # Only add to no_faction if the entry has no other factions
+                if lore_entry.factions.count() == 0:
+                    lore_entry.factions.add(no_faction)
+        
+        super().perform_destroy(instance)
+
+    @action(detail=True, methods=['patch'])
+    def toggle_collapse(self, request, work_pk=None, pk=None):
+        """Toggle faction collapsed state"""
+        faction = self.get_object()
+        faction.is_collapsed = not faction.is_collapsed
+        faction.save(update_fields=['is_collapsed'])
+        return Response({'is_collapsed': faction.is_collapsed})
+
+
+class LoreEntryViewSet(viewsets.ModelViewSet):
+    serializer_class = LoreEntrySerializer
+    permission_classes = [IsAuthenticated]
+    pagination_class = None  # Return all lore entries without pagination
+
+    def get_queryset(self):
+        work_id = self.kwargs.get('work_pk')
+        work = get_object_or_404(Work, id=work_id, author=self.request.user)
+        return LoreEntry.objects.filter(work=work).prefetch_related('factions')
+
+    def perform_create(self, serializer):
+        work_id = self.kwargs.get('work_pk')
+        work = get_object_or_404(Work, id=work_id, author=self.request.user)
+        
+        # Get faction IDs from the request
+        faction_ids = self.request.data.get('factions', [])
+        
+        # Save the lore entry first
+        lore_entry = serializer.save(work=work)
+        
+        # If no factions specified, add to "no_faction"
+        if not faction_ids:
+            no_faction = Faction.objects.filter(
+                work=work,
+                faction_type='no_faction'
+            ).first()
+            if no_faction:
+                lore_entry.factions.add(no_faction)
+        else:
+            # Validate and add factions
+            factions = Faction.objects.filter(
+                id__in=faction_ids,
+                work=work
+            )
+            lore_entry.factions.set(factions)
+    
+    def perform_update(self, serializer):
+        """Handle faction updates on lore entry update"""
+        instance = serializer.save()
+        
+        # Handle faction assignment if provided
+        if 'factions' in self.request.data:
+            faction_ids = self.request.data.get('factions', [])
+            work = instance.work
+            
+            if not faction_ids:
+                # If factions is empty, add to "no_faction"
+                no_faction = Faction.objects.filter(
+                    work=work,
+                    faction_type='no_faction'
+                ).first()
+                if no_faction:
+                    instance.factions.set([no_faction])
+            else:
+                # Validate and set factions
+                factions = Faction.objects.filter(
+                    id__in=faction_ids,
+                    work=work
+                )
+                instance.factions.set(factions)
 
 
 class WritingStyleViewSet(viewsets.ModelViewSet):

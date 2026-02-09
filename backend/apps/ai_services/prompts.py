@@ -226,23 +226,69 @@ AUTO_DESCRIBE_ENTRY_SYSTEM_PROMPT = """你是一位客观的角色记录员。�
 开始描述："""
 
 
-def format_auto_describe_request(entry_name: str, context_text: str) -> str:
+AUTO_DESCRIBE_ENTRY_UPDATE_SYSTEM_PROMPT = """你是一位客观的角色记录员。你需要根据新提供的文本资料，更新现有的人物描述。
+
+**指令（请严格遵守）：**
+1. 保留原描述中仍然正确的信息
+2. 根据新资料更新或补充信息
+3. 如果新资料与原描述冲突，以新资料为准
+4. 完全按照以下格式输出，不添加任何额外文字：
+
+[名字]-[年龄（如果资料提及）]-[可受孕人分数（如果资料提及）]
+外观：[直接描述外貌，不使用比喻]
+性格：[直接描述性格特征]
+人物简介：[简述身份背景和角色的故事情节]
+人际关系：[按"角色名：关系"格式列出，每行一个，最多写五个。若无明确信息则写"无明确信息"]
+
+3. 具体规则：
+   - 不使用markdown格式
+   - 总字数不超过500字
+   - 外观描述：直接描述特征，如"黑色短发、身高180cm、左脸有疤痕"
+   - 性格描述：仅列出资料中明确提到的性格词汇
+   - 人物简介：仅陈述资料中明确提及的身份、职业、背景事实
+   - 绝对不分析角色作用、象征意义或剧情重要性
+   - 整合原有描述和新资料中的信息
+
+开始更新描述："""
+
+
+def format_auto_describe_request(
+    entry_name: str, 
+    context_text: str, 
+    additional_context: str = "",
+    is_update: bool = False,
+    original_description: str = ""
+) -> str:
     """
     Format an auto-describe entry request.
 
     Args:
         entry_name: The name of the entry/character to describe
         context_text: The chapter content to extract information from
+        additional_context: Optional additional context from user
+        is_update: Whether this is an update to existing description
+        original_description: The original description (required if is_update=True)
 
     Returns:
         Formatted request string
     """
-    return f"""**文本资料：**
-{context_text}
-
-**需要描述的人物：** {entry_name}
-
-{AUTO_DESCRIBE_ENTRY_SYSTEM_PROMPT}"""
+    if is_update and original_description:
+        # Update mode - include original description
+        parts = [f"**原有描述：**\n{original_description}"]
+        parts.append(f"\n**新的文本资料：**\n{context_text}")
+        if additional_context:
+            parts.append(f"\n**补充说明：**\n{additional_context}")
+        parts.append(f"\n**需要更新描述的人物：** {entry_name}")
+        parts.append(f"\n{AUTO_DESCRIBE_ENTRY_UPDATE_SYSTEM_PROMPT}")
+        return "\n".join(parts)
+    else:
+        # New description mode
+        parts = [f"**文本资料：**\n{context_text}"]
+        if additional_context:
+            parts.append(f"\n**补充说明：**\n{additional_context}")
+        parts.append(f"\n**需要描述的人物：** {entry_name}")
+        parts.append(f"\n{AUTO_DESCRIBE_ENTRY_SYSTEM_PROMPT}")
+        return "\n".join(parts)
 
 
 # =============================================================================

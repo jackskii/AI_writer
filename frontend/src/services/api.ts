@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { Work, Act, Chapter, LoreEntry, Note, ChatMessage, AutoEdit, Suggestion, WritingStyle } from '../types';
+import type { Work, Act, Chapter, Faction, LoreEntry, Note, ChatMessage, AutoEdit, Suggestion, WritingStyle } from '../types';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8001/api';
 
@@ -114,13 +114,26 @@ export const actsApi = {
   delete: (workId: number, id: number) => api.delete(`/works/${workId}/acts/${id}/`),
 };
 
+// 阵营相关 API
+export const factionsApi = {
+  list: (workId: number) => api.get<Faction[]>(`/works/${workId}/factions/`),
+  get: (workId: number, id: number) => api.get<Faction>(`/works/${workId}/factions/${id}/`),
+  create: (workId: number, data: Partial<Faction>) => 
+    api.post<Faction>(`/works/${workId}/factions/`, data),
+  update: (workId: number, id: number, data: Partial<Faction>) => 
+    api.patch<Faction>(`/works/${workId}/factions/${id}/`, data),
+  delete: (workId: number, id: number) => api.delete(`/works/${workId}/factions/${id}/`),
+  toggleCollapse: (workId: number, id: number) => 
+    api.patch<{ is_collapsed: boolean }>(`/works/${workId}/factions/${id}/toggle_collapse/`),
+};
+
 // 世界观条目相关 API
 export const loreApi = {
   list: (workId: number) => api.get<LoreEntry[]>(`/works/${workId}/lore/`),
   get: (workId: number, id: number) => api.get<LoreEntry>(`/works/${workId}/lore/${id}/`),
-  create: (workId: number, data: Partial<LoreEntry>) => 
+  create: (workId: number, data: Partial<LoreEntry> & { factions?: number[] }) => 
     api.post<LoreEntry>(`/works/${workId}/lore/`, data),
-  update: (workId: number, id: number, data: Partial<LoreEntry>) => 
+  update: (workId: number, id: number, data: Partial<LoreEntry> & { factions?: number[] }) => 
     api.patch<LoreEntry>(`/works/${workId}/lore/${id}/`, data),
   delete: (workId: number, id: number) => api.delete(`/works/${workId}/lore/${id}/`),
 };
@@ -594,20 +607,79 @@ export const aiApi = {
     return eventSource;
   },
 
+  // Get chapters containing entry name (for UI selection)
+  getChaptersWithEntry: async (
+    workId: number,
+    entryName: string
+  ): Promise<Array<{id: number, chapter_number: number, title: string}>> => {
+    const requestBody: Record<string, string | number> = {
+      work_id: workId,
+      entry_name: entryName,
+    };
+
+    // Add token for authentication
+    const authStorage = localStorage.getItem('auth-storage');
+    if (authStorage) {
+      try {
+        const parsedStorage = JSON.parse(authStorage);
+        const token = parsedStorage?.state?.token;
+        if (token) {
+          requestBody.token = token;
+        }
+      } catch (e) {
+        console.error('Failed to parse auth storage:', e);
+      }
+    }
+
+    const response = await fetch(`${API_BASE_URL}/ai/auto-describe-entry/chapters/`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(requestBody),
+      credentials: 'include',
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
+    const data = await response.json();
+    return data.chapters || [];
+  },
+
   // Streaming auto describe entry
   autoDescribeEntry: async (
     workId: number,
     entryName: string,
     onChunk: (chunk: string) => void,
-    onStart?: (usedChapters: Array<{chapter_number: number, title: string}>) => void,
-    onEnd?: (description: string, usedChapters: Array<{chapter_number: number, title: string}>) => void,
-    onError?: (error: string) => void
+    onStart?: (usedChapters: Array<{chapter_number: number, title: string, id?: number}>) => void,
+    onEnd?: (description: string, usedChapters: Array<{chapter_number: number, title: string, id?: number}>) => void,
+    onError?: (error: string) => void,
+    options?: {
+      chapterIds?: number[];
+      additionalContext?: string;
+      isUpdate?: boolean;
+      originalDescription?: string;
+    }
   ) => {
     // Build request body
-    const requestBody: Record<string, string | number> = {
+    const requestBody: Record<string, unknown> = {
       work_id: workId,
       entry_name: entryName,
     };
+
+    // Add optional parameters
+    if (options?.chapterIds && options.chapterIds.length > 0) {
+      requestBody.chapter_ids = options.chapterIds;
+    }
+    if (options?.additionalContext) {
+      requestBody.additional_context = options.additionalContext;
+    }
+    if (options?.isUpdate) {
+      requestBody.is_update = true;
+      requestBody.original_description = options.originalDescription || '';
+    }
 
     // Add token for authentication
     const authStorage = localStorage.getItem('auth-storage');

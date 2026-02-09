@@ -585,14 +585,31 @@ class AIService:
     async def auto_describe_entry_stream(
         self,
         entry_name: str,
-        context_text: str
+        context_text: str,
+        additional_context: str = "",
+        is_update: bool = False,
+        original_description: str = ""
     ) -> AsyncGenerator[str, None]:
-        """AI auto-describe entry function - streaming version"""
-        logger.debug(f"Starting AI auto-describe stream for entry: {entry_name}")
+        """AI auto-describe entry function - streaming version
+        
+        Args:
+            entry_name: Name of the entry/character
+            context_text: Chapter content for context
+            additional_context: Optional additional context from user
+            is_update: Whether this is updating an existing description
+            original_description: The original description (for update mode)
+        """
+        logger.debug(f"Starting AI auto-describe stream for entry: {entry_name} (update={is_update})")
 
         try:
             # Format the request using prompts.py
-            user_message = prompts.format_auto_describe_request(entry_name, context_text)
+            user_message = prompts.format_auto_describe_request(
+                entry_name, 
+                context_text,
+                additional_context=additional_context,
+                is_update=is_update,
+                original_description=original_description
+            )
 
             messages = [
                 {"role": "user", "content": user_message}

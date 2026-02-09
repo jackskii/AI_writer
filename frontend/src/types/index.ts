@@ -37,6 +37,19 @@ export interface Chapter {
   summary?: string;
 }
 
+export interface Faction {
+  id: number;
+  work: number;
+  name: string;
+  description: string;
+  is_default: boolean;
+  faction_type: 'normal' | 'no_faction' | 'worldbuilding';
+  order: number;
+  is_collapsed: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface LoreEntry {
   id: number;
   work: number;
@@ -44,6 +57,7 @@ export interface LoreEntry {
   description: string;
   triggers: string[];
   extra_triggers: string[];
+  factions: number[];
   created_at: string;
   updated_at: string;
 }

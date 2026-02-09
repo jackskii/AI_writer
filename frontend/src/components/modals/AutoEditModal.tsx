@@ -3,7 +3,7 @@ import { X, ChevronLeft, ChevronRight, Square, Wand2, Check, RotateCcw, Settings
 import { Button } from '../ui/Button';
 import { Textarea } from '../ui/Input';
 import { useMobile } from '../../hooks/useMobile';
-import type { Work, Chapter, LoreEntry, WritingStyle } from '../../types';
+import type { Work, Chapter, Faction, LoreEntry, WritingStyle } from '../../types';
 
 interface AutoEditModalProps {
   isOpen: boolean;
@@ -77,6 +77,20 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
   const [customChapterCount, setCustomChapterCount] = useState(3);
   const [useSummaries, setUseSummaries] = useState(false);
   const [loreEntries, setLoreEntries] = useState<LoreEntry[]>([]);
+  const [factions, setFactions] = useState<Faction[]>([]);
+  
+  // Sort factions: 无归属 (top) → normal factions (by order) → 世界观 (bottom)
+  const sortedFactions = React.useMemo(() => {
+    return [...factions].sort((a, b) => {
+      if (a.faction_type === 'no_faction') return -1;
+      if (b.faction_type === 'no_faction') return 1;
+      if (a.faction_type === 'worldbuilding') return 1;
+      if (b.faction_type === 'worldbuilding') return -1;
+      return a.order - b.order;
+    });
+  }, [factions]);
+  
+  const [selectedFactionFilter, setSelectedFactionFilter] = useState<number | 'all'>('all');
   const [selectedLoreIds, setSelectedLoreIds] = useState<number[]>([]);
   const [loreCurrentPage, setLoreCurrentPage] = useState(1);
   const [selectedModel, setSelectedModel] = useState<'deepseek-chat' | 'deepseek-reasoner'>('deepseek-chat');
@@ -169,6 +183,7 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
       setCurrentEditedText('');
       setIsGenerating(false);
       setEditRequirement(prefills[selectedPrefillKey] || prefills['修改'] || '');
+      setSelectedFactionFilter('all'); // Reset faction filter
       loadLoreEntries();
       preselectTriggeredLoreEntries();
     }
@@ -181,25 +196,39 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
     }
   }, [selectedPrefillKey, isOpen, isLoadingPrefills, prefills]);
 
-  // Load lore entries for the work
+  // Load lore entries and factions for the work
   const loadLoreEntries = async () => {
     try {
-      const { loreApi } = await import('../../services/api');
-      const response = await loreApi.list(work.id);
-      const data = response.data;
+      const { loreApi, factionsApi } = await import('../../services/api');
+      
+      // Load lore entries
+      const loreResponse = await loreApi.list(work.id);
+      const loreData = loreResponse.data;
 
       // Handle both array and paginated response formats
-      if (Array.isArray(data)) {
-        setLoreEntries(data);
-      } else if ((data as any).results && Array.isArray((data as any).results)) {
-        setLoreEntries((data as any).results);
+      if (Array.isArray(loreData)) {
+        setLoreEntries(loreData);
+      } else if ((loreData as any).results && Array.isArray((loreData as any).results)) {
+        setLoreEntries((loreData as any).results);
       } else {
-        console.warn('Unexpected lore entries format:', data);
+        console.warn('Unexpected lore entries format:', loreData);
         setLoreEntries([]);
+      }
+
+      // Load factions
+      const factionsResponse = await factionsApi.list(work.id);
+      const factionsData = factionsResponse.data;
+      if (Array.isArray(factionsData)) {
+        setFactions(factionsData);
+      } else if ((factionsData as any).results && Array.isArray((factionsData as any).results)) {
+        setFactions((factionsData as any).results);
+      } else {
+        setFactions([]);
       }
     } catch (error) {
       console.error('Failed to load lore entries:', error);
       setLoreEntries([]);
+      setFactions([]);
     }
   };
 
@@ -396,13 +425,21 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
     );
   };
 
-  // Pagination for lore entries
+  // Filter and paginate lore entries by faction
   const safeLoreeEntries = Array.isArray(loreEntries) ? loreEntries : [];
-  const totalLorePages = Math.ceil(safeLoreeEntries.length / LORE_PAGE_SIZE);
-  const paginatedLoreEntries = safeLoreeEntries.slice(
+  const filteredLoreEntries = selectedFactionFilter === 'all' 
+    ? safeLoreeEntries 
+    : safeLoreeEntries.filter(entry => entry.factions?.includes(selectedFactionFilter as number));
+  const totalLorePages = Math.ceil(filteredLoreEntries.length / LORE_PAGE_SIZE);
+  const paginatedLoreEntries = filteredLoreEntries.slice(
     (loreCurrentPage - 1) * LORE_PAGE_SIZE,
     loreCurrentPage * LORE_PAGE_SIZE
   );
+
+  // Reset page when faction filter changes
+  useEffect(() => {
+    setLoreCurrentPage(1);
+  }, [selectedFactionFilter]);
 
   // Calculate actual prompt character count using real data
   const calculatePromptLength = (): number => {
@@ -724,6 +761,21 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
               {/* Lore Entries */}
               <div>
                 <h4 className="text-sm font-medium text-dark-text mb-2">世界观条目</h4>
+                {/* Faction Filter Dropdown */}
+                {sortedFactions.length > 0 && (
+                  <select
+                    value={selectedFactionFilter}
+                    onChange={(e) => setSelectedFactionFilter(e.target.value === 'all' ? 'all' : parseInt(e.target.value))}
+                    className="w-full mb-3 bg-dark-surface border border-dark-border rounded px-3 py-2 text-sm text-dark-text focus:outline-none focus:ring-2 focus:ring-dark-primary"
+                  >
+                    <option value="all">全部阵营</option>
+                    {sortedFactions.map((faction) => (
+                      <option key={faction.id} value={faction.id}>
+                        {faction.name}
+                      </option>
+                    ))}
+                  </select>
+                )}
                 <div className="grid grid-cols-2 gap-2 mb-3">
                   {paginatedLoreEntries.map(entry => (
                     <label
@@ -740,6 +792,9 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
                     </label>
                   ))}
                 </div>
+                {filteredLoreEntries.length === 0 && (
+                  <p className="text-xs text-dark-text-muted text-center py-2">该阵营暂无条目</p>
+                )}
                 {totalLorePages > 1 && (
                   <div className="flex items-center justify-center gap-2">
                     <button
@@ -993,6 +1048,21 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
               {/* Lore Entries Selection */}
               <div>
                 <h4 className="text-sm font-medium text-dark-text mb-2">世界观条目</h4>
+                {/* Faction Filter Dropdown */}
+                {sortedFactions.length > 0 && (
+                  <select
+                    value={selectedFactionFilter}
+                    onChange={(e) => setSelectedFactionFilter(e.target.value === 'all' ? 'all' : parseInt(e.target.value))}
+                    className="w-full mb-3 bg-dark-surface border border-dark-border rounded px-3 py-1.5 text-sm text-dark-text focus:outline-none focus:ring-2 focus:ring-dark-primary"
+                  >
+                    <option value="all">全部阵营</option>
+                    {sortedFactions.map((faction) => (
+                      <option key={faction.id} value={faction.id}>
+                        {faction.name}
+                      </option>
+                    ))}
+                  </select>
+                )}
                 <div className="grid grid-cols-2 gap-2 mb-3">
                   {paginatedLoreEntries.map(entry => (
                     <label
@@ -1009,6 +1079,10 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
                     </label>
                   ))}
                 </div>
+
+                {filteredLoreEntries.length === 0 && (
+                  <p className="text-xs text-dark-text-muted text-center py-2">该阵营暂无条目</p>
+                )}
 
                 {/* Pagination */}
                 {totalLorePages > 1 && (

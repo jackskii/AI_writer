@@ -1,11 +1,12 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useMutation } from '@tanstack/react-query';
-import { X, Plus, Minus, Sparkles } from 'lucide-react';
-import { loreApi, aiApi } from '../../services/api';
+import { X, Plus, Minus, Sparkles, ChevronDown, Check } from 'lucide-react';
+import { loreApi } from '../../services/api';
 import { Button } from '../ui/Button';
 import { Input, Textarea } from '../ui/Input';
 import { Card, CardHeader, CardContent } from '../ui/Card';
-import type { LoreEntry } from '../../types';
+import { AutoDescribeModal } from './AutoDescribeModal';
+import type { LoreEntry, Faction } from '../../types';
 
 interface CreateLoreModalProps {
   workId: number;
@@ -13,6 +14,8 @@ interface CreateLoreModalProps {
   onClose: () => void;
   onLoreCreated: (lore: LoreEntry) => void;
   editEntry?: LoreEntry | null;
+  factions?: Faction[];
+  defaultFactionId?: number | null;
 }
 
 export const CreateLoreModal: React.FC<CreateLoreModalProps> = ({
@@ -20,31 +23,85 @@ export const CreateLoreModal: React.FC<CreateLoreModalProps> = ({
   isOpen,
   onClose,
   onLoreCreated,
-  editEntry
+  editEntry,
+  factions = [],
+  defaultFactionId
 }) => {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [triggers, setTriggers] = useState<string[]>(['']);
-  const [isGeneratingDescription, setIsGeneratingDescription] = useState(false);
+  const [selectedFactions, setSelectedFactions] = useState<number[]>([]);
   const [usedChapters, setUsedChapters] = useState<Array<{chapter_number: number, title: string}>>([]);
+  const [isFactionDropdownOpen, setIsFactionDropdownOpen] = useState(false);
+  const [isAutoDescribeModalOpen, setIsAutoDescribeModalOpen] = useState(false);
 
   const isEditMode = !!editEntry;
 
-  // Populate form when editing
+  // Determine if this is a worldbuilding entry
+  const isWorldbuildingEntry = useMemo(() => {
+    // Check if editing an existing worldbuilding entry
+    if (editEntry && editEntry.factions) {
+      const worldbuildingFaction = factions.find(f => f.faction_type === 'worldbuilding');
+      if (worldbuildingFaction && editEntry.factions.includes(worldbuildingFaction.id)) {
+        return true;
+      }
+    }
+    // Check if creating from worldbuilding faction
+    if (defaultFactionId) {
+      const defaultFaction = factions.find(f => f.id === defaultFactionId);
+      if (defaultFaction?.faction_type === 'worldbuilding') {
+        return true;
+      }
+    }
+    return false;
+  }, [editEntry, defaultFactionId, factions]);
+
+  // Filter available factions based on entry type
+  const availableFactions = useMemo(() => {
+    if (isWorldbuildingEntry) {
+      // Worldbuilding entries can ONLY belong to worldbuilding faction
+      return factions.filter(f => f.faction_type === 'worldbuilding');
+    } else {
+      // Other entries can belong to any faction EXCEPT worldbuilding
+      return factions.filter(f => f.faction_type !== 'worldbuilding' && f.faction_type !== 'no_faction');
+    }
+  }, [factions, isWorldbuildingEntry]);
+
   useEffect(() => {
+    // Always reset dropdown state when modal opens/closes or entry changes
+    setIsFactionDropdownOpen(false);
+    
     if (editEntry) {
       setName(editEntry.name);
       setDescription(editEntry.description);
       setTriggers(editEntry.triggers.length > 0 ? editEntry.triggers : ['']);
+      // Filter out 无归属 from displayed selections - it's handled automatically
+      const filteredFactions = (editEntry.factions || []).filter(id => {
+        const faction = factions.find(f => f.id === id);
+        return faction?.faction_type !== 'no_faction';
+      });
+      setSelectedFactions(filteredFactions);
     } else {
       setName('');
       setDescription('');
       setTriggers(['']);
+      // Don't pre-select 无归属 faction - entries with no faction automatically go there
+      if (defaultFactionId) {
+        const defaultFaction = factions.find(f => f.id === defaultFactionId);
+        if (defaultFaction?.faction_type === 'no_faction') {
+          // Creating from 无归属: don't select any faction
+          setSelectedFactions([]);
+        } else {
+          setSelectedFactions([defaultFactionId]);
+        }
+      } else {
+        setSelectedFactions([]);
+      }
     }
-  }, [editEntry]);
+  }, [editEntry, defaultFactionId, isOpen, factions]);
 
   const saveMutation = useMutation({
-    mutationFn: (loreData: { name: string; description: string; triggers: string[] }) => {
+    mutationFn: (loreData: { name: string; description: string; triggers: string[]; factions: number[] }) => {
       if (isEditMode && editEntry) {
         return loreApi.update(workId, editEntry.id, loreData);
       } else {
@@ -58,6 +115,7 @@ export const CreateLoreModal: React.FC<CreateLoreModalProps> = ({
         setName('');
         setDescription('');
         setTriggers(['']);
+        setSelectedFactions([]);
       }
     }
   });
@@ -72,8 +130,17 @@ export const CreateLoreModal: React.FC<CreateLoreModalProps> = ({
     saveMutation.mutate({
       name: name.trim(),
       description: description.trim(),
-      triggers: validTriggers
+      triggers: validTriggers,
+      factions: selectedFactions
     });
+  };
+
+  const toggleFaction = (factionId: number) => {
+    setSelectedFactions(prev => 
+      prev.includes(factionId)
+        ? prev.filter(id => id !== factionId)
+        : [...prev, factionId]
+    );
   };
 
   const addTrigger = () => {
@@ -92,46 +159,17 @@ export const CreateLoreModal: React.FC<CreateLoreModalProps> = ({
     setTriggers(newTriggers);
   };
 
-  const handleAutoDescribe = async () => {
+  const handleAutoDescribe = () => {
     if (!name.trim()) {
       alert('请先输入条目名称');
       return;
     }
+    setIsAutoDescribeModalOpen(true);
+  };
 
-    setIsGeneratingDescription(true);
-    setUsedChapters([]); // Clear previous chapters
-    setDescription(''); // Clear previous description for streaming
-
-    try {
-      await aiApi.autoDescribeEntry(
-        workId,
-        name.trim(),
-        // onChunk - append each chunk to description
-        (chunk: string) => {
-          setDescription(prev => prev + chunk);
-        },
-        // onStart - set used chapters when available
-        (chapters) => {
-          setUsedChapters(chapters);
-        },
-        // onEnd - generation complete
-        (finalDescription, chapters) => {
-          setDescription(finalDescription);
-          setUsedChapters(chapters);
-          setIsGeneratingDescription(false);
-        },
-        // onError - handle errors
-        (error: string) => {
-          console.error('Failed to generate description:', error);
-          alert(`生成描述失败: ${error}`);
-          setIsGeneratingDescription(false);
-        }
-      );
-    } catch (error) {
-      console.error('Failed to generate description:', error);
-      alert('生成描述失败，请稍后重试');
-      setIsGeneratingDescription(false);
-    }
+  const handleDescriptionGenerated = (newDescription: string, chapters: Array<{chapter_number: number, title: string}>) => {
+    setDescription(newDescription);
+    setUsedChapters(chapters);
   };
 
   if (!isOpen) return null;
@@ -173,31 +211,27 @@ export const CreateLoreModal: React.FC<CreateLoreModalProps> = ({
                   variant="outline"
                   size="sm"
                   onClick={handleAutoDescribe}
-                  disabled={!name.trim() || isGeneratingDescription}
+                  disabled={!name.trim()}
                   className="flex items-center gap-1 text-xs"
                 >
                   <Sparkles size={14} />
-                  {isGeneratingDescription ? '生成中...' : 'AI自动描述'}
+                  AI自动描述
                 </Button>
               </div>
 
-              {/* Display used chapters during/after generation */}
-              {(isGeneratingDescription || usedChapters.length > 0) && (
+              {/* Display used chapters after generation */}
+              {usedChapters.length > 0 && (
                 <div className="mb-2 p-2 bg-dark-bg rounded border border-dark-border">
                   <p className="text-xs text-dark-text-muted">
-                    {isGeneratingDescription ? '正在使用' : '已使用'} 章节: {' '}
-                    {usedChapters.length > 0 ? (
-                      <span className="text-dark-text">
-                        {usedChapters.map((ch, idx) => (
-                          <span key={idx}>
-                            第{ch.chapter_number}章《{ch.title}》
-                            {idx < usedChapters.length - 1 ? ', ' : ''}
-                          </span>
-                        ))}
-                      </span>
-                    ) : (
-                      <span className="text-dark-text">查找包含"{name}"的章节...</span>
-                    )}
+                    已使用章节: {' '}
+                    <span className="text-dark-text">
+                      {usedChapters.map((ch, idx) => (
+                        <span key={idx}>
+                          第{ch.chapter_number}章《{ch.title}》
+                          {idx < usedChapters.length - 1 ? ', ' : ''}
+                        </span>
+                      ))}
+                    </span>
                   </p>
                 </div>
               )}
@@ -209,6 +243,90 @@ export const CreateLoreModal: React.FC<CreateLoreModalProps> = ({
                 rows={6}
               />
             </div>
+
+            {/* Faction Selection - only show for non-worldbuilding entries */}
+            {availableFactions.length > 0 && !isWorldbuildingEntry && (
+              <div className="space-y-2">
+                <label className="block text-sm font-medium text-dark-text">
+                  所属阵营
+                </label>
+                <p className="text-xs text-dark-text-muted mb-3">
+                  选择该条目所属的阵营（可多选，不选则归入"无归属"）
+                </p>
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setIsFactionDropdownOpen(!isFactionDropdownOpen)}
+                    className="w-full flex items-center justify-between px-3 py-2 bg-dark-bg border border-dark-border rounded-lg text-left hover:border-dark-primary/50 transition-colors"
+                  >
+                    <span className="text-sm text-dark-text truncate">
+                      {selectedFactions.length === 0 
+                        ? '选择阵营...' 
+                        : `已选择 ${selectedFactions.length} 个阵营`}
+                    </span>
+                    <ChevronDown size={16} className={`text-dark-text-muted transition-transform ${isFactionDropdownOpen ? 'rotate-180' : ''}`} />
+                  </button>
+                  
+                  {/* Dropdown menu - opens downward */}
+                  {isFactionDropdownOpen && (
+                    <div className="absolute top-full left-0 w-full mt-1 py-1 bg-dark-surface border border-dark-border rounded-lg shadow-lg max-h-48 overflow-y-auto z-[100]">
+                      {availableFactions.map((faction) => (
+                        <button
+                          key={faction.id}
+                          type="button"
+                          onClick={() => toggleFaction(faction.id)}
+                          className="w-full flex items-center justify-between px-3 py-2 text-sm text-left hover:bg-dark-bg transition-colors"
+                        >
+                          <span className="text-dark-text">{faction.name}</span>
+                          {selectedFactions.includes(faction.id) && (
+                            <Check size={16} className="text-dark-primary" />
+                          )}
+                        </button>
+                      ))}
+                      {availableFactions.length === 0 && (
+                        <div className="px-3 py-2 text-sm text-dark-text-muted">
+                          没有可选阵营
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  
+                  {/* Selected factions preview - shown below dropdown */}
+                  {selectedFactions.length > 0 && !isFactionDropdownOpen && (
+                    <div className="flex flex-wrap gap-1 mt-2">
+                      {selectedFactions.map(factionId => {
+                        const faction = factions.find(f => f.id === factionId);
+                        return faction ? (
+                          <span 
+                            key={factionId}
+                            className="inline-flex items-center gap-1 px-2 py-0.5 bg-dark-primary/20 text-dark-primary text-xs rounded"
+                          >
+                            {faction.name}
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                toggleFaction(factionId);
+                              }}
+                              className="hover:text-dark-text"
+                            >
+                              <X size={12} />
+                            </button>
+                          </span>
+                        ) : null;
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+            
+            {/* Show info for worldbuilding entries */}
+            {isWorldbuildingEntry && (
+              <div className="text-sm text-dark-text-muted bg-dark-bg p-3 rounded-lg">
+                此条目属于"世界观"分类，无法添加到其他阵营
+              </div>
+            )}
 
             <div className="space-y-2">
               <label className="block text-sm font-medium text-dark-text">
@@ -272,6 +390,16 @@ export const CreateLoreModal: React.FC<CreateLoreModalProps> = ({
           </form>
         </CardContent>
       </Card>
+
+      {/* Auto Describe Modal */}
+      <AutoDescribeModal
+        workId={workId}
+        entryName={name.trim()}
+        originalDescription={description}
+        isOpen={isAutoDescribeModalOpen}
+        onClose={() => setIsAutoDescribeModalOpen(false)}
+        onDescriptionGenerated={handleDescriptionGenerated}
+      />
     </div>
   );
 };

@@ -148,6 +148,46 @@ class Chapter(models.Model):
         super().save(*args, **kwargs)
 
 
+class Faction(models.Model):
+    """阵营/分组模型 - 用于组织世界观条目"""
+    
+    FACTION_TYPES = [
+        ('normal', '普通阵营'),
+        ('no_faction', '无归属'),
+        ('worldbuilding', '世界观'),
+    ]
+    
+    id = models.BigIntegerField(primary_key=True, default=generate_large_id)
+    work = models.ForeignKey(
+        Work,
+        on_delete=models.CASCADE,
+        related_name='factions',
+        verbose_name='所属作品'
+    )
+    name = models.CharField('阵营名称', max_length=200)
+    description = models.TextField('阵营描述', blank=True)
+    is_default = models.BooleanField('是否默认', default=False)
+    faction_type = models.CharField(
+        '阵营类型',
+        max_length=20,
+        choices=FACTION_TYPES,
+        default='normal'
+    )
+    order = models.PositiveIntegerField('排序', default=0)
+    is_collapsed = models.BooleanField('是否折叠', default=False)
+    
+    created_at = models.DateTimeField('创建时间', auto_now_add=True)
+    updated_at = models.DateTimeField('更新时间', auto_now=True)
+    
+    class Meta:
+        verbose_name = '阵营'
+        verbose_name_plural = '阵营'
+        ordering = ['work', 'order']
+    
+    def __str__(self):
+        return f'{self.work.title} - {self.name}'
+
+
 class LoreEntry(models.Model):
     """世界观条目模型"""
     
@@ -162,6 +202,12 @@ class LoreEntry(models.Model):
     description = models.TextField('详细描述')
     triggers = models.JSONField('触发词', default=list, help_text='当内容中包含这些词时会触发此条目')
     extra_triggers = models.JSONField('额外触发词', default=list, help_text='用户自定义的额外触发词')
+    factions = models.ManyToManyField(
+        Faction,
+        related_name='lore_entries',
+        blank=True,
+        verbose_name='所属阵营'
+    )
     
     created_at = models.DateTimeField('创建时间', auto_now_add=True)
     updated_at = models.DateTimeField('更新时间', auto_now=True)

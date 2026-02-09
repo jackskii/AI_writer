@@ -639,12 +639,24 @@ def get_work_for_user(work_id, user):
 
 
 @sync_to_async
-def search_chapters_with_entry(work, entry_name):
-    """Search chapters containing entry name (async version)"""
+def search_chapters_with_entry(work, entry_name, chapter_ids=None):
+    """Search chapters containing entry name (async version)
+    
+    Args:
+        work: The work object
+        entry_name: The name to search for
+        chapter_ids: Optional list of specific chapter IDs to use. If None, searches all chapters.
+    """
     from django.db.models import Q
-    chapters = work.chapters.filter(
-        Q(content__icontains=entry_name) | Q(title__icontains=entry_name)
-    ).order_by('order')[:5]
+    
+    if chapter_ids:
+        # Use specific chapters selected by user
+        chapters = work.chapters.filter(id__in=chapter_ids).order_by('order')
+    else:
+        # Search all chapters containing entry name
+        chapters = work.chapters.filter(
+            Q(content__icontains=entry_name) | Q(title__icontains=entry_name)
+        ).order_by('order')[:5]
     
     # Build context and used chapters info
     context_parts = []
@@ -653,11 +665,65 @@ def search_chapters_with_entry(work, entry_name):
         context_parts.append(f"### 第{chapter.chapter_number}章《{chapter.title}》\n\n{chapter.content}")
         used_chapters_info.append({
             'chapter_number': chapter.chapter_number,
-            'title': chapter.title
+            'title': chapter.title,
+            'id': chapter.id
         })
     
     context_text = "\n\n---\n\n".join(context_parts)
     return context_text, used_chapters_info
+
+
+@sync_to_async
+def get_chapters_with_entry_name(work, entry_name):
+    """Get all chapters containing entry name (for chapter selection UI)"""
+    from django.db.models import Q
+    chapters = work.chapters.filter(
+        Q(content__icontains=entry_name) | Q(title__icontains=entry_name)
+    ).order_by('order')
+    
+    return [{
+        'id': chapter.id,
+        'chapter_number': chapter.chapter_number,
+        'title': chapter.title
+    } for chapter in chapters]
+
+
+@csrf_exempt
+async def ai_auto_describe_entry_chapters(request):
+    """获取包含条目名称的章节列表（用于UI选择）"""
+    if request.method != 'POST':
+        return JsonResponse({'error': '仅支持POST请求'}, status=405)
+
+    try:
+        body = json.loads(request.body.decode('utf-8'))
+    except Exception:
+        return JsonResponse({'error': '无效的请求数据'}, status=400)
+
+    user = None
+    token = request.GET.get('token') or body.get('token')
+    if token:
+        try:
+            user = await get_token_user(token)
+        except Exception:
+            return JsonResponse({'error': '认证令牌无效'}, status=401)
+    elif hasattr(request, 'user') and request.user.is_authenticated:
+        user = request.user
+    else:
+        return JsonResponse({'error': '需要登录'}, status=401)
+
+    entry_name = body.get('entry_name')
+    work_id = body.get('work_id')
+
+    if not all([entry_name, work_id]):
+        return JsonResponse({'error': '缺少必要参数'}, status=400)
+
+    try:
+        work = await get_work_for_user(work_id, user)
+    except Exception:
+        return JsonResponse({'error': '作品不存在'}, status=404)
+
+    chapters = await get_chapters_with_entry_name(work, entry_name)
+    return JsonResponse({'chapters': chapters})
 
 
 @csrf_exempt
@@ -701,6 +767,11 @@ async def ai_auto_describe_entry(request):
 
     entry_name = body.get('entry_name')
     work_id = body.get('work_id')
+    # New optional parameters
+    chapter_ids = body.get('chapter_ids')  # List of specific chapter IDs to use
+    additional_context = body.get('additional_context', '')  # Additional user context
+    is_update = body.get('is_update', False)  # Whether updating existing description
+    original_description = body.get('original_description', '')  # Original description for update mode
 
     if not all([entry_name, work_id]):
         return HttpResponse(
@@ -721,8 +792,10 @@ async def ai_auto_describe_entry(request):
     async def generate_stream():
         """生成SSE数据流 (async generator)"""
         try:
-            # Search chapters with entry name
-            context_text, used_chapters_info = await search_chapters_with_entry(work, entry_name)
+            # Search chapters with entry name (optionally filtered by chapter_ids)
+            context_text, used_chapters_info = await search_chapters_with_entry(
+                work, entry_name, chapter_ids
+            )
 
             if not context_text:
                 not_found_msg = f'"{entry_name}" 尚未在故事中出现。'
@@ -737,7 +810,13 @@ async def ai_auto_describe_entry(request):
 
             accumulated_description = ''
             try:
-                async for chunk in ai_service.auto_describe_entry_stream(entry_name, context_text):
+                async for chunk in ai_service.auto_describe_entry_stream(
+                    entry_name, 
+                    context_text,
+                    additional_context=additional_context,
+                    is_update=is_update,
+                    original_description=original_description
+                ):
                     accumulated_description += chunk
                     yield f'data: {json.dumps({"type": "chunk", "content": chunk})}\n\n'
 

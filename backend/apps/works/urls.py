@@ -1,6 +1,6 @@
 from rest_framework.routers import DefaultRouter
 from django.urls import path, include
-from .views import WorkViewSet, ActViewSet, ChapterViewSet, LoreEntryViewSet, WritingStyleViewSet
+from .views import WorkViewSet, ActViewSet, ChapterViewSet, FactionViewSet, LoreEntryViewSet, WritingStyleViewSet
 
 # 主路由器
 router = DefaultRouter()
@@ -29,7 +29,21 @@ urlpatterns = [
     path('api/works/<int:work_pk>/chapters/<int:pk>/summary/',
          ChapterViewSet.as_view({'post': 'summary'}), name='chapter-summary'),
     
+    # Faction routes
+    path('api/works/<int:work_pk>/factions/', FactionViewSet.as_view({
+        'get': 'list',
+        'post': 'create'
+    }), name='work-factions-list'),
+    path('api/works/<int:work_pk>/factions/<int:pk>/', FactionViewSet.as_view({
+        'get': 'retrieve',
+        'put': 'update',
+        'patch': 'partial_update',
+        'delete': 'destroy'
+    }), name='work-factions-detail'),
+    path('api/works/<int:work_pk>/factions/<int:pk>/toggle_collapse/',
+         FactionViewSet.as_view({'patch': 'toggle_collapse'}), name='work-factions-toggle-collapse'),
     
+    # Lore routes
     path('api/works/<int:work_pk>/lore/', LoreEntryViewSet.as_view({
         'get': 'list',
         'post': 'create'
