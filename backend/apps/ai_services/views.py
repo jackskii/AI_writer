@@ -3,7 +3,7 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
 from django.shortcuts import get_object_or_404
-from django.http import StreamingHttpResponse
+from django.http import StreamingHttpResponse, JsonResponse
 from asgiref.sync import sync_to_async
 from apps.works.models import Work, Chapter, LoreEntry
 from .services import AIService, run_async_ai_task
