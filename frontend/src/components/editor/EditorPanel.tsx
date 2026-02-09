@@ -17,7 +17,6 @@ interface EditorPanelProps {
   work: Work;
   chapter: Chapter;
   onSave?: (content?: string) => void;
-  onAutoEditOutput?: (output: string) => void;
   isMobile?: boolean;
 }
 
@@ -36,7 +35,6 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
   work,
   chapter,
   onSave,
-  onAutoEditOutput,
   isMobile = false
 }) => {
   // ALL HOOKS MUST BE CALLED BEFORE ANY EARLY RETURNS
@@ -649,17 +647,7 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
 
   // Handle auto edit modal accept
   const handleAutoEditAccept = (editedText: string) => {
-    // On mobile, send output to parent for tab display instead of directly applying
-    if (isMobile && onAutoEditOutput) {
-      onAutoEditOutput(editedText);
-      addNotification({
-        type: 'success',
-        message: '自动编辑完成，请查看"自动编辑"标签页'
-      });
-      return;
-    }
-
-    // Desktop behavior: apply directly
+    // Apply edited text directly (same behavior on mobile and desktop)
     // Set flag to prevent auto-adjustment
     isManualUpdateRef.current = true;
 
@@ -1501,9 +1489,9 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
       </div>
 
       {/* Bottom Panel - Stats and AI Tools */}
-      <div className="flex-shrink-0 border-t border-dark-border bg-dark-surface">
+      <div className={`flex-shrink-0 border-t border-dark-border bg-dark-surface ${isMobile ? 'sticky bottom-0 z-20' : ''}`}>
         {/* Stats Bar - Fixed height */}
-        <div className="px-6 py-2 border-b border-dark-border h-[48px] flex items-center">
+        <div className={`py-2 border-b border-dark-border h-[48px] flex items-center ${isMobile ? 'px-3' : 'px-6'}`}>
           <div className="flex items-center justify-between text-sm text-dark-text-muted w-full">
             <div className="flex items-center gap-4">
               <span>字数: {totalWords.toLocaleString()}</span>

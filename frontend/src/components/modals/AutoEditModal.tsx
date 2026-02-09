@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { X, ChevronLeft, ChevronRight, Square, Wand2, Check, RotateCcw, Settings } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { Textarea } from '../ui/Input';
+import { useMobile } from '../../hooks/useMobile';
 import type { Work, Chapter, LoreEntry, WritingStyle } from '../../types';
 
 interface AutoEditModalProps {
@@ -47,6 +48,9 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
   onRevert,
   onGenerateEdit
 }) => {
+  // Mobile detection
+  const isMobile = useMobile();
+
   // State for text boxes
   const [originalText, setOriginalText] = useState(initialOriginalText);
   const [editedVersions, setEditedVersions] = useState<AutoEditVersion[]>([]);
@@ -464,6 +468,367 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
 
   if (!isOpen) return null;
 
+  // Mobile Layout
+  if (isMobile) {
+    return (
+      <div className="fixed inset-0 z-50 bg-dark-surface flex flex-col">
+        {/* Mobile Header */}
+        <div className="flex items-center justify-between px-4 py-3 border-b border-dark-border flex-shrink-0">
+          <h2 className="text-lg font-semibold text-dark-text">
+            {initialOriginalText ? '自动编辑' : 'AI 生成'}
+          </h2>
+          <button
+            onClick={handleClose}
+            className="p-2 text-dark-text-muted hover:text-dark-text transition-colors"
+          >
+            <X size={22} />
+          </button>
+        </div>
+
+        {/* Mobile Writing Style Selector */}
+        <div className="px-4 py-2 border-b border-dark-border bg-dark-bg flex-shrink-0">
+          <select
+            value={selectedStyleId || ''}
+            onChange={(e) => {
+              const newStyleId = e.target.value ? parseInt(e.target.value) : null;
+              setSelectedStyleId(newStyleId);
+              if (newStyleId) {
+                localStorage.setItem('autoEdit_selectedStyleId', newStyleId.toString());
+              } else {
+                localStorage.removeItem('autoEdit_selectedStyleId');
+              }
+            }}
+            className="w-full bg-dark-surface border border-dark-border rounded px-3 py-2 text-sm text-dark-text focus:outline-none focus:ring-2 focus:ring-dark-primary"
+          >
+            <option value="">无风格 (默认)</option>
+            {styles.map((style) => (
+              <option key={style.id} value={style.id}>
+                {style.name}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {/* Mobile Content - Scrollable */}
+        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          {/* 提示词 (Original Text / Prompt) - Full Width */}
+          <div>
+            <label className="text-sm font-medium text-dark-text mb-2 block">
+              {initialOriginalText ? '原始文本' : '提示词（可选）'}
+            </label>
+            <Textarea
+              value={originalText}
+              onChange={(e) => setOriginalText(e.target.value)}
+              className="font-mono text-sm resize-none w-full"
+              style={{ minHeight: '120px' }}
+              placeholder={initialOriginalText ? "原始文本..." : "输入提示词来引导 AI 生成（可留空）..."}
+            />
+          </div>
+
+          {/* 编辑指引 - Full Width */}
+          <div>
+            <label className="text-sm font-medium text-dark-text mb-2 block">
+              编辑指引
+            </label>
+            <div className="flex flex-wrap gap-2 mb-2">
+              {Object.keys(prefills).map(key => (
+                <button
+                  key={key}
+                  onClick={() => {
+                    setEditRequirement(prefills[key]);
+                    setSelectedPrefillKey(key);
+                    localStorage.setItem('autoEdit_selectedPrefillKey', key);
+                  }}
+                  className={`px-3 py-1.5 text-sm rounded transition-colors ${
+                    selectedPrefillKey === key
+                      ? 'bg-dark-primary text-white'
+                      : 'bg-dark-bg text-dark-text border border-dark-border'
+                  }`}
+                >
+                  {key}
+                </button>
+              ))}
+            </div>
+            <Textarea
+              value={editRequirement}
+              onChange={(e) => setEditRequirement(e.target.value)}
+              className="font-mono text-sm resize-none w-full"
+              style={{ minHeight: '80px' }}
+              placeholder="输入编辑要求..."
+              maxLength={50000}
+            />
+          </div>
+
+          {/* 编辑文本 (Generated Text) - Full Width, Centered, Readable */}
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <label className="text-sm font-medium text-dark-text">编辑文本</label>
+              {/* Version Navigation */}
+              {editedVersions.length > 0 && (
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handlePreviousVersion}
+                    disabled={currentVersionIndex <= 0}
+                    className="p-1 hover:bg-dark-bg rounded disabled:opacity-50"
+                  >
+                    <ChevronLeft size={18} />
+                  </button>
+                  <span className="text-xs text-dark-text-muted">
+                    {currentVersionIndex + 1}/{editedVersions.length}
+                  </span>
+                  <button
+                    onClick={handleNextVersion}
+                    disabled={currentVersionIndex >= editedVersions.length - 1}
+                    className="p-1 hover:bg-dark-bg rounded disabled:opacity-50"
+                  >
+                    <ChevronRight size={18} />
+                  </button>
+                </div>
+              )}
+            </div>
+            {/* Generated text box - readable width, scrollable */}
+            <div className="flex justify-center">
+              <div className="w-full max-w-[85%]">
+                <Textarea
+                  value={currentEditedText}
+                  onChange={(e) => setCurrentEditedText(e.target.value)}
+                  className="font-mono text-sm resize-none w-full leading-relaxed"
+                  style={{ minHeight: '200px', maxHeight: '300px' }}
+                  placeholder={isGenerating ? "生成中..." : "编辑文本将在这里显示..."}
+                  disabled={isGenerating}
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Mobile Customize Overlay */}
+        {showCustomize && (
+          <div className="absolute inset-0 z-60 bg-dark-surface flex flex-col">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-dark-border flex-shrink-0">
+              <h3 className="text-lg font-medium text-dark-text">自定义上下文</h3>
+              <button
+                onClick={() => setShowCustomize(false)}
+                className="p-2 text-dark-text-muted hover:text-dark-text"
+              >
+                <X size={22} />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-4">
+              {/* Model Selection */}
+              <div className="mb-6">
+                <h4 className="text-sm font-medium text-dark-text mb-2">AI 模型</h4>
+                <div className="space-y-2">
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="radio"
+                      checked={selectedModel === 'deepseek-chat'}
+                      onChange={() => setSelectedModel('deepseek-chat')}
+                      className="text-dark-primary"
+                    />
+                    <span className="text-sm text-dark-text">DeepSeek Chat（默认）</span>
+                  </label>
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="radio"
+                      checked={selectedModel === 'deepseek-reasoner'}
+                      onChange={() => setSelectedModel('deepseek-reasoner')}
+                      className="text-dark-primary"
+                    />
+                    <span className="text-sm text-dark-text">DeepSeek Reasoner</span>
+                  </label>
+                </div>
+              </div>
+
+              {/* Chapter Selection */}
+              <div className="mb-6">
+                <h4 className="text-sm font-medium text-dark-text mb-2">
+                  章节选择 <span className="text-xs text-dark-text-muted">(可用: {availablePreviousChapters} 章)</span>
+                </h4>
+                <div className="space-y-2">
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="radio"
+                      checked={chapterSelection === 'none'}
+                      onChange={() => setChapterSelection('none')}
+                      className="text-dark-primary"
+                    />
+                    <span className="text-sm text-dark-text">不使用前文</span>
+                  </label>
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="radio"
+                      checked={chapterSelection === 'past_3'}
+                      onChange={() => setChapterSelection('past_3')}
+                      className="text-dark-primary"
+                    />
+                    <span className="text-sm text-dark-text">最近3章</span>
+                  </label>
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="radio"
+                      checked={chapterSelection === 'all'}
+                      onChange={() => setChapterSelection('all')}
+                      className="text-dark-primary"
+                    />
+                    <span className="text-sm text-dark-text">所有前文 ({availablePreviousChapters} 章)</span>
+                  </label>
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="radio"
+                      checked={chapterSelection === 'custom'}
+                      onChange={() => setChapterSelection('custom')}
+                      className="text-dark-primary"
+                    />
+                    <span className="text-sm text-dark-text">自定义数量</span>
+                  </label>
+                  {chapterSelection === 'custom' && (
+                    <div className="ml-6 flex items-center gap-2">
+                      <input
+                        type="number"
+                        min={0}
+                        max={availablePreviousChapters}
+                        value={customChapterCount}
+                        onChange={(e) => {
+                          const value = parseInt(e.target.value);
+                          if (isNaN(value)) {
+                            setCustomChapterCount(0);
+                          } else {
+                            setCustomChapterCount(Math.min(Math.max(0, value), availablePreviousChapters));
+                          }
+                        }}
+                        className="w-20 px-2 py-1 text-sm border border-dark-border rounded bg-dark-bg text-dark-text"
+                      />
+                    </div>
+                  )}
+                </div>
+                {chapterSelection !== 'none' && (
+                  <label className="flex items-center gap-2 mt-3 pt-3 border-t border-dark-border">
+                    <input
+                      type="checkbox"
+                      checked={useSummaries}
+                      onChange={(e) => setUseSummaries(e.target.checked)}
+                      className="text-dark-primary"
+                    />
+                    <span className="text-sm text-dark-text">使用摘要代替全文</span>
+                  </label>
+                )}
+              </div>
+
+              {/* Lore Entries */}
+              <div>
+                <h4 className="text-sm font-medium text-dark-text mb-2">世界观条目</h4>
+                <div className="grid grid-cols-2 gap-2 mb-3">
+                  {paginatedLoreEntries.map(entry => (
+                    <label
+                      key={entry.id}
+                      className="flex items-start gap-2 p-2 bg-dark-bg rounded border border-dark-border cursor-pointer"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selectedLoreIds.includes(entry.id)}
+                        onChange={() => toggleLoreEntry(entry.id)}
+                        className="mt-0.5"
+                      />
+                      <span className="text-xs text-dark-text line-clamp-2">{entry.name}</span>
+                    </label>
+                  ))}
+                </div>
+                {totalLorePages > 1 && (
+                  <div className="flex items-center justify-center gap-2">
+                    <button
+                      onClick={() => setLoreCurrentPage(p => Math.max(1, p - 1))}
+                      disabled={loreCurrentPage === 1}
+                      className="px-2 py-1 border border-dark-border rounded disabled:opacity-50"
+                    >
+                      <ChevronLeft size={16} />
+                    </button>
+                    <span className="text-xs text-dark-text-muted">
+                      {loreCurrentPage} / {totalLorePages}
+                    </span>
+                    <button
+                      onClick={() => setLoreCurrentPage(p => Math.min(totalLorePages, p + 1))}
+                      disabled={loreCurrentPage === totalLorePages}
+                      className="px-2 py-1 border border-dark-border rounded disabled:opacity-50"
+                    >
+                      <ChevronRight size={16} />
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+            <div className="flex-shrink-0 p-4 border-t border-dark-border">
+              <Button onClick={() => setShowCustomize(false)} className="w-full">
+                完成
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {/* Mobile Bottom Action Bar - Icon Only */}
+        <div className="flex-shrink-0 border-t border-dark-border bg-dark-bg px-3 py-2 safe-area-bottom">
+          <div className="flex items-center justify-between">
+            {/* Left: Customize + Prompt Length */}
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => setShowCustomize(true)}
+                className="p-2 rounded border border-dark-border text-dark-text-muted hover:text-dark-text hover:border-dark-primary transition-colors"
+                title="自定义"
+              >
+                <Settings size={20} />
+              </button>
+              <div className="flex flex-col items-center text-xs text-dark-text-muted">
+                <span>提示词长度</span>
+                <span className="font-medium text-dark-text">{promptCharCount.toLocaleString()}</span>
+              </div>
+            </div>
+
+            {/* Middle: Generate */}
+            <div>
+              {!isGenerating ? (
+                <button
+                  onClick={handleGenerateEdit}
+                  className="p-2 rounded bg-dark-primary text-white hover:bg-dark-primary/80 transition-colors"
+                  title={initialOriginalText ? '自动编辑' : 'AI 生成'}
+                >
+                  <Wand2 size={20} />
+                </button>
+              ) : (
+                <button
+                  onClick={handleGenerateEdit}
+                  className="p-2 rounded border border-red-500 text-red-500 hover:bg-red-500 hover:text-white transition-colors"
+                  title="停止生成"
+                >
+                  <Square size={20} />
+                </button>
+              )}
+            </div>
+
+            {/* Right: Revert + Accept */}
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleRevert}
+                className="p-2 rounded border border-red-500 text-red-500 hover:bg-red-500 hover:text-white transition-colors"
+                title="还原"
+              >
+                <RotateCcw size={20} />
+              </button>
+              <button
+                onClick={handleAccept}
+                disabled={!currentEditedText.trim()}
+                className="p-2 rounded bg-green-600 text-white hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                title="接受"
+              >
+                <Check size={20} />
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Desktop Layout (unchanged)
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
       <div className="bg-dark-surface rounded-lg shadow-xl border border-dark-border max-w-7xl w-full mx-4 h-[85vh] flex flex-col">

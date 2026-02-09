@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, Save, MessageCircle, Settings, Palette, Pencil, FileText, Wand2, Monitor } from 'lucide-react';
+import { ArrowLeft, Save, MessageCircle, Settings, Palette, Pencil, FileText, Monitor } from 'lucide-react';
 import { worksApi, chaptersApi } from '../services/api';
 import { useWorkStore } from '../stores/useWorkStore';
 import { useUIStore } from '../stores/useUIStore';
@@ -20,7 +20,7 @@ import { CreateStyleModal } from '../components/modals/CreateStyleModal';
 import type { Work } from '../types';
 
 // Mobile tab type
-type MobileTab = 'editor' | 'chat' | 'autoedit';
+type MobileTab = 'editor' | 'chat';
 
 export const EditorPage: React.FC = () => {
   const { workId, chapterId } = useParams<{ workId: string; chapterId: string }>();
@@ -54,8 +54,6 @@ export const EditorPage: React.FC = () => {
 
   // Mobile-specific state
   const [mobileTab, setMobileTab] = useState<MobileTab>('editor');
-  const [autoEditOutput, setAutoEditOutput] = useState<string>('');
-  const [hasAutoEditOutput, setHasAutoEditOutput] = useState(false);
   
   const lastSaveContentRef = useRef('');
   const autoSaveTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -212,35 +210,6 @@ export const EditorPage: React.FC = () => {
       handleCancelEditTitle();
     }
   };
-
-  // Handle auto edit output for mobile tab
-  const handleAutoEditOutput = useCallback((output: string) => {
-    setAutoEditOutput(output);
-    setHasAutoEditOutput(!!output);
-    if (output && isMobile) {
-      setMobileTab('autoedit');
-    }
-  }, [isMobile]);
-
-  // Handle accepting auto edit output on mobile
-  const handleAcceptAutoEdit = useCallback(() => {
-    if (autoEditOutput) {
-      // Insert at cursor position or append to content
-      const newContent = editorContent + autoEditOutput;
-      setEditorContent(newContent);
-      handleContentChange(newContent);
-      setAutoEditOutput('');
-      setHasAutoEditOutput(false);
-      setMobileTab('editor');
-    }
-  }, [autoEditOutput, editorContent, handleContentChange]);
-
-  // Handle rejecting auto edit output on mobile
-  const handleRejectAutoEdit = useCallback(() => {
-    setAutoEditOutput('');
-    setHasAutoEditOutput(false);
-    setMobileTab('editor');
-  }, []);
 
   // Cleanup timer on unmount
   useEffect(() => {
@@ -416,7 +385,6 @@ export const EditorPage: React.FC = () => {
             work={currentWorkData}
             chapter={currentChapterData}
             onSave={handleManualSave}
-            onAutoEditOutput={handleAutoEditOutput}
           />
         </div>
 
@@ -450,7 +418,6 @@ export const EditorPage: React.FC = () => {
               work={currentWorkData}
               chapter={currentChapterData}
               onSave={handleManualSave}
-              onAutoEditOutput={handleAutoEditOutput}
               isMobile={true}
             />
           </div>
@@ -474,49 +441,6 @@ export const EditorPage: React.FC = () => {
           </div>
         )}
 
-        {/* AutoEdit Tab Content */}
-        {mobileTab === 'autoedit' && (
-          <div className="flex-1 flex flex-col min-h-0 bg-dark-surface">
-            <div className="flex-shrink-0 px-4 py-3 border-b border-dark-border">
-              <div className="flex items-center gap-2 text-sm font-medium text-dark-text">
-                <Wand2 size={16} />
-                自动编辑结果
-              </div>
-            </div>
-            <div className="flex-1 overflow-y-auto p-4">
-              {hasAutoEditOutput ? (
-                <div className="chinese-text text-dark-text whitespace-pre-wrap leading-relaxed">
-                  {autoEditOutput}
-                </div>
-              ) : (
-                <div className="flex flex-col items-center justify-center h-full text-dark-text-muted">
-                  <Wand2 size={48} className="mb-4 opacity-50" />
-                  <p>暂无自动编辑内容</p>
-                  <p className="text-xs mt-2">在编辑器中选择文本并使用自动编辑功能</p>
-                </div>
-              )}
-            </div>
-            {hasAutoEditOutput && (
-              <div className="flex-shrink-0 p-4 border-t border-dark-border bg-dark-bg">
-                <div className="flex gap-3">
-                  <Button
-                    variant="outline"
-                    className="flex-1 text-red-400 border-red-400 hover:bg-red-400 hover:text-white"
-                    onClick={handleRejectAutoEdit}
-                  >
-                    放弃
-                  </Button>
-                  <Button
-                    className="flex-1 bg-green-600 hover:bg-green-700"
-                    onClick={handleAcceptAutoEdit}
-                  >
-                    接受并插入
-                  </Button>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
       </div>
 
       {/* Mobile Bottom Tab Bar */}
@@ -543,20 +467,6 @@ export const EditorPage: React.FC = () => {
           >
             <MessageCircle size={20} />
             <span className="text-xs">AI助手</span>
-          </button>
-          <button
-            onClick={() => setMobileTab('autoedit')}
-            className={`flex-1 flex flex-col items-center justify-center gap-1 transition-colors relative ${
-              mobileTab === 'autoedit' 
-                ? 'text-dark-primary bg-dark-primary/10' 
-                : 'text-dark-text-muted'
-            }`}
-          >
-            <Wand2 size={20} />
-            <span className="text-xs">自动编辑</span>
-            {hasAutoEditOutput && (
-              <span className="absolute top-2 right-1/4 w-2 h-2 bg-green-500 rounded-full" />
-            )}
           </button>
         </div>
       </div>
