@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Sparkles, Check } from 'lucide-react';
+import { X, Sparkles, Check, RefreshCw } from 'lucide-react';
 import { aiApi } from '../../services/api';
 import { Button } from '../ui/Button';
 import { Textarea } from '../ui/Input';
@@ -283,14 +283,26 @@ export const AutoDescribeModal: React.FC<AutoDescribeModalProps> = ({
               取消
             </Button>
             {generatedDescription && !isGenerating ? (
-              <Button
-                type="button"
-                onClick={handleApply}
-                className="flex items-center gap-2"
-              >
-                <Check size={16} />
-                应用描述
-              </Button>
+              <>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={handleGenerate}
+                  disabled={selectedChapterIds.length === 0 || isLoadingChapters}
+                  className="flex items-center gap-2"
+                >
+                  <RefreshCw size={16} />
+                  重新生成
+                </Button>
+                <Button
+                  type="button"
+                  onClick={handleApply}
+                  className="flex items-center gap-2"
+                >
+                  <Check size={16} />
+                  应用描述
+                </Button>
+              </>
             ) : (
               <Button
                 type="button"
