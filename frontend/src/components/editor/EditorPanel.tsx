@@ -1666,6 +1666,7 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
         onAccept={handleAutoEditAccept}
         onRevert={handleAutoEditRevert}
         onGenerateEdit={handleAutoEditGenerate}
+        isMobile={isMobile}
       />
       </div>
     </>

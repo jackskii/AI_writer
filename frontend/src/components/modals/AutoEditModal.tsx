@@ -21,6 +21,7 @@ interface AutoEditModalProps {
     onError: (error: string) => void,
     signal?: AbortSignal
   ) => Promise<void>;
+  isMobile?: boolean;
 }
 
 export interface AutoEditContext {
@@ -46,10 +47,12 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
   chapter,
   onAccept,
   onRevert,
-  onGenerateEdit
+  onGenerateEdit,
+  isMobile: isMobileProp
 }) => {
-  // Mobile detection
-  const isMobile = useMobile();
+  // Mobile detection - use prop if provided, otherwise detect
+  const isMobileHook = useMobile();
+  const isMobile = isMobileProp !== undefined ? isMobileProp : isMobileHook;
 
   // State for text boxes
   const [originalText, setOriginalText] = useState(initialOriginalText);
