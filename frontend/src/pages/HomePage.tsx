@@ -89,8 +89,8 @@ export const HomePage: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-dark-bg">
-      {/* Header */}
-      <header className="border-b border-dark-border">
+      {/* Header - Desktop */}
+      <header className="border-b border-dark-border hidden md:block">
         <div className="max-w-7xl mx-auto px-6 py-4">
           <div className="flex items-center justify-between">
             <div>
@@ -124,24 +124,66 @@ export const HomePage: React.FC = () => {
         </div>
       </header>
 
+      {/* Header - Mobile */}
+      <header className="border-b border-dark-border md:hidden">
+        {/* Title Row */}
+        <div className="px-4 pt-4 pb-2 text-center border-b border-dark-border/50">
+          <h1 className="text-xl font-bold text-dark-text">AI 小说写作助手</h1>
+          <p className="text-dark-text-muted text-sm">智能写作，创意无限</p>
+        </div>
+        
+        {/* Actions Row */}
+        <div className="px-4 py-3 flex items-center justify-between">
+          <Button 
+            onClick={handleCreateWork} 
+            size="lg"
+            className="flex items-center gap-2 px-6 py-3 text-base"
+          >
+            <Plus size={22} />
+            新建作品
+          </Button>
+          
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setIsStyleManagerOpen(true)}
+              className="p-3"
+              title="风格"
+            >
+              <Palette size={20} />
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => setIsSettingsModalOpen(true)}
+              className="p-3"
+              title="设置"
+            >
+              <Settings size={20} />
+            </Button>
+            <UserMenu iconOnly />
+          </div>
+        </div>
+      </header>
+
       {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-6 py-8">
+      <main className="max-w-7xl mx-auto px-4 md:px-6 py-6 md:py-8">
         {!worksList || worksList.length === 0 ? (
           // Empty State
-          <div className="text-center py-16">
-            <BookOpen size={64} className="mx-auto text-dark-text-muted mb-4" />
-            <h3 className="text-xl font-semibold text-dark-text mb-2">开始您的创作之旅</h3>
-            <p className="text-dark-text-muted mb-6 max-w-md mx-auto">
+          <div className="text-center py-12 md:py-16">
+            <BookOpen size={48} className="mx-auto text-dark-text-muted mb-4 md:hidden" />
+            <BookOpen size={64} className="mx-auto text-dark-text-muted mb-4 hidden md:block" />
+            <h3 className="text-lg md:text-xl font-semibold text-dark-text mb-2">开始您的创作之旅</h3>
+            <p className="text-dark-text-muted mb-6 max-w-md mx-auto text-sm md:text-base px-4">
               创建您的第一部作品，享受AI驱动的智能写作体验
             </p>
-            <Button onClick={handleCreateWork} size="lg" className="flex items-center gap-2">
+            <Button onClick={handleCreateWork} size="lg" className="flex items-center gap-2 mx-auto">
               <Plus size={20} />
               创建第一部作品
             </Button>
           </div>
         ) : (
           // Works Grid
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 md:gap-6">
             {worksList.map((work) => (
               <Card key={work.id} className="hover:border-dark-primary transition-colors cursor-pointer">
                 <CardHeader>
