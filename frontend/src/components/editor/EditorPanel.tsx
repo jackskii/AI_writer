@@ -1491,10 +1491,11 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
       </div>
 
       {/* Bottom Panel - Stats and AI Tools */}
-      {/* On mobile: fixed position above the tab bar (60px) and keyboard */}
+      {/* On mobile: fixed position. When keyboard is up, position directly above keyboard. */}
+      {/* When keyboard is down, position above the tab bar (60px). */}
       <div 
         className={`flex-shrink-0 border-t border-dark-border bg-dark-surface ${isMobile ? 'fixed left-0 right-0 z-20' : ''}`}
-        style={isMobile ? { bottom: `${60 + keyboardHeight}px` } : undefined}
+        style={isMobile ? { bottom: `${keyboardHeight > 0 ? keyboardHeight : 60}px` } : undefined}
       >
         {/* Stats Bar - Fixed height */}
         <div className={`py-2 border-b border-dark-border h-[48px] flex items-center ${isMobile ? 'px-3' : 'px-6'}`}>

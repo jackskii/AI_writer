@@ -359,7 +359,8 @@ export const WorkDetailPage: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-dark-bg">
-      <header className="border-b border-dark-border">
+      {/* Desktop Header */}
+      <header className="border-b border-dark-border hidden md:block">
         <div className="max-w-7xl mx-auto px-6 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
@@ -385,7 +386,61 @@ export const WorkDetailPage: React.FC = () => {
         </div>
       </header>
 
-      <div className="border-b border-dark-border">
+      {/* Mobile Header - Two Rows */}
+      <header className="border-b border-dark-border md:hidden">
+        {/* Row 1: Back button, Title, Word count, User menu */}
+        <div className="px-3 py-2">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2 flex-1 min-w-0">
+              <button onClick={() => navigate('/')} className="flex-shrink-0 p-1 text-dark-text-muted hover:text-dark-text">
+                <ArrowLeft size={20} />
+              </button>
+              <div className="min-w-0 flex-1">
+                {isEditingTitle ? (
+                  <input type="text" value={titleContent} onChange={(e) => setTitleContent(e.target.value)} onBlur={handleSaveTitle} onKeyDown={handleTitleKeyDown} className="text-lg font-bold text-dark-text bg-transparent border-b-2 border-dark-primary focus:outline-none w-full" autoFocus />
+                ) : (
+                  <h1 className="text-lg font-bold text-dark-text truncate" onClick={handleEditTitle}>{work.title}</h1>
+                )}
+                <p className="text-xs text-dark-text-muted">{work.word_count.toLocaleString()} 字 · {work.chapter_count} 章</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-1 flex-shrink-0">
+              <button onClick={() => setIsStyleManagerOpen(true)} className="p-2 text-dark-text-muted hover:text-dark-text">
+                <Palette size={18} />
+              </button>
+              <button onClick={() => setIsSettingsModalOpen(true)} className="p-2 text-dark-text-muted hover:text-dark-text">
+                <Settings size={18} />
+              </button>
+              <UserMenu />
+            </div>
+          </div>
+        </div>
+        {/* Row 2: Tabs and action button */}
+        <div className="px-2 pb-1 flex items-center justify-between">
+          <nav className="flex">
+            {tabs.map(({ id, label, icon: Icon }) => (
+              <button key={id} onClick={() => setActiveTab(id)} className={`flex items-center gap-1 py-2 px-2 text-xs border-b-2 transition-colors ${activeTab === id ? 'border-dark-primary text-dark-primary' : 'border-transparent text-dark-text-muted'}`}>
+                <Icon size={14} />{label}
+              </button>
+            ))}
+          </nav>
+          <div className="flex items-center gap-1">
+            {activeTab === 'chapters' && (
+              <button onClick={handleCreateAct} className="flex items-center gap-1 px-2 py-1 text-xs bg-dark-primary text-white rounded">
+                <Plus size={12} />新卷
+              </button>
+            )}
+            {activeTab === 'lore' && (
+              <button onClick={handleCreateFaction} className="flex items-center gap-1 px-2 py-1 text-xs bg-dark-primary text-white rounded">
+                <Plus size={12} />阵营
+              </button>
+            )}
+          </div>
+        </div>
+      </header>
+
+      {/* Desktop Tab Bar */}
+      <div className="border-b border-dark-border hidden md:block">
         <div className="max-w-7xl mx-auto px-6">
           <div className="flex items-center justify-between">
             <nav className="flex space-x-8">

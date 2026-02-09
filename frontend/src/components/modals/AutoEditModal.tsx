@@ -643,11 +643,11 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
           <>
             {/* Backdrop */}
             <div 
-              className="absolute inset-0 z-50 bg-black/40"
+              className="fixed inset-0 z-[60] bg-black/40"
               onClick={() => setShowCustomize(false)}
             />
             {/* Bottom Sheet */}
-            <div className="absolute bottom-0 left-0 right-0 z-60 bg-dark-surface flex flex-col h-[66vh] rounded-t-2xl">
+            <div className="fixed bottom-0 left-0 right-0 z-[70] bg-dark-surface flex flex-col h-[66vh] rounded-t-2xl">
               <div className="flex items-center justify-between px-4 py-3 border-b border-dark-border flex-shrink-0">
                 <h3 className="text-lg font-medium text-dark-text">自定义上下文</h3>
                 <button
