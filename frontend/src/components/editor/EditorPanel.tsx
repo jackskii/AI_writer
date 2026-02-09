@@ -6,7 +6,6 @@ import { Button } from '../ui/Button';
 import { Textarea } from '../ui/Input';
 import { LoadingButton } from '../ui/Loading';
 import { useUIStore } from '../../stores/useUIStore';
-import { useKeyboardHeight } from '../../hooks/useKeyboardHeight';
 import { aiApi, notesApi, autoEditApi } from '../../services/api';
 import { DeleteNoteConfirmDialog } from '../modals/DeleteNoteConfirmDialog';
 import { AutoEditModal, type AutoEditContext } from '../modals/AutoEditModal';
@@ -40,7 +39,6 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
 }) => {
   // ALL HOOKS MUST BE CALLED BEFORE ANY EARLY RETURNS
   const editorRef = useRef<HTMLTextAreaElement | null>(null);
-  const keyboardHeight = useKeyboardHeight();
   const previousContentRef = useRef(content);
   const highlightTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isManualUpdateRef = useRef(false); // Flag to prevent double-adjustment during version switching
@@ -1491,11 +1489,10 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
       </div>
 
       {/* Bottom Panel - Stats and AI Tools */}
-      {/* On mobile: fixed position. When keyboard is up, position directly above keyboard. */}
-      {/* When keyboard is down, position above the tab bar (60px). */}
+      {/* On mobile: fixed at bottom, above tab bar (60px) */}
       <div 
         className={`flex-shrink-0 border-t border-dark-border bg-dark-surface ${isMobile ? 'fixed left-0 right-0 z-20' : ''}`}
-        style={isMobile ? { bottom: `${keyboardHeight > 0 ? keyboardHeight : 60}px` } : undefined}
+        style={isMobile ? { bottom: '60px' } : undefined}
       >
         {/* Stats Bar - Fixed height */}
         <div className={`py-2 border-b border-dark-border h-[48px] flex items-center ${isMobile ? 'px-3' : 'px-6'}`}>

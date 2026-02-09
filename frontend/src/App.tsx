@@ -11,7 +11,8 @@ import { useAuthStore } from './stores/useAuthStore';
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      staleTime: 0, // No stale time - always refetch from server
+      staleTime: 60 * 1000, // 60 seconds - show cached data instantly, refresh in background
+      gcTime: 5 * 60 * 1000, // 5 minutes - keep unused data in cache
       retry: 1,
     },
   },
