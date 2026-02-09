@@ -8,7 +8,6 @@ import { worksApi, chaptersApi } from '../services/api';
 import { useWorkStore } from '../stores/useWorkStore';
 import { useUIStore } from '../stores/useUIStore';
 import { useMobile, toggleDesktopMode, isDesktopModeForced } from '../hooks/useMobile';
-import { useKeyboardHeight } from '../hooks/useKeyboardHeight';
 import { Button } from '../components/ui/Button';
 import { LoadingScreen } from '../components/ui/Loading';
 import { UserMenu } from '../components/ui/UserMenu';
@@ -44,7 +43,6 @@ export const EditorPage: React.FC = () => {
 
   // Mobile detection
   const isMobile = useMobile();
-  const keyboardHeight = useKeyboardHeight();
 
   // Use local state for editor content instead of problematic Zustand store
   const [editorContent, setEditorContent] = useState('');
@@ -446,10 +444,7 @@ export const EditorPage: React.FC = () => {
       </div>
 
       {/* Mobile Bottom Tab Bar */}
-      <div 
-        className="fixed left-0 right-0 md:hidden bg-dark-surface border-t border-dark-border safe-area-bottom"
-        style={{ bottom: `${keyboardHeight}px` }}
-      >
+      <div className="fixed bottom-0 left-0 right-0 md:hidden bg-dark-surface border-t border-dark-border safe-area-bottom">
         <div className="flex h-[60px]">
           <button
             onClick={() => setMobileTab('editor')}

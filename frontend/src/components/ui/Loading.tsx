@@ -40,6 +40,7 @@ interface LoadingButtonProps {
   children: React.ReactNode;
   className?: string;
   onClick?: () => void;
+  onMouseDown?: (e: React.MouseEvent) => void;
   disabled?: boolean;
   variant?: 'primary' | 'outline';
 }
@@ -49,6 +50,7 @@ export const LoadingButton: React.FC<LoadingButtonProps> = ({
   children,
   className = '',
   onClick,
+  onMouseDown,
   disabled = false,
   variant = 'primary'
 }) => {
@@ -61,6 +63,7 @@ export const LoadingButton: React.FC<LoadingButtonProps> = ({
       className={`inline-flex items-center justify-center px-4 py-2 rounded-lg focus-ring disabled:opacity-50 ${variantClasses} ${className}`}
       disabled={isLoading || disabled}
       onClick={onClick}
+      onMouseDown={onMouseDown}
     >
       {isLoading && <LoadingSpinner size="sm" className="mr-2" />}
       {children}

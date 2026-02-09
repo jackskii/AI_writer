@@ -1513,6 +1513,7 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
                 <>
                   <Button
                     size="sm"
+                    onMouseDown={(e) => e.preventDefault()}
                     onClick={handleStartCreateNote}
                     className="flex items-center gap-1 px-3 py-1 text-xs"
                     variant="outline"
@@ -1522,6 +1523,7 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
                   </Button>
                   <LoadingButton
                     isLoading={isAISuggestLoading}
+                    onMouseDown={(e) => e.preventDefault()}
                     onClick={handleAISuggest}
                     className="flex items-center gap-1 px-3 py-1 text-xs"
                   >
@@ -1534,8 +1536,12 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
               )}
 
               {/* Auto Edit button - always in same position, same text */}
+              {/* Use onMouseDown with preventDefault to prevent textarea blur which clears selection */}
               <LoadingButton
                 isLoading={isAutoEditLoading}
+                onMouseDown={(e) => {
+                  e.preventDefault(); // Prevent textarea from losing focus/selection
+                }}
                 onClick={handleAutoEdit}
                 className="flex items-center gap-1 px-3 py-1 text-xs"
               >
