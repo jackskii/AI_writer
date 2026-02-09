@@ -589,35 +589,38 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
                 </div>
               )}
             </div>
-            {/* Generated text box - readable width, scrollable */}
-            <div className="flex justify-center">
-              <div className="w-full max-w-[85%]">
-                <Textarea
-                  value={currentEditedText}
-                  onChange={(e) => setCurrentEditedText(e.target.value)}
-                  className="font-mono text-sm resize-none w-full leading-relaxed"
-                  style={{ minHeight: '200px', maxHeight: '300px' }}
-                  placeholder={isGenerating ? "生成中..." : "编辑文本将在这里显示..."}
-                  disabled={isGenerating}
-                />
-              </div>
-            </div>
+            {/* Generated text box - full width, scrollable */}
+            <Textarea
+              value={currentEditedText}
+              onChange={(e) => setCurrentEditedText(e.target.value)}
+              className="font-mono text-sm resize-none w-full leading-relaxed"
+              style={{ minHeight: '150px' }}
+              placeholder={isGenerating ? "生成中..." : "编辑文本将在这里显示..."}
+              disabled={isGenerating}
+            />
           </div>
         </div>
 
-        {/* Mobile Customize Overlay */}
+        {/* Mobile Customize Overlay - Bottom Sheet Style (2/3 height) */}
         {showCustomize && (
-          <div className="absolute inset-0 z-60 bg-dark-surface flex flex-col">
-            <div className="flex items-center justify-between px-4 py-3 border-b border-dark-border flex-shrink-0">
-              <h3 className="text-lg font-medium text-dark-text">自定义上下文</h3>
-              <button
-                onClick={() => setShowCustomize(false)}
-                className="p-2 text-dark-text-muted hover:text-dark-text"
-              >
-                <X size={22} />
-              </button>
-            </div>
-            <div className="flex-1 overflow-y-auto p-4">
+          <>
+            {/* Backdrop */}
+            <div 
+              className="absolute inset-0 z-50 bg-black/40"
+              onClick={() => setShowCustomize(false)}
+            />
+            {/* Bottom Sheet */}
+            <div className="absolute bottom-0 left-0 right-0 z-60 bg-dark-surface flex flex-col h-[66vh] rounded-t-2xl">
+              <div className="flex items-center justify-between px-4 py-3 border-b border-dark-border flex-shrink-0">
+                <h3 className="text-lg font-medium text-dark-text">自定义上下文</h3>
+                <button
+                  onClick={() => setShowCustomize(false)}
+                  className="p-2 text-dark-text-muted hover:text-dark-text"
+                >
+                  <X size={22} />
+                </button>
+              </div>
+              <div className="flex-1 overflow-y-auto p-4">
               {/* Model Selection */}
               <div className="mb-6">
                 <h4 className="text-sm font-medium text-dark-text mb-2">AI 模型</h4>
@@ -766,6 +769,7 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
               </Button>
             </div>
           </div>
+          </>
         )}
 
         {/* Mobile Bottom Action Bar - Icon Only */}

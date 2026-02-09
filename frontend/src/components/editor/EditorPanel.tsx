@@ -6,6 +6,7 @@ import { Button } from '../ui/Button';
 import { Textarea } from '../ui/Input';
 import { LoadingButton } from '../ui/Loading';
 import { useUIStore } from '../../stores/useUIStore';
+import { useKeyboardHeight } from '../../hooks/useKeyboardHeight';
 import { aiApi, notesApi, autoEditApi } from '../../services/api';
 import { DeleteNoteConfirmDialog } from '../modals/DeleteNoteConfirmDialog';
 import { AutoEditModal, type AutoEditContext } from '../modals/AutoEditModal';
@@ -39,6 +40,7 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
 }) => {
   // ALL HOOKS MUST BE CALLED BEFORE ANY EARLY RETURNS
   const editorRef = useRef<HTMLTextAreaElement | null>(null);
+  const keyboardHeight = useKeyboardHeight();
   const previousContentRef = useRef(content);
   const highlightTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isManualUpdateRef = useRef(false); // Flag to prevent double-adjustment during version switching
@@ -1184,9 +1186,9 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
         }
       `}</style>
 
-      <div className="h-full flex flex-col bg-dark-bg">
+      <div className={`h-full flex flex-col bg-dark-bg ${isMobile ? 'pb-[60px]' : ''}`}>
       {/* Editor Area with Inline Notes */}
-      <div className="flex-1 flex">
+      <div className="flex-1 flex overflow-y-auto">
         {/* Notes Margin - Hidden on mobile */}
         <div className={`w-80 border-r border-gray-300 bg-gray-50 dark:bg-dark-surface dark:border-dark-border ${isMobile ? 'hidden' : 'hidden md:block'}`}>
           {/* Notes Header */}
@@ -1489,7 +1491,11 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
       </div>
 
       {/* Bottom Panel - Stats and AI Tools */}
-      <div className={`flex-shrink-0 border-t border-dark-border bg-dark-surface ${isMobile ? 'sticky bottom-0 z-20' : ''}`}>
+      {/* On mobile: fixed position above the tab bar (60px) and keyboard */}
+      <div 
+        className={`flex-shrink-0 border-t border-dark-border bg-dark-surface ${isMobile ? 'fixed left-0 right-0 z-20' : ''}`}
+        style={isMobile ? { bottom: `${60 + keyboardHeight}px` } : undefined}
+      >
         {/* Stats Bar - Fixed height */}
         <div className={`py-2 border-b border-dark-border h-[48px] flex items-center ${isMobile ? 'px-3' : 'px-6'}`}>
           <div className="flex items-center justify-between text-sm text-dark-text-muted w-full">
