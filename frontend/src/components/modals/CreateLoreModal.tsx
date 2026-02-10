@@ -244,8 +244,8 @@ export const CreateLoreModal: React.FC<CreateLoreModalProps> = ({
               />
             </div>
 
-            {/* Faction Selection - only show for non-worldbuilding entries */}
-            {availableFactions.length > 0 && !isWorldbuildingEntry && (
+            {/* Faction Selection - always show for non-worldbuilding entries */}
+            {!isWorldbuildingEntry && (
               <div className="space-y-2">
                 <label className="block text-sm font-medium text-dark-text">
                   所属阵营
@@ -270,22 +270,23 @@ export const CreateLoreModal: React.FC<CreateLoreModalProps> = ({
                   {/* Dropdown menu - opens downward */}
                   {isFactionDropdownOpen && (
                     <div className="absolute top-full left-0 w-full mt-1 py-1 bg-dark-surface border border-dark-border rounded-lg shadow-lg max-h-48 overflow-y-auto z-[100]">
-                      {availableFactions.map((faction) => (
-                        <button
-                          key={faction.id}
-                          type="button"
-                          onClick={() => toggleFaction(faction.id)}
-                          className="w-full flex items-center justify-between px-3 py-2 text-sm text-left hover:bg-dark-bg transition-colors"
-                        >
-                          <span className="text-dark-text">{faction.name}</span>
-                          {selectedFactions.includes(faction.id) && (
-                            <Check size={16} className="text-dark-primary" />
-                          )}
-                        </button>
-                      ))}
-                      {availableFactions.length === 0 && (
+                      {availableFactions.length > 0 ? (
+                        availableFactions.map((faction) => (
+                          <button
+                            key={faction.id}
+                            type="button"
+                            onClick={() => toggleFaction(faction.id)}
+                            className="w-full flex items-center justify-between px-3 py-2 text-sm text-left hover:bg-dark-bg transition-colors"
+                          >
+                            <span className="text-dark-text">{faction.name}</span>
+                            {selectedFactions.includes(faction.id) && (
+                              <Check size={16} className="text-dark-primary" />
+                            )}
+                          </button>
+                        ))
+                      ) : (
                         <div className="px-3 py-2 text-sm text-dark-text-muted">
-                          没有可选阵营
+                          暂无自定义阵营
                         </div>
                       )}
                     </div>

@@ -4,6 +4,7 @@ export interface Work {
   id: number;
   title: string;
   synopsis: string;
+  lore_entry_template?: string;
   created_at: string;
   updated_at: string;
   word_count: number;

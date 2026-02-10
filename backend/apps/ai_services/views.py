@@ -639,6 +639,14 @@ def get_work_for_user(work_id, user):
 
 
 @sync_to_async
+def get_work_lore_template(work):
+    """Get the custom lore entry template for a work (async version)"""
+    # Refresh from db to ensure we have the latest value
+    work.refresh_from_db()
+    return work.lore_entry_template or ''
+
+
+@sync_to_async
 def search_chapters_with_entry(work, entry_name, chapter_ids=None):
     """Search chapters containing entry name (async version)
     
@@ -789,6 +797,9 @@ async def ai_auto_describe_entry(request):
             status=404
         )
 
+    # Get custom template for this work (if set)
+    custom_template = await get_work_lore_template(work)
+
     async def generate_stream():
         """生成SSE数据流 (async generator)"""
         try:
@@ -815,7 +826,8 @@ async def ai_auto_describe_entry(request):
                     context_text,
                     additional_context=additional_context,
                     is_update=is_update,
-                    original_description=original_description
+                    original_description=original_description,
+                    custom_template=custom_template
                 ):
                     accumulated_description += chunk
                     yield f'data: {json.dumps({"type": "chunk", "content": chunk})}\n\n'
@@ -837,3 +849,11 @@ async def ai_auto_describe_entry(request):
     response['X-Accel-Buffering'] = 'no'
     response['Access-Control-Allow-Origin'] = '*'
     return response
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_default_lore_template(request):
+    """获取默认的条目生成模板"""
+    default_template = prompts.get_default_lore_entry_template()
+    return Response({'template': default_template})

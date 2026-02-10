@@ -300,7 +300,7 @@ class ContextBuilder:
 
         summaries = []
         for ch in reversed(list(chapters)):
-            summaries.append(f"第{ch.chapter_number}章《{ch.title}》摘要：{ch.summary}")
+            summaries.append(f"第{ch.chapter_number}章《{ch.title}》：\n{ch.summary}")
 
         return summaries
 
@@ -317,7 +317,7 @@ class ContextBuilder:
         # Get last 3 chapter summaries
         recent_summaries = ContextBuilder._get_recent_chapter_summaries(chapter, count=3)
         if recent_summaries:
-            context_parts.append("前文摘要：\n" + "\n".join(recent_summaries))
+            context_parts.append("前文摘要：\n\n" + "\n\n".join(recent_summaries))
 
         return "\n\n".join(context_parts)
 
@@ -588,7 +588,8 @@ class AIService:
         context_text: str,
         additional_context: str = "",
         is_update: bool = False,
-        original_description: str = ""
+        original_description: str = "",
+        custom_template: str = ""
     ) -> AsyncGenerator[str, None]:
         """AI auto-describe entry function - streaming version
         
@@ -598,6 +599,7 @@ class AIService:
             additional_context: Optional additional context from user
             is_update: Whether this is updating an existing description
             original_description: The original description (for update mode)
+            custom_template: Optional custom template for the work
         """
         logger.debug(f"Starting AI auto-describe stream for entry: {entry_name} (update={is_update})")
 
@@ -608,7 +610,8 @@ class AIService:
                 context_text,
                 additional_context=additional_context,
                 is_update=is_update,
-                original_description=original_description
+                original_description=original_description,
+                custom_template=custom_template
             )
 
             messages = [

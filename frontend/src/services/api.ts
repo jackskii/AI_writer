@@ -299,6 +299,9 @@ export const aiApi = {
   // Get auto-edit prefills
   getPrefills: () => api.get<{ prefills: Record<string, string> }>('/ai/prefills/'),
 
+  // Get default lore entry template
+  getDefaultLoreTemplate: () => api.get<{ template: string }>('/ai/lore-template/default/'),
+
   // Streaming version of auto edit
   autoEditStream: async (
     workId: number,

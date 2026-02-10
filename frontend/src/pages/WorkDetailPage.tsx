@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, Plus, Edit3, Settings, Palette, BookOpen, Layers } from 'lucide-react';
+import { ArrowLeft, Plus, Edit3, Settings, Palette, BookOpen, Layers, FileText } from 'lucide-react';
 import { worksApi, actsApi, chaptersApi, loreApi, factionsApi } from '../services/api';
 import { useWorkStore } from '../stores/useWorkStore';
 import { Button } from '../components/ui/Button';
@@ -24,6 +24,7 @@ import { DeleteActConfirmDialog } from '../components/modals/DeleteActConfirmDia
 import { ActSection } from '../components/chapters/ActSection';
 import { WorkChatPanel } from '../components/work/WorkChatPanel';
 import { FactionSection } from '../components/lore/FactionSection';
+import { LoreTemplateModal } from '../components/modals/LoreTemplateModal';
 import type { Work, Act, Chapter, Faction, LoreEntry } from '../types';
 
 export const WorkDetailPage: React.FC = () => {
@@ -38,6 +39,7 @@ export const WorkDetailPage: React.FC = () => {
   const [deletingLoreEntry, setDeletingLoreEntry] = useState<LoreEntry | null>(null);
   const [isCreateFactionModalOpen, setIsCreateFactionModalOpen] = useState(false);
   const [editingFaction, setEditingFaction] = useState<Faction | null>(null);
+  const [isLoreTemplateModalOpen, setIsLoreTemplateModalOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [isStyleManagerOpen, setIsStyleManagerOpen] = useState(false);
   const [isCreateStyleOpen, setIsCreateStyleOpen] = useState(false);
@@ -384,7 +386,6 @@ export const WorkDetailPage: React.FC = () => {
             <div className="flex items-center gap-2">
               <Button variant="outline" size="sm" onClick={() => setIsStyleManagerOpen(true)} className="flex items-center gap-2"><Palette size={16} />风格</Button>
               <Button variant="outline" size="sm" onClick={() => setIsSettingsModalOpen(true)} className="flex items-center gap-2"><Settings size={16} />设置</Button>
-              {activeTab === 'lore' && <Button onClick={handleCreateFaction} size="sm" className="flex items-center gap-2"><Plus size={16} />新建阵营</Button>}
               <UserMenu />
             </div>
           </div>
@@ -436,9 +437,14 @@ export const WorkDetailPage: React.FC = () => {
               </button>
             )}
             {activeTab === 'lore' && (
-              <button onClick={handleCreateFaction} className="flex items-center gap-1 px-2 py-1 text-xs bg-dark-primary text-white rounded">
-                <Plus size={12} />阵营
-              </button>
+              <>
+                <button onClick={() => setIsLoreTemplateModalOpen(true)} className="flex items-center gap-1 px-2 py-1 text-xs border border-dark-border text-dark-text rounded">
+                  <FileText size={12} />模板
+                </button>
+                <button onClick={handleCreateFaction} className="flex items-center gap-1 px-2 py-1 text-xs bg-dark-primary text-white rounded">
+                  <Plus size={12} />阵营
+                </button>
+              </>
             )}
           </div>
         </div>
@@ -456,6 +462,12 @@ export const WorkDetailPage: React.FC = () => {
               ))}
             </nav>
             {activeTab === 'chapters' && <Button onClick={handleCreateAct} size="sm" className="flex items-center gap-2 my-2"><Plus size={16} />添加新卷</Button>}
+            {activeTab === 'lore' && (
+              <div className="flex items-center gap-2 my-2">
+                <Button variant="outline" size="sm" onClick={() => setIsLoreTemplateModalOpen(true)} className="flex items-center gap-2"><FileText size={16} />条目模板</Button>
+                <Button onClick={handleCreateFaction} size="sm" className="flex items-center gap-2"><Plus size={16} />新建阵营</Button>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -536,6 +548,7 @@ export const WorkDetailPage: React.FC = () => {
       <DeleteLoreConfirmDialog loreEntry={deletingLoreEntry} isOpen={!!deletingLoreEntry} onClose={() => setDeletingLoreEntry(null)} onConfirm={handleConfirmDeleteLoreEntry} isDeleting={deleteLoreEntryMutation.isPending} />
       <EditActNameModal isOpen={!!editActNameModal} onClose={() => setEditActNameModal(null)} onSave={handleSaveActName} currentName={editActNameModal?.currentName} actNumber={editActNameModal?.act || 1} />
       <DeleteActConfirmDialog act={deleteActModal?.act || null} actName={deleteActModal?.actName} isOpen={!!deleteActModal} onClose={() => setDeleteActModal(null)} onConfirm={handleConfirmDeleteAct} isDeleting={deleteActMutation.isPending} />
+      <LoreTemplateModal work={work} isOpen={isLoreTemplateModalOpen} onClose={() => setIsLoreTemplateModalOpen(false)} />
     </div>
   );
 };
