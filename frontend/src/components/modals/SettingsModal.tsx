@@ -40,6 +40,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [hasDeepseekApiKey, setHasDeepseekApiKey] = useState(false);
   const [hasQwenApiKey, setHasQwenApiKey] = useState(false);
   const [apiProvider, setApiProvider] = useState<'deepseek' | 'qwen'>('deepseek');
+  const [isChangingDeepseekKey, setIsChangingDeepseekKey] = useState(false);
+  const [isChangingQwenKey, setIsChangingQwenKey] = useState(false);
 
   // AI Settings
   const [temperature, setTemperature] = useState(0.7);
@@ -63,6 +65,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     setIsLoadingSettings(true);
     setChangesApplied(false);
     setSaveMessage(null);
+    setDeepseekApiKey('');
+    setQwenApiKey('');
+    setIsChangingDeepseekKey(false);
+    setIsChangingQwenKey(false);
     try {
       const settings = await authApi.getSettings();
       // Per-provider API key info
@@ -148,11 +154,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         updateData.api_provider = apiProvider;
       }
 
-      // Include API keys if entered (per provider)
-      if (deepseekApiKey.trim()) {
+      // Include API keys if entered (per provider) - but not if user is in "changing" mode (they have their own confirm button)
+      if (deepseekApiKey.trim() && !isChangingDeepseekKey) {
         updateData.deepseek_api_key = deepseekApiKey;
       }
-      if (qwenApiKey.trim()) {
+      if (qwenApiKey.trim() && !isChangingQwenKey) {
         updateData.qwen_api_key = qwenApiKey;
       }
 
@@ -192,6 +198,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       setDeepseekApiKey('');
       setQwenApiKey('');
       setShowApiKey(false);
+      setIsChangingDeepseekKey(false);
+      setIsChangingQwenKey(false);
 
       // Update original settings
       setOriginalSettings({
@@ -222,8 +230,21 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     }
   };
 
-  const handleSave = () => {
+  const handleCancel = () => {
+    // Reset any unsaved changes
+    setDeepseekApiKey('');
+    setQwenApiKey('');
+    setIsChangingDeepseekKey(false);
+    setIsChangingQwenKey(false);
     onClose();
+  };
+
+  const handleSave = async () => {
+    // Apply changes first, then close
+    await handleApplyChanges();
+    if (!saveMessage || saveMessage.type === 'success') {
+      onClose();
+    }
   };
 
   const toggleSection = (section: keyof ExpandedSections) => {
@@ -309,26 +330,89 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                           )}
                         </div>
 
-                        {hasDeepseekApiKey && (
+                        {hasDeepseekApiKey && !isChangingDeepseekKey && (
                           <p className="text-sm text-dark-text font-mono">{maskedDeepseekApiKey}</p>
                         )}
 
-                        <div className="relative">
-                          <Input
-                            type={showApiKey ? 'text' : 'password'}
-                            value={deepseekApiKey}
-                            onChange={(e) => setDeepseekApiKey(e.target.value)}
-                            placeholder={hasDeepseekApiKey ? '输入新密钥以更新...' : 'sk-...'}
-                            className="bg-dark-bg border-dark-border font-mono text-sm pr-10"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => setShowApiKey(!showApiKey)}
-                            className="absolute right-2 top-1/2 -translate-y-1/2 text-dark-text-muted hover:text-dark-text"
+                        {!hasDeepseekApiKey || isChangingDeepseekKey ? (
+                          <>
+                            <div className="relative">
+                              <Input
+                                type={showApiKey ? 'text' : 'password'}
+                                value={deepseekApiKey}
+                                onChange={(e) => setDeepseekApiKey(e.target.value)}
+                                placeholder="sk-..."
+                                className="bg-dark-bg border-dark-border font-mono text-sm pr-10"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => setShowApiKey(!showApiKey)}
+                                className="absolute right-2 top-1/2 -translate-y-1/2 text-dark-text-muted hover:text-dark-text"
+                              >
+                                {showApiKey ? <EyeOff size={16} /> : <Eye size={16} />}
+                              </button>
+                            </div>
+                            {isChangingDeepseekKey && (
+                              <div className="flex gap-2">
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={async () => {
+                                    if (deepseekApiKey.trim()) {
+                                      setIsSaving(true);
+                                      try {
+                                        const response = await authApi.updateSettings({
+                                          deepseek_api_key: deepseekApiKey.trim()
+                                        });
+                                        setMaskedDeepseekApiKey(response.data.masked_deepseek_api_key || '');
+                                        setHasDeepseekApiKey(response.data.has_deepseek_api_key || false);
+                                        setDeepseekApiKey('');
+                                        setIsChangingDeepseekKey(false);
+                                        setShowApiKey(false);
+                                        setSaveMessage({ type: 'success', text: 'API密钥已更新' });
+                                        setTimeout(() => setSaveMessage(null), 3000);
+                                      } catch (error: unknown) {
+                                        const axiosError = error as { response?: { data?: { error?: string } } };
+                                        setSaveMessage({
+                                          type: 'error',
+                                          text: axiosError.response?.data?.error || '更新失败'
+                                        });
+                                      } finally {
+                                        setIsSaving(false);
+                                      }
+                                    }
+                                  }}
+                                  disabled={isSaving || !deepseekApiKey.trim()}
+                                  className="text-xs"
+                                >
+                                  确定
+                                </Button>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => {
+                                    setDeepseekApiKey('');
+                                    setIsChangingDeepseekKey(false);
+                                    setShowApiKey(false);
+                                  }}
+                                  disabled={isSaving}
+                                  className="text-xs"
+                                >
+                                  取消
+                                </Button>
+                              </div>
+                            )}
+                          </>
+                        ) : (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setIsChangingDeepseekKey(true)}
+                            className="text-xs"
                           >
-                            {showApiKey ? <EyeOff size={16} /> : <Eye size={16} />}
-                          </button>
-                        </div>
+                            更改密钥
+                          </Button>
+                        )}
                         <p className="text-xs text-dark-text-muted">
                           获取密钥：
                           <a
@@ -361,26 +445,89 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                           )}
                         </div>
 
-                        {hasQwenApiKey && (
+                        {hasQwenApiKey && !isChangingQwenKey && (
                           <p className="text-sm text-dark-text font-mono">{maskedQwenApiKey}</p>
                         )}
 
-                        <div className="relative">
-                          <Input
-                            type={showApiKey ? 'text' : 'password'}
-                            value={qwenApiKey}
-                            onChange={(e) => setQwenApiKey(e.target.value)}
-                            placeholder={hasQwenApiKey ? '输入新密钥以更新...' : 'sk-...'}
-                            className="bg-dark-bg border-dark-border font-mono text-sm pr-10"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => setShowApiKey(!showApiKey)}
-                            className="absolute right-2 top-1/2 -translate-y-1/2 text-dark-text-muted hover:text-dark-text"
+                        {!hasQwenApiKey || isChangingQwenKey ? (
+                          <>
+                            <div className="relative">
+                              <Input
+                                type={showApiKey ? 'text' : 'password'}
+                                value={qwenApiKey}
+                                onChange={(e) => setQwenApiKey(e.target.value)}
+                                placeholder="sk-..."
+                                className="bg-dark-bg border-dark-border font-mono text-sm pr-10"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => setShowApiKey(!showApiKey)}
+                                className="absolute right-2 top-1/2 -translate-y-1/2 text-dark-text-muted hover:text-dark-text"
+                              >
+                                {showApiKey ? <EyeOff size={16} /> : <Eye size={16} />}
+                              </button>
+                            </div>
+                            {isChangingQwenKey && (
+                              <div className="flex gap-2">
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={async () => {
+                                    if (qwenApiKey.trim()) {
+                                      setIsSaving(true);
+                                      try {
+                                        const response = await authApi.updateSettings({
+                                          qwen_api_key: qwenApiKey.trim()
+                                        });
+                                        setMaskedQwenApiKey(response.data.masked_qwen_api_key || '');
+                                        setHasQwenApiKey(response.data.has_qwen_api_key || false);
+                                        setQwenApiKey('');
+                                        setIsChangingQwenKey(false);
+                                        setShowApiKey(false);
+                                        setSaveMessage({ type: 'success', text: 'API密钥已更新' });
+                                        setTimeout(() => setSaveMessage(null), 3000);
+                                      } catch (error: unknown) {
+                                        const axiosError = error as { response?: { data?: { error?: string } } };
+                                        setSaveMessage({
+                                          type: 'error',
+                                          text: axiosError.response?.data?.error || '更新失败'
+                                        });
+                                      } finally {
+                                        setIsSaving(false);
+                                      }
+                                    }
+                                  }}
+                                  disabled={isSaving || !qwenApiKey.trim()}
+                                  className="text-xs"
+                                >
+                                  确定
+                                </Button>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => {
+                                    setQwenApiKey('');
+                                    setIsChangingQwenKey(false);
+                                    setShowApiKey(false);
+                                  }}
+                                  disabled={isSaving}
+                                  className="text-xs"
+                                >
+                                  取消
+                                </Button>
+                              </div>
+                            )}
+                          </>
+                        ) : (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setIsChangingQwenKey(true)}
+                            className="text-xs"
                           >
-                            {showApiKey ? <EyeOff size={16} /> : <Eye size={16} />}
-                          </button>
-                        </div>
+                            更改密钥
+                          </Button>
+                        )}
                         <p className="text-xs text-dark-text-muted">
                           获取密钥：
                           <a
@@ -640,7 +787,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 <Button
                   variant="outline"
                   onClick={handleApplyChanges}
-                  disabled={isSaving || !hasUnsavedChanges}
+                  disabled={isSaving}
                 >
                   {isSaving ? (
                     <div className="flex items-center gap-2">
@@ -648,20 +795,27 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       应用中
                     </div>
                   ) : (
-                    '应用更改'
+                    '应用'
                   )}
                 </Button>
                 <Button
                   variant="outline"
-                  onClick={onClose}
+                  onClick={handleCancel}
                 >
-                  关闭
+                  取消
                 </Button>
                 <Button
                   onClick={handleSave}
-                  disabled={!changesApplied}
+                  disabled={isSaving}
                 >
-                  保存
+                  {isSaving ? (
+                    <div className="flex items-center gap-2">
+                      <LoadingSpinner size="sm" />
+                      保存中
+                    </div>
+                  ) : (
+                    '保存'
+                  )}
                 </Button>
               </div>
             </>
