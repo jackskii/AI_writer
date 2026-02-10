@@ -54,8 +54,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [isLoadingSettings, setIsLoadingSettings] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
-  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
-  const [changesApplied, setChangesApplied] = useState(false);
 
   // Original settings for comparison
   const [originalSettings, setOriginalSettings] = useState<Partial<UserSettings>>({});
@@ -63,7 +61,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   // Load settings function
   const loadSettings = useCallback(async () => {
     setIsLoadingSettings(true);
-    setChangesApplied(false);
     setSaveMessage(null);
     setDeepseekApiKey('');
     setQwenApiKey('');
@@ -126,21 +123,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     };
   }, [isOpen]);
 
-  // Check for unsaved changes
-  useEffect(() => {
-    const hasChanges =
-      apiProvider !== originalSettings.api_provider ||
-      temperature !== originalSettings.temperature ||
-      topP !== originalSettings.top_p ||
-      maxTokens !== originalSettings.max_tokens ||
-      frequencyPenalty !== originalSettings.frequency_penalty ||
-      presencePenalty !== originalSettings.presence_penalty ||
-      theme !== originalSettings.theme ||
-      deepseekApiKey.trim() !== '' ||
-      qwenApiKey.trim() !== '';
-
-    setHasUnsavedChanges(hasChanges);
-  }, [apiProvider, temperature, topP, maxTokens, frequencyPenalty, presencePenalty, theme, deepseekApiKey, qwenApiKey, originalSettings]);
 
   const handleApplyChanges = async () => {
     setIsSaving(true);
@@ -213,8 +195,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       });
 
       setSaveMessage({ type: 'success', text: '设置已应用' });
-      setHasUnsavedChanges(false);
-      setChangesApplied(true);
 
       setTimeout(() => setSaveMessage(null), 3000);
     } catch (error: unknown) {
