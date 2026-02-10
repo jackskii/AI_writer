@@ -48,14 +48,41 @@ class ActViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         work_id = self.kwargs.get('work_pk')
         work = get_object_or_404(Work, id=work_id, author=self.request.user)
-        return Act.objects.filter(work=work).order_by('order')
+        # Sort: normal acts first (by order), then side chapters acts (by order)
+        return Act.objects.filter(work=work).order_by(
+            models.Case(
+                models.When(act_type='normal', then=models.Value(0)),
+                models.When(act_type='side_chapters', then=models.Value(1)),
+                default=models.Value(0),
+                output_field=models.IntegerField(),
+            ),
+            'order'
+        )
 
     def perform_create(self, serializer):
         work_id = self.kwargs.get('work_pk')
         work = get_object_or_404(Work, id=work_id, author=self.request.user)
         
-        # Auto-set order to the next available number
-        next_order = work.acts.count() + 1
+        act_type = serializer.validated_data.get('act_type', 'normal')
+        
+        if act_type == 'side_chapters':
+            # Side chapters acts should have order >= 9999
+            max_side_order = work.acts.filter(act_type='side_chapters').aggregate(
+                max_order=models.Max('order')
+            )['max_order'] or 9998
+            next_order = max(max_side_order + 1, 9999)
+            # Auto-generate name if not provided
+            if not serializer.validated_data.get('name'):
+                serializer.validated_data['name'] = '外传'
+        else:
+            # Normal acts: find max order of normal acts
+            max_normal_order = work.acts.filter(act_type='normal').aggregate(
+                max_order=models.Max('order')
+            )['max_order'] or 0
+            next_order = max_normal_order + 1
+            # Auto-generate name if not provided (use order, not chapter_number)
+            if not serializer.validated_data.get('name'):
+                serializer.validated_data['name'] = f'第{next_order}卷'
         
         serializer.save(work=work, order=next_order)
 

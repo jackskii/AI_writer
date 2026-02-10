@@ -279,10 +279,22 @@ class ContextBuilder:
 
     @staticmethod
     def _get_all_previous_chapters(chapter: Chapter) -> List[str]:
-        """Get ALL previous chapters with full content (legacy - consider using _get_recent_chapter_content)"""
+        """Get ALL previous chapters with full content (legacy - consider using _get_recent_chapter_content)
+        
+        Excludes chapters from side chapters acts for normal chapters.
+        """
+        # Check if current chapter is in a side chapters act
+        current_act = chapter.act
+        is_side_chapter = current_act and current_act.act_type == 'side_chapters'
+        
+        if is_side_chapter:
+            # Side chapters don't see other chapters
+            return []
+        
+        # For normal chapters, exclude chapters from side chapters acts
         chapters = chapter.work.chapters.filter(
             order__lt=chapter.order
-        ).order_by('order')
+        ).exclude(act__act_type='side_chapters').order_by('order')
 
         previous_chapters = []
         for ch in chapters:
@@ -298,10 +310,22 @@ class ContextBuilder:
         Args:
             chapter: Current chapter
             count: Number of previous chapters to include (default 1)
+        
+        Excludes chapters from side chapters acts for normal chapters.
+        Side chapters return empty list.
         """
+        # Check if current chapter is in a side chapters act
+        current_act = chapter.act
+        is_side_chapter = current_act and current_act.act_type == 'side_chapters'
+        
+        if is_side_chapter:
+            # Side chapters don't see other chapters
+            return []
+        
+        # For normal chapters, exclude chapters from side chapters acts
         chapters = chapter.work.chapters.filter(
             order__lt=chapter.order
-        ).order_by('-order')[:count]
+        ).exclude(act__act_type='side_chapters').order_by('-order')[:count]
 
         recent_chapters = []
         for ch in reversed(list(chapters)):
@@ -312,10 +336,23 @@ class ContextBuilder:
 
     @staticmethod
     def _get_recent_chapter_summaries(chapter: Chapter, count: int = 3) -> List[str]:
-        """Get summaries from the most recent chapters before this one"""
+        """Get summaries from the most recent chapters before this one
+        
+        Excludes chapters from side chapters acts for normal chapters.
+        Side chapters return empty list.
+        """
+        # Check if current chapter is in a side chapters act
+        current_act = chapter.act
+        is_side_chapter = current_act and current_act.act_type == 'side_chapters'
+        
+        if is_side_chapter:
+            # Side chapters don't see other chapters
+            return []
+        
+        # For normal chapters, exclude chapters from side chapters acts
         chapters = chapter.work.chapters.filter(
             order__lt=chapter.order
-        ).exclude(summary__isnull=True).exclude(summary='').order_by('-order')[:count]
+        ).exclude(act__act_type='side_chapters').exclude(summary__isnull=True).exclude(summary='').order_by('-order')[:count]
 
         summaries = []
         for ch in reversed(list(chapters)):
@@ -325,29 +362,51 @@ class ContextBuilder:
 
     @staticmethod
     def _get_previous_act_synopses(chapter: Chapter) -> List[str]:
-        """Get synopses of all previous acts (books) before the current chapter's act"""
+        """Get synopses of all previous acts (books) before the current chapter's act
+        
+        For normal chapters: excludes side chapters acts.
+        For side chapters: only includes normal acts (all of them, not just previous).
+        """
         current_act = chapter.act
         if not current_act:
             return []
         
-        # Get all acts before the current one
         from apps.works.models import Act
-        previous_acts = Act.objects.filter(
-            work=chapter.work,
-            order__lt=current_act.order
-        ).exclude(synopsis__isnull=True).exclude(synopsis='').order_by('order')
+        
+        is_side_chapter = current_act.act_type == 'side_chapters'
+        
+        if is_side_chapter:
+            # Side chapters see all normal act synopses (not just previous)
+            normal_acts = Act.objects.filter(
+                work=chapter.work,
+                act_type='normal'
+            ).exclude(synopsis__isnull=True).exclude(synopsis='').order_by('order')
+        else:
+            # Normal chapters see previous normal acts only
+            normal_acts = Act.objects.filter(
+                work=chapter.work,
+                act_type='normal',
+                order__lt=current_act.order
+            ).exclude(synopsis__isnull=True).exclude(synopsis='').order_by('order')
 
         synopses = []
-        for act in previous_acts:
+        for act in normal_acts:
             synopses.append(f"【{act.name}】\n{act.synopsis}")
 
         return synopses
 
     @staticmethod
     def _get_current_act_chapter_summaries(chapter: Chapter) -> List[str]:
-        """Get chapter summaries from the current act, before the current chapter"""
+        """Get chapter summaries from the current act, before the current chapter
+        
+        For side chapters: returns empty list (they don't see other side chapters).
+        """
         current_act = chapter.act
         if not current_act:
+            return []
+        
+        # Side chapters don't see other side chapters
+        if current_act.act_type == 'side_chapters':
             return []
         
         # Get chapters in current act before current chapter
@@ -363,7 +422,10 @@ class ContextBuilder:
 
     @staticmethod
     def build_summary_context(chapter: Chapter) -> str:
-        """Build context specifically for chapter summarization (work synopsis + last 3 chapter summaries)"""
+        """Build context specifically for chapter summarization (work synopsis + last 3 chapter summaries)
+        
+        For side chapters: only includes work synopsis (no chapter summaries).
+        """
         work = chapter.work
         context_parts = []
 
@@ -371,7 +433,7 @@ class ContextBuilder:
         if work.synopsis:
             context_parts.append(f"作品大纲：{work.synopsis}")
 
-        # Get last 3 chapter summaries
+        # Get last 3 chapter summaries (excludes side chapters for normal chapters, empty for side chapters)
         recent_summaries = ContextBuilder._get_recent_chapter_summaries(chapter, count=3)
         if recent_summaries:
             context_parts.append("前文摘要：\n\n" + "\n\n".join(recent_summaries))
@@ -387,7 +449,14 @@ class ContextBuilder:
         - All chapter synopses in current act (before current chapter)
         - Full content for previous N chapters (default N=1)
         - Triggered lore entries
+        
+        For side chapters, uses build_side_chapters_context instead.
         """
+        # Check if this is a side chapter
+        current_act = chapter.act
+        if current_act and current_act.act_type == 'side_chapters':
+            return ContextBuilder.build_side_chapters_context(chapter)
+        
         work = chapter.work
 
         # Basic context
@@ -420,6 +489,55 @@ class ContextBuilder:
         # Get recent chapter content (full content for last N chapters)
         recent_content = ContextBuilder._get_recent_chapter_content(chapter, count=recent_content_count)
         context["recent_chapter_content"] = recent_content
+
+        return context
+
+    @staticmethod
+    def build_side_chapters_context(chapter: Chapter) -> Dict:
+        """Build context specifically for side chapters
+        
+        Side chapters context:
+        - Work synopsis
+        - All normal act synopses (not side chapters acts)
+        - Triggered lore entries
+        - NO chapter content or summaries
+        """
+        work = chapter.work
+
+        # Basic context
+        context = {
+            "synopsis": work.synopsis,
+            "work_title": work.title,
+            "chapter_title": chapter.title,
+            "current_chapter_content": chapter.content,
+        }
+
+        # Get triggered lore entries
+        lore_entries = ContextBuilder._get_triggered_lore_entries(chapter)
+        context["lore_entries"] = [
+            {
+                "name": entry.name,
+                "description": entry.description,
+                "triggers": entry.all_triggers
+            }
+            for entry in lore_entries
+        ]
+
+        # Get all normal act synopses (not side chapters acts)
+        from apps.works.models import Act
+        normal_acts = Act.objects.filter(
+            work=work,
+            act_type='normal'
+        ).exclude(synopsis__isnull=True).exclude(synopsis='').order_by('order')
+
+        act_synopses = []
+        for act in normal_acts:
+            act_synopses.append(f"【{act.name}】\n{act.synopsis}")
+
+        context["normal_act_synopses"] = act_synopses
+        context["current_act_chapter_summaries"] = []  # Side chapters don't see other side chapters
+        context["recent_chapter_content"] = []  # Side chapters don't see chapter content
+        context["previous_act_synopses"] = act_synopses  # For compatibility
 
         return context
 

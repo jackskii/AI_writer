@@ -47,6 +47,11 @@ class Work(models.Model):
 class Act(models.Model):
     """卷模型"""
     
+    ACT_TYPES = [
+        ('normal', '正常卷'),
+        ('side_chapters', '外传'),
+    ]
+    
     id = models.BigIntegerField(primary_key=True, default=generate_large_id)
     work = models.ForeignKey(
         Work,
@@ -57,6 +62,12 @@ class Act(models.Model):
     name = models.CharField('卷名', max_length=100)
     order = models.PositiveIntegerField('排序')
     synopsis = models.TextField('卷摘要', blank=True, default='')
+    act_type = models.CharField(
+        '卷类型',
+        max_length=20,
+        choices=ACT_TYPES,
+        default='normal'
+    )
     
     created_at = models.DateTimeField('创建时间', auto_now_add=True)
     updated_at = models.DateTimeField('更新时间', auto_now=True)

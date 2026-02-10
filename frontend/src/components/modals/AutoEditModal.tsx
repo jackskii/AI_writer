@@ -25,7 +25,7 @@ interface AutoEditModalProps {
 }
 
 export interface AutoEditContext {
-  chapterSelection: 'all' | 'past_3' | 'custom' | 'none';
+  chapterSelection: 'all' | 'past_1' | 'custom' | 'none';
   customChapterCount?: number;
   selectedLoreEntries: number[]; // IDs of selected lore entries
   model: 'deepseek-chat' | 'deepseek-reasoner';
@@ -73,8 +73,8 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
 
   // State for customize panel
   const [showCustomize, setShowCustomize] = useState(false);
-  const [chapterSelection, setChapterSelection] = useState<'all' | 'past_3' | 'custom' | 'none'>('past_3');
-  const [customChapterCount, setCustomChapterCount] = useState(3);
+  const [chapterSelection, setChapterSelection] = useState<'all' | 'past_1' | 'custom' | 'none'>('past_1');
+  const [customChapterCount, setCustomChapterCount] = useState(1);
   const [useSummaries, setUseSummaries] = useState(false);
   const [loreEntries, setLoreEntries] = useState<LoreEntry[]>([]);
   const [factions, setFactions] = useState<Faction[]>([]);
@@ -456,9 +456,9 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
       length += entry.name.length + entry.description.length + 30; // +30 for formatting
     });
 
-    // Calculate previous chapters using actual word_count data
+    // Calculate previous chapters from current act only
     const previousChapters = allChapters
-      .filter(ch => ch.chapter_number < chapter.chapter_number)
+      .filter(ch => ch.act === chapter.act && ch.chapter_number < chapter.chapter_number)
       .sort((a, b) => b.chapter_number - a.chapter_number);
 
     let chaptersToInclude: Chapter[] = [];
@@ -466,8 +466,8 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
       chaptersToInclude = [];
     } else if (chapterSelection === 'all') {
       chaptersToInclude = previousChapters;
-    } else if (chapterSelection === 'past_3') {
-      chaptersToInclude = previousChapters.slice(0, 3);
+    } else if (chapterSelection === 'past_1') {
+      chaptersToInclude = previousChapters.slice(0, 1);
     } else if (chapterSelection === 'custom') {
       chaptersToInclude = previousChapters.slice(0, customChapterCount);
     }
@@ -503,8 +503,10 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
 
   const promptCharCount = calculatePromptLength();
 
-  // Calculate actual number of previous chapters for display/validation
-  const availablePreviousChapters = Math.max(0, chapter.chapter_number - 1);
+  // Calculate actual number of previous chapters in current act for display/validation
+  const availablePreviousChapters = allChapters.filter(
+    ch => ch.act === chapter.act && ch.chapter_number < chapter.chapter_number
+  ).length;
 
   if (!isOpen) return null;
 
@@ -701,11 +703,11 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
                   <label className="flex items-center gap-2">
                     <input
                       type="radio"
-                      checked={chapterSelection === 'past_3'}
-                      onChange={() => setChapterSelection('past_3')}
+                      checked={chapterSelection === 'past_1'}
+                      onChange={() => setChapterSelection('past_1')}
                       className="text-dark-primary"
                     />
-                    <span className="text-sm text-dark-text">最近3章</span>
+                    <span className="text-sm text-dark-text">最近1章</span>
                   </label>
                   <label className="flex items-center gap-2">
                     <input
@@ -714,7 +716,7 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
                       onChange={() => setChapterSelection('all')}
                       className="text-dark-primary"
                     />
-                    <span className="text-sm text-dark-text">所有前文 ({availablePreviousChapters} 章)</span>
+                    <span className="text-sm text-dark-text">本卷所有前文 ({availablePreviousChapters} 章)</span>
                   </label>
                   <label className="flex items-center gap-2">
                     <input
@@ -984,11 +986,11 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
                   <label className="flex items-center gap-2">
                     <input
                       type="radio"
-                      checked={chapterSelection === 'past_3'}
-                      onChange={() => setChapterSelection('past_3')}
+                      checked={chapterSelection === 'past_1'}
+                      onChange={() => setChapterSelection('past_1')}
                       className="text-dark-primary"
                     />
-                    <span className="text-sm text-dark-text">最近3章</span>
+                    <span className="text-sm text-dark-text">最近1章</span>
                   </label>
                   <label className="flex items-center gap-2">
                     <input
@@ -997,7 +999,7 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
                       onChange={() => setChapterSelection('all')}
                       className="text-dark-primary"
                     />
-                    <span className="text-sm text-dark-text">所有前文章节 ({availablePreviousChapters} 章)</span>
+                    <span className="text-sm text-dark-text">本卷所有前文章节 ({availablePreviousChapters} 章)</span>
                   </label>
                   <label className="flex items-center gap-2">
                     <input

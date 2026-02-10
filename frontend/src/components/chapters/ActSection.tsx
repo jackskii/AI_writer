@@ -82,6 +82,7 @@ export const ActSection: React.FC<ActSectionProps> = ({
   const totalWords = localChapters.reduce((sum, chapter) => sum + chapter.word_count, 0);
   const displayName = actData.name || `第${actData.order}卷`;
   const hasSynopsis = actData.synopsis && actData.synopsis.trim().length > 0;
+  const isSideChapters = actData.act_type === 'side_chapters';
 
   return (
     <div className="space-y-1">
@@ -98,12 +99,21 @@ export const ActSection: React.FC<ActSectionProps> = ({
           )}
           
           <div className="flex items-center gap-2">
-            <BookOpen size={16} className="text-dark-primary" />
+            {isSideChapters ? (
+              <FileText size={16} className="text-dark-text-muted" />
+            ) : (
+              <BookOpen size={16} className="text-dark-primary" />
+            )}
             <div>
               <div className="flex items-center gap-2">
-                <h3 className="font-medium text-dark-text">
+                <h3 className={`font-medium ${isSideChapters ? 'text-dark-text-muted' : 'text-dark-text'}`}>
                   {displayName}
                 </h3>
+                {isSideChapters && (
+                  <span className="px-2 py-0.5 text-xs bg-dark-surface border border-dark-border rounded text-dark-text-muted">
+                    外传
+                  </span>
+                )}
                 <Button
                   variant="ghost"
                   size="sm"

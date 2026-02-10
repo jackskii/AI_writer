@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { X, FileText, Sparkles, Zap } from 'lucide-react';
 import { chaptersApi, aiApi } from '../../services/api';
 import { Button } from '../ui/Button';
@@ -24,12 +24,14 @@ export const SummaryModal: React.FC<SummaryModalProps> = ({
   const [isGenerating, setIsGenerating] = useState(false);
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamEventSource, setStreamEventSource] = useState<EventSource | null>(null);
+  const queryClient = useQueryClient();
 
   useEffect(() => {
-    if (chapter) {
+    if (chapter && isOpen) {
+      // Refresh summary from chapter data when modal opens
       setSummary(chapter.summary || '');
     }
-  }, [chapter]);
+  }, [chapter, isOpen]);
 
   // Cleanup on component unmount
   useEffect(() => {
@@ -44,8 +46,10 @@ export const SummaryModal: React.FC<SummaryModalProps> = ({
     mutationFn: (summaryData: { summary: string }) => 
       chaptersApi.update(chapter!.work, chapter!.id, summaryData),
     onSuccess: () => {
-      // Don't call onSummaryUpdated here to prevent modal closing
-      // onSummaryUpdated(summary);
+      // Invalidate queries to refresh chapter data so it's up-to-date when modal reopens
+      queryClient.invalidateQueries({ queryKey: ['chapters', chapter!.work] });
+      // Don't call onSummaryUpdated here - that would close the modal
+      // onSummaryUpdated is only called when AI generation completes
     }
   });
 

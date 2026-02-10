@@ -271,7 +271,14 @@ export const WorkDetailPage: React.FC = () => {
   
   const handleCreateChapter = () => {
     if (actsData && Array.isArray(actsData) && actsData.length > 0) {
-      const firstAct = actsData.sort((a, b) => a.order - b.order)[0];
+      // Sort: normal acts first, then side chapters
+      const sortedActs = [...actsData].sort((a, b) => {
+        const aType = a.act_type === 'side_chapters' ? 1 : 0;
+        const bType = b.act_type === 'side_chapters' ? 1 : 0;
+        if (aType !== bType) return aType - bType;
+        return a.order - b.order;
+      });
+      const firstAct = sortedActs[0];
       handleCreateChapterInAct(firstAct.id);
     } else {
       handleCreateAct();
@@ -508,7 +515,13 @@ export const WorkDetailPage: React.FC = () => {
             ) : (
               <div className="space-y-3">
                 {actsData && Array.isArray(actsData) && actsData.length > 0 ? (
-                  actsData.sort((a, b) => a.order - b.order).map(act => (
+                  [...actsData].sort((a, b) => {
+                    // Sort: normal acts first (by order), then side chapters acts (by order)
+                    const aType = a.act_type === 'side_chapters' ? 1 : 0;
+                    const bType = b.act_type === 'side_chapters' ? 1 : 0;
+                    if (aType !== bType) return aType - bType;
+                    return a.order - b.order;
+                  }).map(act => (
                     <ActSection key={act.id} actData={act} chapters={(workChapters || []).filter(ch => ch.act === act.id).sort((a, b) => a.chapter_number - b.chapter_number)} onChapterClick={handleChapterClick} onChapterDelete={handleChapterDelete} onChapterSummary={handleChapterSummary} onCreateChapter={handleCreateChapterInAct} onEditActName={handleEditActName} onDeleteAct={handleDeleteAct} onReorderChapters={handleReorderChapters} onActSynopsis={handleActSynopsis} />
                   ))
                 ) : (

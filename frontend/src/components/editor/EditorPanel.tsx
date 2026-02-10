@@ -993,7 +993,7 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
         chapter.id,
         autoEdit.original_text,
         {
-          chapterSelection: 'past_3',  // Use past 3 chapters for context
+          chapterSelection: 'past_1',  // Use past 1 chapter for context
           selectedLoreEntries: [],      // Could retrieve saved lore IDs from autoEdit if stored
           model: 'deepseek-chat'
         },

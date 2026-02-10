@@ -164,8 +164,16 @@ def get_lore_entries_for_act(act):
 
 @sync_to_async
 def build_auto_edit_context(work, chapter, user, style_id, selected_lore_ids, chapter_selection, custom_chapter_count, use_summaries=False):
-    """Build context for auto-edit (async version)"""
+    """Build context for auto-edit (async version)
+    
+    For side chapters: only includes work synopsis, normal act synopses, and selected lore entries.
+    For normal chapters: excludes side chapters from previous chapters.
+    """
     formatted_context = ""
+
+    # Check if this is a side chapter
+    current_act = chapter.act
+    is_side_chapter = current_act and current_act.act_type == 'side_chapters'
 
     # Add writing style if selected
     if style_id:
@@ -191,41 +199,67 @@ def build_auto_edit_context(work, chapter, user, style_id, selected_lore_ids, ch
                     formatted_context += f"【{entry.name}】\n{entry.description}\n\n"
                 formatted_context += "---\n\n"
 
-    # Add chapters based on selection
-    available_previous_count = work.chapters.filter(order__lt=chapter.order).count()
-
-    previous_chapters = []
-    if chapter_selection == 'none':
-        previous_chapters = []
-    elif chapter_selection == 'all':
-        previous_chapters = list(work.chapters.filter(order__lt=chapter.order).order_by('order'))
-    elif chapter_selection == 'custom':
-        try:
-            count = int(custom_chapter_count)
-            count = min(max(0, count), available_previous_count)
-            if count > 0:
-                previous_chapters = list(work.chapters.filter(order__lt=chapter.order).order_by('-order')[:count])
-                previous_chapters = list(reversed(previous_chapters))
-        except:
-            count = 3
-            previous_chapters = list(work.chapters.filter(order__lt=chapter.order).order_by('-order')[:count])
-            previous_chapters = list(reversed(previous_chapters))
-    else:  # 'past_3' (default)
-        count = min(3, available_previous_count)
-        previous_chapters = list(work.chapters.filter(order__lt=chapter.order).order_by('-order')[:count])
-        previous_chapters = list(reversed(previous_chapters))
-
-    if previous_chapters:
-        if use_summaries:
-            formatted_context += "前文章节摘要：\n\n"
-            for ch in previous_chapters:
-                summary_text = ch.summary or '(无摘要)'
-                formatted_context += f"第{ch.chapter_number}章《{ch.title}》摘要：{summary_text}\n\n"
+    # For side chapters, only add normal act synopses (no chapter content)
+    if is_side_chapter:
+        from apps.works.models import Act
+        normal_acts = Act.objects.filter(
+            work=work,
+            act_type='normal'
+        ).exclude(synopsis__isnull=True).exclude(synopsis='').order_by('order')
+        
+        if normal_acts:
+            formatted_context += "正文章节摘要：\n\n"
+            for act in normal_acts:
+                formatted_context += f"【{act.name}】\n{act.synopsis}\n\n"
             formatted_context += "---\n\n"
-        else:
-            formatted_context += "前文章节：\n\n"
-            for ch in previous_chapters:
-                formatted_context += f"第{ch.chapter_number}章《{ch.title}》\n\n{ch.content or '(空章节)'}\n\n---\n\n"
+    else:
+        # For normal chapters, add previous chapters from current act only
+        current_act = chapter.act
+        available_previous_count = current_act.chapters.filter(
+            order__lt=chapter.order
+        ).count() if current_act else 0
+
+        previous_chapters = []
+        if chapter_selection == 'none':
+            previous_chapters = []
+        elif chapter_selection == 'all':
+            # Only chapters from current act
+            previous_chapters = list(current_act.chapters.filter(
+                order__lt=chapter.order
+            ).order_by('order')) if current_act else []
+        elif chapter_selection == 'custom':
+            try:
+                count = int(custom_chapter_count)
+                count = min(max(0, count), available_previous_count)
+                if count > 0:
+                    previous_chapters = list(current_act.chapters.filter(
+                        order__lt=chapter.order
+                    ).order_by('-order')[:count]) if current_act else []
+                    previous_chapters = list(reversed(previous_chapters))
+            except:
+                count = 1
+                previous_chapters = list(current_act.chapters.filter(
+                    order__lt=chapter.order
+                ).order_by('-order')[:count]) if current_act else []
+                previous_chapters = list(reversed(previous_chapters))
+        else:  # 'past_1' (default, changed from 'past_3')
+            count = min(1, available_previous_count)
+            previous_chapters = list(current_act.chapters.filter(
+                order__lt=chapter.order
+            ).order_by('-order')[:count]) if current_act else []
+            previous_chapters = list(reversed(previous_chapters))
+
+        if previous_chapters:
+            if use_summaries:
+                formatted_context += "前文章节摘要：\n\n"
+                for ch in previous_chapters:
+                    summary_text = ch.summary or '(无摘要)'
+                    formatted_context += f"第{ch.chapter_number}章《{ch.title}》摘要：{summary_text}\n\n"
+                formatted_context += "---\n\n"
+            else:
+                formatted_context += "前文章节：\n\n"
+                for ch in previous_chapters:
+                    formatted_context += f"第{ch.chapter_number}章《{ch.title}》\n\n{ch.content or '(空章节)'}\n\n---\n\n"
 
     # Add current chapter content at the end
     if chapter.content:
@@ -804,7 +838,7 @@ async def ai_auto_edit_stream(request):
     chapter_id = body.get('chapter_id')
 
     # Context customization parameters
-    chapter_selection = body.get('chapter_selection', 'past_3')
+    chapter_selection = body.get('chapter_selection', 'past_1')
     custom_chapter_count = body.get('custom_chapter_count', '3')
     selected_lore_ids = body.get('selected_lore_ids', '')
     model = body.get('model')  # Let provider determine default model

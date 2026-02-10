@@ -425,7 +425,7 @@ export const aiApi = {
     chapterId: number,
     selectedText: string,
     context: {
-      chapterSelection: 'all' | 'past_3' | 'custom' | 'none';
+      chapterSelection: 'all' | 'past_1' | 'custom' | 'none';
       customChapterCount?: number;
       selectedLoreEntries: number[];
       model: 'deepseek-chat' | 'deepseek-reasoner';
