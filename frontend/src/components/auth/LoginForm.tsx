@@ -92,7 +92,45 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSuccess, onSwitchToRegis
         {loginMutation.error && (
           <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-3">
             <p className="text-red-400 text-sm">
-              {loginMutation.error instanceof Error ? loginMutation.error.message : '登录失败，请检查用户名和密码'}
+              {(() => {
+                const error = loginMutation.error as any;
+                // Try to extract error message from axios error response
+                if (error?.response?.data) {
+                  const errorData = error.response.data;
+                  
+                  // Handle Django REST Framework serializer errors
+                  // Can be: {field: ['error']}, {non_field_errors: ['error']}, or ['error']
+                  if (typeof errorData === 'object') {
+                    // Check for non_field_errors first (general errors)
+                    if (errorData.non_field_errors && Array.isArray(errorData.non_field_errors)) {
+                      return errorData.non_field_errors[0];
+                    }
+                    // Check for field-specific errors
+                    const fieldErrors = Object.values(errorData).flat();
+                    if (fieldErrors.length > 0 && typeof fieldErrors[0] === 'string') {
+                      return fieldErrors[0];
+                    }
+                    // If it's an array of strings
+                    if (Array.isArray(errorData) && errorData.length > 0) {
+                      return errorData[0];
+                    }
+                    // If it's a single string value
+                    if (typeof errorData === 'string') {
+                      return errorData;
+                    }
+                  }
+                  // If errorData is a string
+                  if (typeof errorData === 'string') {
+                    return errorData;
+                  }
+                }
+                // Fallback to error message
+                if (error?.message) {
+                  return error.message;
+                }
+                // Default fallback
+                return '登录失败，请检查用户名和密码';
+              })()}
             </p>
           </div>
         )}
