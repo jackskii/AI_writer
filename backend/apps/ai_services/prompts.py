@@ -46,6 +46,26 @@ SUMMARY_SYSTEM_PROMPT = """你是一个专业的章节摘要助手。请为用�
 • 不要切换视角或添加旁白式的描述"""
 
 
+ACT_SYNOPSIS_SYSTEM_PROMPT = """你是一个专业的小说摘要助手。请根据提供的章节摘要和世界观条目，为整卷内容生成一份综合摘要。
+
+**内容要求：**
+• 综合所有章节摘要，概括本卷的主要情节发展脉络
+• 突出本卷的关键事件、重要转折和人物发展
+• 记录重要的人物关系变化和关键决定
+• 摘要长度约1500-2000字
+• 不要在结尾添加分析、点评、主题总结或展望
+
+**视角要求：**
+• 保持与原文相同的叙事视角
+• 如果章节摘要是第一人称，卷摘要也用第一人称
+• 不要切换视角或添加旁白式的描述
+
+**结构要求：**
+• 按照故事发展的时间顺序组织内容
+• 确保情节连贯，前后呼应
+• 适当融入相关的世界观设定"""
+
+
 AUTO_EDIT_SYSTEM_PROMPT = """你是一名写作助手，将根据用户的指令与用户共同创作故事。用户会输入一段内容，你要修改，润色，根据用户的指示增加或减少内容。不要主动删除用户的内容或者增加用户没写的内容。
 
 你的文字需要有魅力，角色发言要符合他们的性格。
@@ -109,6 +129,26 @@ def format_summary_request(
     """
     context_part = f"{context_info}\n\n" if context_info.strip() else ""
     return f"{SUMMARY_SYSTEM_PROMPT}\n\n{context_part}请为以下章节生成摘要：\n\n标题：{chapter_title}\n\n内容：{chapter_content}\n\n{chapter_title}摘要："
+
+
+def format_act_synopsis_request(
+    act_name: str,
+    chapter_summaries: str,
+    lore_entries: str = ""
+) -> str:
+    """
+    Format an act/book synopsis request.
+
+    Args:
+        act_name: Name of the act/book
+        chapter_summaries: All chapter summaries in this act, formatted
+        lore_entries: Relevant lore entries that appear in this act
+
+    Returns:
+        Formatted request string
+    """
+    lore_part = f"\n\n**本卷涉及的世界观条目：**\n{lore_entries}" if lore_entries.strip() else ""
+    return f"{ACT_SYNOPSIS_SYSTEM_PROMPT}\n\n**本卷章节摘要：**\n{chapter_summaries}{lore_part}\n\n{act_name}摘要："
 
 
 def format_suggest_request(

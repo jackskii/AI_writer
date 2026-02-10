@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ChevronDown, ChevronRight, BookOpen, Plus, Edit2, Trash2 } from 'lucide-react';
+import { ChevronDown, ChevronRight, BookOpen, Plus, Edit2, Trash2, FileText } from 'lucide-react';
 import {
   DndContext,
   closestCenter,
@@ -17,11 +17,10 @@ import {
 } from '@dnd-kit/sortable';
 import { Button } from '../ui/Button';
 import { ChapterListItem } from './ChapterListItem';
-import type { Chapter } from '../../types';
+import type { Act, Chapter } from '../../types';
 
 interface ActSectionProps {
-  act: number;
-  actName?: string;
+  actData: Act;
   chapters: Chapter[];
   onChapterClick: (chapter: Chapter) => void;
   onChapterDelete: (chapter: Chapter) => void;
@@ -30,11 +29,11 @@ interface ActSectionProps {
   onEditActName: (actId: number, currentName?: string) => void;
   onDeleteAct: (actId: number) => void;
   onReorderChapters: (actId: number, chapterIds: number[]) => void;
+  onActSynopsis: (act: Act) => void;
 }
 
 export const ActSection: React.FC<ActSectionProps> = ({
-  act,
-  actName,
+  actData,
   chapters,
   onChapterClick,
   onChapterDelete,
@@ -42,7 +41,8 @@ export const ActSection: React.FC<ActSectionProps> = ({
   onCreateChapter,
   onEditActName,
   onDeleteAct,
-  onReorderChapters
+  onReorderChapters,
+  onActSynopsis
 }) => {
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [localChapters, setLocalChapters] = useState(chapters);
@@ -75,12 +75,13 @@ export const ActSection: React.FC<ActSectionProps> = ({
 
       // Call API to reorder
       const chapterIds = newChapters.map(c => c.id);
-      onReorderChapters(act, chapterIds);
+      onReorderChapters(actData.id, chapterIds);
     }
   };
 
   const totalWords = localChapters.reduce((sum, chapter) => sum + chapter.word_count, 0);
-  const displayName = actName || `第${act}卷`;
+  const displayName = actData.name || `第${actData.order}卷`;
+  const hasSynopsis = actData.synopsis && actData.synopsis.trim().length > 0;
 
   return (
     <div className="space-y-1">
@@ -108,7 +109,7 @@ export const ActSection: React.FC<ActSectionProps> = ({
                   size="sm"
                   onClick={(e) => {
                     e.stopPropagation();
-                    onEditActName(act, actName);
+                    onEditActName(actData.id, actData.name);
                   }}
                   className="h-8 w-8 p-1 bg-dark-surface/50 hover:bg-dark-primary/20 text-dark-text/70 hover:text-dark-primary transition-all rounded"
                   title="编辑卷名"
@@ -129,7 +130,21 @@ export const ActSection: React.FC<ActSectionProps> = ({
             size="sm"
             onClick={(e) => {
               e.stopPropagation();
-              onCreateChapter(act);
+              onActSynopsis(actData);
+            }}
+            className={`${hasSynopsis ? 'bg-green-500/10 border-green-500/30 text-green-400 hover:bg-green-500/20 hover:border-green-500/50' : 'bg-dark-surface/50 border-dark-border text-dark-text-muted hover:bg-dark-primary/20 hover:text-dark-primary'} text-xs px-3 py-1 h-7 flex items-center gap-1 font-medium`}
+            title={hasSynopsis ? "编辑卷摘要" : "生成卷摘要"}
+          >
+            <FileText size={12} />
+            摘要
+          </Button>
+          
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={(e) => {
+              e.stopPropagation();
+              onCreateChapter(actData.id);
             }}
             className="bg-dark-primary/10 border-dark-primary/30 text-dark-primary hover:bg-dark-primary/20 hover:border-dark-primary/50 text-xs px-3 py-1 h-7 flex items-center gap-1 font-medium"
           >
@@ -142,7 +157,7 @@ export const ActSection: React.FC<ActSectionProps> = ({
             size="sm"
             onClick={(e) => {
               e.stopPropagation();
-              onDeleteAct(act);
+              onDeleteAct(actData.id);
             }}
             className="h-7 px-2 hover:bg-red-500/20 hover:text-red-400 text-dark-text-muted flex items-center gap-1 transition-colors"
             title={chapters.length > 0 ? "请先删除所有章节" : "删除空卷"}

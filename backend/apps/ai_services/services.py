@@ -279,7 +279,7 @@ class ContextBuilder:
 
     @staticmethod
     def _get_all_previous_chapters(chapter: Chapter) -> List[str]:
-        """Get ALL previous chapters with full content"""
+        """Get ALL previous chapters with full content (legacy - consider using _get_recent_chapter_content)"""
         chapters = chapter.work.chapters.filter(
             order__lt=chapter.order
         ).order_by('order')
@@ -292,6 +292,25 @@ class ContextBuilder:
         return previous_chapters
 
     @staticmethod
+    def _get_recent_chapter_content(chapter: Chapter, count: int = 1) -> List[str]:
+        """Get full content of the most recent N chapters before this one
+        
+        Args:
+            chapter: Current chapter
+            count: Number of previous chapters to include (default 1)
+        """
+        chapters = chapter.work.chapters.filter(
+            order__lt=chapter.order
+        ).order_by('-order')[:count]
+
+        recent_chapters = []
+        for ch in reversed(list(chapters)):
+            chapter_text = f"第{ch.chapter_number}章《{ch.title}》\n\n{ch.content or '(空章节)'}"
+            recent_chapters.append(chapter_text)
+
+        return recent_chapters
+
+    @staticmethod
     def _get_recent_chapter_summaries(chapter: Chapter, count: int = 3) -> List[str]:
         """Get summaries from the most recent chapters before this one"""
         chapters = chapter.work.chapters.filter(
@@ -300,6 +319,44 @@ class ContextBuilder:
 
         summaries = []
         for ch in reversed(list(chapters)):
+            summaries.append(f"第{ch.chapter_number}章《{ch.title}》：\n{ch.summary}")
+
+        return summaries
+
+    @staticmethod
+    def _get_previous_act_synopses(chapter: Chapter) -> List[str]:
+        """Get synopses of all previous acts (books) before the current chapter's act"""
+        current_act = chapter.act
+        if not current_act:
+            return []
+        
+        # Get all acts before the current one
+        from apps.works.models import Act
+        previous_acts = Act.objects.filter(
+            work=chapter.work,
+            order__lt=current_act.order
+        ).exclude(synopsis__isnull=True).exclude(synopsis='').order_by('order')
+
+        synopses = []
+        for act in previous_acts:
+            synopses.append(f"【{act.name}】\n{act.synopsis}")
+
+        return synopses
+
+    @staticmethod
+    def _get_current_act_chapter_summaries(chapter: Chapter) -> List[str]:
+        """Get chapter summaries from the current act, before the current chapter"""
+        current_act = chapter.act
+        if not current_act:
+            return []
+        
+        # Get chapters in current act before current chapter
+        chapters = current_act.chapters.filter(
+            order__lt=chapter.order
+        ).exclude(summary__isnull=True).exclude(summary='').order_by('order')
+
+        summaries = []
+        for ch in chapters:
             summaries.append(f"第{ch.chapter_number}章《{ch.title}》：\n{ch.summary}")
 
         return summaries
@@ -320,6 +377,51 @@ class ContextBuilder:
             context_parts.append("前文摘要：\n\n" + "\n\n".join(recent_summaries))
 
         return "\n\n".join(context_parts)
+
+    @staticmethod
+    def build_enhanced_context(chapter: Chapter, recent_content_count: int = 1) -> Dict:
+        """Build enhanced AI context using act synopses + chapter summaries + recent content
+        
+        New context strategy:
+        - All synopses for previous acts (books)
+        - All chapter synopses in current act (before current chapter)
+        - Full content for previous N chapters (default N=1)
+        - Triggered lore entries
+        """
+        work = chapter.work
+
+        # Basic context
+        context = {
+            "synopsis": work.synopsis,
+            "work_title": work.title,
+            "chapter_title": chapter.title,
+            "current_chapter_content": chapter.content,
+        }
+
+        # Get triggered lore entries
+        lore_entries = ContextBuilder._get_triggered_lore_entries(chapter)
+        context["lore_entries"] = [
+            {
+                "name": entry.name,
+                "description": entry.description,
+                "triggers": entry.all_triggers
+            }
+            for entry in lore_entries
+        ]
+
+        # Get previous act synopses
+        previous_act_synopses = ContextBuilder._get_previous_act_synopses(chapter)
+        context["previous_act_synopses"] = previous_act_synopses
+
+        # Get current act chapter summaries
+        current_act_summaries = ContextBuilder._get_current_act_chapter_summaries(chapter)
+        context["current_act_chapter_summaries"] = current_act_summaries
+
+        # Get recent chapter content (full content for last N chapters)
+        recent_content = ContextBuilder._get_recent_chapter_content(chapter, count=recent_content_count)
+        context["recent_chapter_content"] = recent_content
+
+        return context
 
 
 class AIService:
@@ -477,6 +579,35 @@ class AIService:
         except Exception as e:
             logger.error(f"Generate summary stream error: {str(e)}")
             raise Exception(f"{prompts.ERROR_SUMMARY_FAILED}: {str(e)}")
+
+    async def generate_act_synopsis_stream(
+        self,
+        act,
+        chapter_summaries: str,
+        lore_entries_text: str = ""
+    ) -> AsyncGenerator[str, None]:
+        """Generate act/book synopsis - streaming version
+        
+        Args:
+            act: The Act object
+            chapter_summaries: Pre-formatted chapter summaries
+            lore_entries_text: Pre-formatted lore entries text
+        """
+        user_content = prompts.format_act_synopsis_request(
+            act.name,
+            chapter_summaries,
+            lore_entries_text
+        )
+        messages = [
+            {"role": "user", "content": user_content}
+        ]
+
+        try:
+            async for chunk in self.provider.chat_completion_stream(messages):
+                yield chunk
+        except Exception as e:
+            logger.error(f"Generate act synopsis stream error: {str(e)}")
+            raise Exception(f"卷摘要生成失败: {str(e)}")
 
     async def chat_with_ai_stream(
         self,

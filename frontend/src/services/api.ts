@@ -296,6 +296,123 @@ export const aiApi = {
     return eventSource;
   },
 
+  // Streaming version of generate act synopsis
+  generateActSynopsisStream: async (
+    workId: number,
+    actId: number,
+    callbacks: {
+      onStart?: () => void;
+      onChapterProgress?: (info: { chapter: string; status: string; current: number; total: number; message?: string }) => void;
+      onChapterDone?: (chapter: string) => void;
+      onChapterSkip?: (chapter: string, message: string) => void;
+      onChapterError?: (chapter: string, message: string) => void;
+      onSynopsisProgress?: (message: string) => void;
+      onChunk?: (chunk: string) => void;
+      onEnd?: (synopsis: string) => void;
+      onError?: (message: string) => void;
+    }
+  ) => {
+    // Get auth token
+    let token = '';
+    const authStorage = localStorage.getItem('auth-storage');
+    if (authStorage) {
+      try {
+        const parsedStorage = JSON.parse(authStorage);
+        token = parsedStorage?.state?.token || '';
+      } catch (e) {
+        console.error('Failed to parse auth storage:', e);
+      }
+    }
+
+    const url = `${API_BASE_URL}/ai/act-synopsis/stream/`;
+    
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': token ? `Token ${token}` : ''
+        },
+        body: JSON.stringify({
+          work_id: workId,
+          act_id: actId,
+          token: token
+        }),
+        credentials: 'include'
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const reader = response.body?.getReader();
+      if (!reader) {
+        throw new Error('No response body');
+      }
+
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try {
+              const data = JSON.parse(line.substring(6));
+              
+              switch (data.type) {
+                case 'start':
+                  callbacks.onStart?.();
+                  break;
+                case 'chapter_progress':
+                  callbacks.onChapterProgress?.({
+                    chapter: data.chapter,
+                    status: data.status,
+                    current: data.current,
+                    total: data.total,
+                    message: data.message
+                  });
+                  break;
+                case 'chapter_done':
+                  callbacks.onChapterDone?.(data.chapter);
+                  break;
+                case 'chapter_skip':
+                  callbacks.onChapterSkip?.(data.chapter, data.message);
+                  break;
+                case 'chapter_error':
+                  callbacks.onChapterError?.(data.chapter, data.message);
+                  break;
+                case 'synopsis_progress':
+                  callbacks.onSynopsisProgress?.(data.message);
+                  break;
+                case 'chunk':
+                  callbacks.onChunk?.(data.content);
+                  break;
+                case 'end':
+                  callbacks.onEnd?.(data.synopsis);
+                  break;
+                case 'error':
+                  callbacks.onError?.(data.message);
+                  break;
+              }
+            } catch (error) {
+              console.error('Error parsing SSE data:', error, line);
+            }
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Act synopsis stream error:', error);
+      callbacks.onError?.(`连接错误: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  },
+
   // Get auto-edit prefills
   getPrefills: () => api.get<{ prefills: Record<string, string> }>('/ai/prefills/'),
 

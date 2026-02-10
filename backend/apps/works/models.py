@@ -56,6 +56,7 @@ class Act(models.Model):
     )
     name = models.CharField('卷名', max_length=100)
     order = models.PositiveIntegerField('排序')
+    synopsis = models.TextField('卷摘要', blank=True, default='')
     
     created_at = models.DateTimeField('创建时间', auto_now_add=True)
     updated_at = models.DateTimeField('更新时间', auto_now=True)

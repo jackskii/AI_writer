@@ -9,7 +9,7 @@ class ActSerializer(serializers.ModelSerializer):
     class Meta:
         model = Act
         fields = [
-            'id', 'work', 'name', 'order', 
+            'id', 'work', 'name', 'order', 'synopsis',
             'word_count', 'chapter_count',
             'created_at', 'updated_at'
         ]

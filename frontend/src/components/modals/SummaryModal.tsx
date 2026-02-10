@@ -131,6 +131,10 @@ export const SummaryModal: React.FC<SummaryModalProps> = ({
 
   if (!isOpen || !chapter) return null;
 
+  const MIN_CHAPTER_WORDS = 1000;
+  const chapterWordCount = chapter.content?.length || 0;
+  const hasEnoughWords = chapterWordCount >= MIN_CHAPTER_WORDS;
+
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
       <Card className="w-full max-w-2xl mx-4 max-h-[90vh] overflow-y-auto">
@@ -140,7 +144,10 @@ export const SummaryModal: React.FC<SummaryModalProps> = ({
               <FileText size={20} className="text-dark-primary" />
               <div>
                 <h3 className="text-lg font-semibold text-dark-text">章节摘要</h3>
-                <p className="text-sm text-dark-text-muted">第{chapter.order}章 {chapter.title}</p>
+                <p className="text-sm text-dark-text-muted">
+                  第{chapter.chapter_number}章 {chapter.title}
+                  <span className="ml-2 text-dark-text-muted">({chapterWordCount.toLocaleString()}字)</span>
+                </p>
               </div>
             </div>
             <button
@@ -172,7 +179,7 @@ export const SummaryModal: React.FC<SummaryModalProps> = ({
               <Button
                 variant="outline"
                 onClick={handleGenerate}
-                disabled={isGenerating || !chapter.content}
+                disabled={isGenerating || !chapter.content || !hasEnoughWords}
                 className="flex items-center gap-2"
               >
                 {isStreaming ? (
@@ -205,7 +212,7 @@ export const SummaryModal: React.FC<SummaryModalProps> = ({
                 variant="outline"
                 onClick={onClose}
               >
-                取消
+                关闭
               </Button>
               <Button
                 onClick={handleSave}
@@ -224,8 +231,17 @@ export const SummaryModal: React.FC<SummaryModalProps> = ({
             </div>
           )}
 
+          {chapter.content && !hasEnoughWords && (
+            <div className="bg-yellow-900/20 border border-yellow-700/30 rounded-lg p-3">
+              <p className="text-sm text-yellow-300">
+                💡 章节字数不足，需要至少{MIN_CHAPTER_WORDS.toLocaleString()}字才能生成摘要（当前{chapterWordCount.toLocaleString()}字）
+              </p>
+            </div>
+          )}
+
           <div className="text-xs text-dark-text-muted border-t pt-3">
-            <p>快捷键：Ctrl/Cmd + Enter 保存，Esc 关闭</p>
+            <p>快捷键：Ctrl/Cmd + Enter 保存手动编辑，Esc 关闭</p>
+            <p className="mt-1">提示：AI生成的摘要会自动保存</p>
           </div>
         </CardContent>
       </Card>

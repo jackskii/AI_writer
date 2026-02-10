@@ -25,6 +25,7 @@ import { ActSection } from '../components/chapters/ActSection';
 import { WorkChatPanel } from '../components/work/WorkChatPanel';
 import { FactionSection } from '../components/lore/FactionSection';
 import { LoreTemplateModal } from '../components/modals/LoreTemplateModal';
+import { ActSynopsisModal } from '../components/modals/ActSynopsisModal';
 import type { Work, Act, Chapter, Faction, LoreEntry } from '../types';
 
 export const WorkDetailPage: React.FC = () => {
@@ -47,6 +48,7 @@ export const WorkDetailPage: React.FC = () => {
   const [deleteModalChapter, setDeleteModalChapter] = useState<Chapter | null>(null);
   const [editActNameModal, setEditActNameModal] = useState<{ act: number; currentName?: string } | null>(null);
   const [deleteActModal, setDeleteActModal] = useState<{ act: number; actName?: string } | null>(null);
+  const [actSynopsisModalAct, setActSynopsisModalAct] = useState<Act | null>(null);
   const [isEditingSynopsis, setIsEditingSynopsis] = useState(false);
   const [synopsisContent, setSynopsisContent] = useState('');
   const [isEditingTitle, setIsEditingTitle] = useState(false);
@@ -351,6 +353,8 @@ export const WorkDetailPage: React.FC = () => {
   const handleSaveActName = (actName: string) => { if (editActNameModal) updateActNameMutation.mutate({ actId: editActNameModal.act, name: actName }); };
   const handleDeleteAct = (actId: number) => { const act = actsData?.find(a => a.id === actId); setDeleteActModal({ act: actId, actName: act?.name }); };
   const handleConfirmDeleteAct = () => { if (deleteActModal) deleteActMutation.mutate(deleteActModal.act); };
+  const handleActSynopsis = (act: Act) => setActSynopsisModalAct(act);
+  const handleActSynopsisUpdated = (synopsis: string) => { queryClient.invalidateQueries({ queryKey: ['acts', workIdNum] }); };
   const handleCreateAct = () => {
     const currentOrders = (actsData && Array.isArray(actsData)) ? actsData.map(act => act.order) : [0];
     const nextOrder = Math.max(...currentOrders, 0) + 1;
@@ -505,7 +509,7 @@ export const WorkDetailPage: React.FC = () => {
               <div className="space-y-3">
                 {actsData && Array.isArray(actsData) && actsData.length > 0 ? (
                   actsData.sort((a, b) => a.order - b.order).map(act => (
-                    <ActSection key={act.id} act={act.id} actName={act.name} chapters={(workChapters || []).filter(ch => ch.act === act.id).sort((a, b) => a.chapter_number - b.chapter_number)} onChapterClick={handleChapterClick} onChapterDelete={handleChapterDelete} onChapterSummary={handleChapterSummary} onCreateChapter={handleCreateChapterInAct} onEditActName={handleEditActName} onDeleteAct={handleDeleteAct} onReorderChapters={handleReorderChapters} />
+                    <ActSection key={act.id} actData={act} chapters={(workChapters || []).filter(ch => ch.act === act.id).sort((a, b) => a.chapter_number - b.chapter_number)} onChapterClick={handleChapterClick} onChapterDelete={handleChapterDelete} onChapterSummary={handleChapterSummary} onCreateChapter={handleCreateChapterInAct} onEditActName={handleEditActName} onDeleteAct={handleDeleteAct} onReorderChapters={handleReorderChapters} onActSynopsis={handleActSynopsis} />
                   ))
                 ) : (
                   <div className="text-center py-8 text-dark-text-muted"><BookOpen size={48} className="mx-auto mb-4 opacity-50" /><p>暂无卷，点击"添加新卷"开始创作</p></div>
@@ -549,6 +553,7 @@ export const WorkDetailPage: React.FC = () => {
       <EditActNameModal isOpen={!!editActNameModal} onClose={() => setEditActNameModal(null)} onSave={handleSaveActName} currentName={editActNameModal?.currentName} actNumber={editActNameModal?.act || 1} />
       <DeleteActConfirmDialog act={deleteActModal?.act || null} actName={deleteActModal?.actName} isOpen={!!deleteActModal} onClose={() => setDeleteActModal(null)} onConfirm={handleConfirmDeleteAct} isDeleting={deleteActMutation.isPending} />
       <LoreTemplateModal work={work} isOpen={isLoreTemplateModalOpen} onClose={() => setIsLoreTemplateModalOpen(false)} />
+      <ActSynopsisModal act={actSynopsisModalAct} workId={workIdNum} isOpen={!!actSynopsisModalAct} onClose={() => setActSynopsisModalAct(null)} onSynopsisUpdated={handleActSynopsisUpdated} />
     </div>
   );
 };

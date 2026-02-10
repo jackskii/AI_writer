@@ -16,6 +16,7 @@ export interface Act {
   work: number;
   name: string;
   order: number;
+  synopsis: string;
   word_count: number;
   chapter_count: number;
   created_at: string;

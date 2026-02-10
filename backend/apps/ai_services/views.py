@@ -4,8 +4,9 @@ from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
 from django.shortcuts import get_object_or_404
 from django.http import StreamingHttpResponse, JsonResponse
+from django.db import models
 from asgiref.sync import sync_to_async
-from apps.works.models import Work, Chapter, LoreEntry
+from apps.works.models import Work, Act, Chapter, LoreEntry
 from .services import AIService, run_async_ai_task
 from .models import Suggestion
 from . import prompts
@@ -102,6 +103,63 @@ def save_chapter_summary(chapter, summary):
     """Save chapter summary (async version)"""
     chapter.summary = summary
     chapter.save(update_fields=['summary'])
+
+
+@sync_to_async
+def get_act_by_id(work_id, act_id, user):
+    """Get act by id (async version)"""
+    work = get_object_or_404(Work, id=work_id, author=user)
+    act = get_object_or_404(Act, id=act_id, work=work)
+    return act
+
+
+@sync_to_async
+def save_act_synopsis(act, synopsis):
+    """Save act synopsis (async version)"""
+    act.synopsis = synopsis
+    act.save(update_fields=['synopsis'])
+
+
+@sync_to_async
+def get_chapters_without_summary(act):
+    """Get chapters in act that don't have summaries"""
+    chapters = act.chapters.filter(
+        models.Q(summary__isnull=True) | models.Q(summary='')
+    ).order_by('order')
+    return list(chapters)
+
+
+@sync_to_async
+def get_all_chapters_in_act(act):
+    """Get all chapters in an act"""
+    return list(act.chapters.order_by('order'))
+
+
+@sync_to_async
+def get_lore_entries_for_act(act):
+    """Get lore entries that appear in any chapter of the act"""
+    from django.db.models import Q
+    
+    # Get all chapter content in this act
+    chapters = act.chapters.all()
+    lore_entries = LoreEntry.objects.filter(work=act.work)
+    
+    # Find lore entries that are mentioned in chapter content
+    found_entries = []
+    for entry in lore_entries:
+        # Check all triggers including name
+        all_triggers = [entry.name] + list(entry.triggers or []) + list(entry.extra_triggers or [])
+        for chapter in chapters:
+            if chapter.content:
+                for trigger in all_triggers:
+                    if trigger and trigger in chapter.content:
+                        found_entries.append(entry)
+                        break
+                else:
+                    continue
+                break
+    
+    return found_entries
 
 
 @sync_to_async
@@ -482,6 +540,15 @@ async def ai_summarize_stream(request):
             status=404
         )
 
+    # Check minimum word count (1000 words)
+    MIN_CHAPTER_WORDS = 1000
+    chapter_word_count = len(chapter.content or '') if chapter.content else 0
+    if chapter_word_count < MIN_CHAPTER_WORDS:
+        return HttpResponse(
+            f'data: {json.dumps({"type": "error", "message": f"章节字数不足，需要至少{MIN_CHAPTER_WORDS}字才能生成摘要（当前{chapter_word_count}字）"})}\n\n',
+            content_type='text/event-stream'
+        )
+
     async def generate_stream():
         """生成SSE数据流 (async generator)"""
         try:
@@ -506,6 +573,182 @@ async def ai_summarize_stream(request):
         except Exception as e:
             logger.error(f"Stream AI summarize error: {str(e)}")
             yield f"data: {json.dumps({'type': 'error', 'message': f'AI摘要生成失败: {str(e)}'})}\n\n"
+
+    response = StreamingHttpResponse(
+        generate_stream(),
+        content_type='text/event-stream'
+    )
+    response['Cache-Control'] = 'no-cache'
+    response['X-Accel-Buffering'] = 'no'
+    response['Access-Control-Allow-Origin'] = '*'
+    return response
+
+
+@csrf_exempt
+async def ai_generate_act_synopsis(request):
+    """AI生成卷摘要端点 - SSE流式响应
+    
+    This endpoint will:
+    1. Check which chapters in the act lack summaries
+    2. Generate summaries for those chapters first (streaming progress)
+    3. Then generate the act synopsis using all chapter summaries + lore entries
+    """
+    if request.method != 'POST':
+        return HttpResponse(
+            'data: {"type": "error", "message": "仅支持POST请求"}\n\n',
+            content_type='text/event-stream'
+        )
+
+    # Parse request body
+    try:
+        body = json.loads(request.body.decode('utf-8'))
+    except Exception:
+        return HttpResponse(
+            'data: {"type": "error", "message": "无效的请求数据"}\n\n',
+            content_type='text/event-stream'
+        )
+
+    # Authenticate user
+    user = None
+    token = request.GET.get('token') or body.get('token')
+    if token:
+        try:
+            user = await get_token_user(token)
+        except Exception:
+            return HttpResponse(
+                'data: {"type": "error", "message": "认证令牌无效"}\n\n',
+                content_type='text/event-stream',
+                status=401
+            )
+    elif hasattr(request, 'user') and request.user.is_authenticated:
+        user = request.user
+    else:
+        return HttpResponse(
+            'data: {"type": "error", "message": "需要登录"}\n\n',
+            content_type='text/event-stream',
+            status=401
+        )
+
+    work_id = body.get('work_id')
+    act_id = body.get('act_id')
+
+    if not all([work_id, act_id]):
+        return HttpResponse(
+            'data: {"type": "error", "message": "缺少必要参数"}\n\n',
+            content_type='text/event-stream'
+        )
+
+    try:
+        act = await get_act_by_id(work_id, act_id, user)
+    except Exception:
+        return HttpResponse(
+            'data: {"type": "error", "message": "卷不存在"}\n\n',
+            content_type='text/event-stream',
+            status=404
+        )
+
+    # Constants for validation
+    MIN_CHAPTERS_FOR_ACT_SYNOPSIS = 3
+    MIN_CHAPTER_WORDS = 1000
+
+    async def generate_stream():
+        """生成SSE数据流"""
+        try:
+            api_key, provider = await get_user_api_key_async(user)
+            ai_service = AIService(api_key=api_key, provider_name=provider)
+
+            yield f"data: {json.dumps({'type': 'start', 'message': '开始生成卷摘要'})}\n\n"
+
+            # Step 1: Get all chapters and validate minimum count
+            all_chapters = await get_all_chapters_in_act(act)
+
+            if not all_chapters:
+                yield f"data: {json.dumps({'type': 'error', 'message': '本卷没有章节'})}\n\n"
+                return
+
+            if len(all_chapters) < MIN_CHAPTERS_FOR_ACT_SYNOPSIS:
+                yield f"data: {json.dumps({'type': 'error', 'message': f'本卷章节数不足，需要至少{MIN_CHAPTERS_FOR_ACT_SYNOPSIS}个章节才能生成卷摘要（当前{len(all_chapters)}章）'})}\n\n"
+                return
+
+            # Step 2: Get chapters without summaries (only those with sufficient word count)
+            chapters_without_summary = await get_chapters_without_summary(act)
+            
+            # Step 3: Generate summaries for chapters that don't have them
+            if chapters_without_summary:
+                # Filter to only chapters with sufficient word count
+                eligible_chapters = [ch for ch in chapters_without_summary if len(ch.content or '') >= MIN_CHAPTER_WORDS]
+                skipped_chapters = [ch for ch in chapters_without_summary if len(ch.content or '') < MIN_CHAPTER_WORDS]
+                
+                if eligible_chapters:
+                    yield f"data: {json.dumps({'type': 'chapter_progress', 'message': f'需要先为 {len(eligible_chapters)} 个章节生成摘要', 'total': len(eligible_chapters), 'current': 0})}\n\n"
+                
+                # Report skipped chapters due to insufficient word count
+                for chapter in skipped_chapters:
+                    word_count = len(chapter.content or '')
+                    yield f"data: {json.dumps({'type': 'chapter_skip', 'chapter': f'第{chapter.chapter_number}章《{chapter.title}》', 'message': f'字数不足（{word_count}字，需{MIN_CHAPTER_WORDS}字）'})}\n\n"
+                
+                for idx, chapter in enumerate(eligible_chapters):
+                    if not chapter.content or not chapter.content.strip():
+                        yield f"data: {json.dumps({'type': 'chapter_skip', 'chapter': f'第{chapter.chapter_number}章《{chapter.title}》', 'message': '章节内容为空，跳过'})}\n\n"
+                        continue
+
+                    yield f"data: {json.dumps({'type': 'chapter_progress', 'chapter': f'第{chapter.chapter_number}章《{chapter.title}》', 'status': 'generating', 'current': idx + 1, 'total': len(eligible_chapters)})}\n\n"
+                    
+                    try:
+                        accumulated_summary = ''
+                        async for chunk in ai_service.generate_summary_stream(chapter):
+                            accumulated_summary += chunk
+                        
+                        # Save summary to the chapter (auto-save)
+                        await save_chapter_summary(chapter, accumulated_summary)
+                        yield f"data: {json.dumps({'type': 'chapter_done', 'chapter': f'第{chapter.chapter_number}章《{chapter.title}》', 'status': 'done'})}\n\n"
+                    except Exception as e:
+                        logger.error(f"Error generating chapter summary: {str(e)}")
+                        yield f"data: {json.dumps({'type': 'chapter_error', 'chapter': f'第{chapter.chapter_number}章《{chapter.title}》', 'message': str(e)})}\n\n"
+
+            # Step 3: Refresh chapters to get updated summaries
+            all_chapters = await get_all_chapters_in_act(act)
+            
+            # Build chapter summaries text
+            chapter_summaries_parts = []
+            for chapter in all_chapters:
+                if chapter.summary:
+                    chapter_summaries_parts.append(f"第{chapter.chapter_number}章《{chapter.title}》：\n{chapter.summary}")
+            
+            if not chapter_summaries_parts:
+                yield f"data: {json.dumps({'type': 'error', 'message': '没有章节摘要可用于生成卷摘要'})}\n\n"
+                return
+
+            chapter_summaries_text = "\n\n".join(chapter_summaries_parts)
+
+            # Step 4: Get lore entries for this act
+            lore_entries = await get_lore_entries_for_act(act)
+            lore_entries_text = ""
+            if lore_entries:
+                lore_parts = []
+                for entry in lore_entries:
+                    lore_parts.append(f"【{entry.name}】\n{entry.description}")
+                lore_entries_text = "\n\n".join(lore_parts)
+
+            # Step 5: Generate act synopsis
+            yield f"data: {json.dumps({'type': 'synopsis_progress', 'message': '正在生成卷摘要...'})}\n\n"
+            
+            accumulated_synopsis = ''
+            try:
+                async for chunk in ai_service.generate_act_synopsis_stream(act, chapter_summaries_text, lore_entries_text):
+                    accumulated_synopsis += chunk
+                    yield f"data: {json.dumps({'type': 'chunk', 'content': chunk})}\n\n"
+
+                # Save synopsis to act
+                await save_act_synopsis(act, accumulated_synopsis)
+                yield f"data: {json.dumps({'type': 'end', 'message': '卷摘要生成完成', 'synopsis': accumulated_synopsis})}\n\n"
+            except Exception as e:
+                logger.error(f"Error generating act synopsis: {str(e)}")
+                yield f"data: {json.dumps({'type': 'error', 'message': f'卷摘要生成失败: {str(e)}'})}\n\n"
+
+        except Exception as e:
+            logger.error(f"Stream AI act synopsis error: {str(e)}")
+            yield f"data: {json.dumps({'type': 'error', 'message': f'卷摘要生成失败: {str(e)}'})}\n\n"
 
     response = StreamingHttpResponse(
         generate_stream(),
