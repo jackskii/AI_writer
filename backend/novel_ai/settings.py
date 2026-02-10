@@ -166,6 +166,18 @@ CORS_ALLOW_HEADERS = [
     'x-requested-with',
 ]
 
+# CSRF Trusted Origins - Must match CORS_ALLOWED_ORIGINS for PWA compatibility
+CSRF_TRUSTED_ORIGINS = CORS_ALLOWED_ORIGINS.copy()
+# Add production domain from environment if set
+if os.environ.get('FRONTEND_URL'):
+    frontend_url = os.environ.get('FRONTEND_URL')
+    if frontend_url not in CSRF_TRUSTED_ORIGINS:
+        CSRF_TRUSTED_ORIGINS.append(frontend_url)
+# Add any additional trusted origins from environment
+if os.environ.get('CSRF_TRUSTED_ORIGINS'):
+    additional_origins = os.environ.get('CSRF_TRUSTED_ORIGINS').split(',')
+    CSRF_TRUSTED_ORIGINS.extend([origin.strip() for origin in additional_origins if origin.strip()])
+
 # Password validation
 AUTH_PASSWORD_VALIDATORS = [
     {
@@ -293,7 +305,7 @@ AXES_HANDLER = 'axes.handlers.database.AxesDatabaseHandler'
 # Cookie Security Settings
 SESSION_COOKIE_SECURE = os.environ.get('SECURE_SSL_REDIRECT', 'False').lower() == 'true'
 SESSION_COOKIE_HTTPONLY = True
-SESSION_COOKIE_SAMESITE = 'Strict'
+SESSION_COOKIE_SAMESITE = 'Lax'  # Changed from 'Strict' to 'Lax' for PWA compatibility
 CSRF_COOKIE_SECURE = os.environ.get('SECURE_SSL_REDIRECT', 'False').lower() == 'true'
 CSRF_COOKIE_HTTPONLY = True
-CSRF_COOKIE_SAMESITE = 'Strict'
+CSRF_COOKIE_SAMESITE = 'Lax'  # Changed from 'Strict' to 'Lax' for PWA compatibility
