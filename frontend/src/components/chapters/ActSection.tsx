@@ -99,14 +99,15 @@ export const ActSection: React.FC<ActSectionProps> = ({
           )}
           
           <div className="flex items-center gap-2">
+            {/* Hide icon on mobile */}
             {isSideChapters ? (
-              <FileText size={16} className="text-dark-text-muted" />
+              <FileText size={16} className="text-dark-text-muted hidden md:block" />
             ) : (
-              <BookOpen size={16} className="text-dark-primary" />
+              <BookOpen size={16} className="text-dark-primary hidden md:block" />
             )}
             <div>
               <div className="flex items-center gap-2">
-                <h3 className={`font-medium ${isSideChapters ? 'text-dark-text-muted' : 'text-dark-text'}`}>
+                <h3 className={`font-medium text-sm md:text-base ${isSideChapters ? 'text-dark-text-muted' : 'text-dark-text'}`}>
                   {displayName}
                 </h3>
                 {isSideChapters && (
@@ -134,7 +135,7 @@ export const ActSection: React.FC<ActSectionProps> = ({
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5 md:gap-2">
           <Button
             variant="outline"
             size="sm"
@@ -142,10 +143,11 @@ export const ActSection: React.FC<ActSectionProps> = ({
               e.stopPropagation();
               onActSynopsis(actData);
             }}
-            className={`${hasSynopsis ? 'bg-green-500/10 border-green-500/30 text-green-400 hover:bg-green-500/20 hover:border-green-500/50' : 'bg-dark-surface/50 border-dark-border text-dark-text-muted hover:bg-dark-primary/20 hover:text-dark-primary'} text-xs px-3 py-1 h-7 flex items-center gap-1 font-medium`}
+            className={`${hasSynopsis ? 'bg-green-500/10 border-green-500/30 text-green-400 hover:bg-green-500/20 hover:border-green-500/50' : 'bg-dark-surface/50 border-dark-border text-dark-text-muted hover:bg-dark-primary/20 hover:text-dark-primary'} text-xs px-2 md:px-3 py-1 h-7 flex items-center gap-0.5 md:gap-1 font-medium`}
             title={hasSynopsis ? "编辑卷摘要" : "生成卷摘要"}
           >
-            <FileText size={12} />
+            {/* Hide icon on mobile */}
+            <FileText size={12} className="hidden md:block" />
             摘要
           </Button>
           
@@ -156,9 +158,9 @@ export const ActSection: React.FC<ActSectionProps> = ({
               e.stopPropagation();
               onCreateChapter(actData.id);
             }}
-            className="bg-dark-primary/10 border-dark-primary/30 text-dark-primary hover:bg-dark-primary/20 hover:border-dark-primary/50 text-xs px-3 py-1 h-7 flex items-center gap-1 font-medium"
+            className="bg-dark-primary/10 border-dark-primary/30 text-dark-primary hover:bg-dark-primary/20 hover:border-dark-primary/50 text-xs px-2 md:px-3 py-1 h-7 flex items-center gap-0.5 md:gap-1 font-medium"
           >
-            <Plus size={12} />
+            <Plus size={12} className="hidden md:block" />
             添加章节
           </Button>
           
@@ -169,11 +171,11 @@ export const ActSection: React.FC<ActSectionProps> = ({
               e.stopPropagation();
               onDeleteAct(actData.id);
             }}
-            className="h-7 px-2 hover:bg-red-500/20 hover:text-red-400 text-dark-text-muted flex items-center gap-1 transition-colors"
+            className="h-7 px-1.5 md:px-2 hover:bg-red-500/20 hover:text-red-400 text-dark-text-muted flex items-center gap-0.5 md:gap-1 transition-colors"
             title={chapters.length > 0 ? "请先删除所有章节" : "删除空卷"}
             disabled={chapters.length > 0}
           >
-            <Trash2 size={12} />
+            <Trash2 size={12} className="hidden md:block" />
             <span className="text-xs">删除</span>
           </Button>
         </div>

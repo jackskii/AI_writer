@@ -55,6 +55,7 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSuccess, onSwitchToRegis
             <User size={18} className="absolute left-3 top-1/2 transform -translate-y-1/2 text-dark-text-muted" />
             <Input
               type="text"
+              inputMode="email"
               value={formData.username}
               onChange={handleChange('username')}
               placeholder="请输入用户名"

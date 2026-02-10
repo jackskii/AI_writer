@@ -425,13 +425,12 @@ export const aiApi = {
     chapterId: number,
     selectedText: string,
     context: {
-      chapterSelection: 'all' | 'past_1' | 'custom' | 'none';
+      chapterSelection: 'all' | 'custom' | 'none';
       customChapterCount?: number;
       selectedLoreEntries: number[];
       model: 'deepseek-chat' | 'deepseek-reasoner';
       editRequirement?: string;
       styleId?: number;
-      useSummaries?: boolean;
     },
     onChunk: (chunk: string) => void,
     onStart?: () => void,
@@ -466,10 +465,6 @@ export const aiApi = {
 
     if (context.styleId) {
       requestBody.style_id = context.styleId;
-    }
-
-    if (context.useSummaries) {
-      requestBody.use_summaries = true;
     }
 
     // Add token for authentication

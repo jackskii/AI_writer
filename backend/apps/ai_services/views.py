@@ -163,11 +163,14 @@ def get_lore_entries_for_act(act):
 
 
 @sync_to_async
-def build_auto_edit_context(work, chapter, user, style_id, selected_lore_ids, chapter_selection, custom_chapter_count, use_summaries=False):
+def build_auto_edit_context(work, chapter, user, style_id, selected_lore_ids, chapter_selection, custom_chapter_count):
     """Build context for auto-edit (async version)
     
+    New logic:
+    - ALWAYS includes: all previous act synopses + all previous chapter synopses in current act
+    - If chapter_selection is not 'none', replaces the last x chapter synopses with full text
+    
     For side chapters: only includes work synopsis, normal act synopses, and selected lore entries.
-    For normal chapters: excludes side chapters from previous chapters.
     """
     formatted_context = ""
 
@@ -213,53 +216,62 @@ def build_auto_edit_context(work, chapter, user, style_id, selected_lore_ids, ch
                 formatted_context += f"【{act.name}】\n{act.synopsis}\n\n"
             formatted_context += "---\n\n"
     else:
-        # For normal chapters, add previous chapters from current act only
-        current_act = chapter.act
-        available_previous_count = current_act.chapters.filter(
+        # For normal chapters: ALWAYS include previous act synopses
+        from apps.works.models import Act
+        previous_acts = Act.objects.filter(
+            work=work,
+            act_type='normal',
+            order__lt=current_act.order
+        ).exclude(synopsis__isnull=True).exclude(synopsis='').order_by('order')
+        
+        if previous_acts:
+            formatted_context += "前卷摘要：\n\n"
+            for act in previous_acts:
+                formatted_context += f"【{act.name}】\n{act.synopsis}\n\n"
+            formatted_context += "---\n\n"
+        
+        # Get all previous chapters in current act (in order)
+        all_previous_chapters = list(current_act.chapters.filter(
             order__lt=chapter.order
-        ).count() if current_act else 0
-
-        previous_chapters = []
+        ).order_by('order')) if current_act else []
+        
+        # Determine which chapters to replace with full text
+        chapters_to_replace_with_full_text = []
         if chapter_selection == 'none':
-            previous_chapters = []
+            # No replacement, use all summaries
+            chapters_to_replace_with_full_text = []
         elif chapter_selection == 'all':
-            # Only chapters from current act
-            previous_chapters = list(current_act.chapters.filter(
-                order__lt=chapter.order
-            ).order_by('order')) if current_act else []
+            # Replace all chapter synopses with full text
+            chapters_to_replace_with_full_text = all_previous_chapters
         elif chapter_selection == 'custom':
+            # Replace last x chapters with full text
             try:
                 count = int(custom_chapter_count)
+                available_previous_count = len(all_previous_chapters)
                 count = min(max(0, count), available_previous_count)
                 if count > 0:
-                    previous_chapters = list(current_act.chapters.filter(
-                        order__lt=chapter.order
-                    ).order_by('-order')[:count]) if current_act else []
-                    previous_chapters = list(reversed(previous_chapters))
+                    # Get last x chapters (most recent)
+                    chapters_to_replace_with_full_text = all_previous_chapters[-count:]
             except:
-                count = 1
-                previous_chapters = list(current_act.chapters.filter(
-                    order__lt=chapter.order
-                ).order_by('-order')[:count]) if current_act else []
-                previous_chapters = list(reversed(previous_chapters))
-        else:  # 'past_1' (default, changed from 'past_3')
-            count = min(1, available_previous_count)
-            previous_chapters = list(current_act.chapters.filter(
-                order__lt=chapter.order
-            ).order_by('-order')[:count]) if current_act else []
-            previous_chapters = list(reversed(previous_chapters))
-
-        if previous_chapters:
-            if use_summaries:
-                formatted_context += "前文章节摘要：\n\n"
-                for ch in previous_chapters:
-                    summary_text = ch.summary or '(无摘要)'
-                    formatted_context += f"第{ch.chapter_number}章《{ch.title}》摘要：{summary_text}\n\n"
-                formatted_context += "---\n\n"
-            else:
-                formatted_context += "前文章节：\n\n"
-                for ch in previous_chapters:
+                chapters_to_replace_with_full_text = []
+        
+        # Build list of chapter IDs to replace
+        replace_ids = {ch.id for ch in chapters_to_replace_with_full_text}
+        
+        # Add chapter summaries (or full text for replaced chapters)
+        if all_previous_chapters:
+            formatted_context += "本卷前文章节：\n\n"
+            
+            for ch in all_previous_chapters:
+                if ch.id in replace_ids:
+                    # Use full text for replaced chapters
                     formatted_context += f"第{ch.chapter_number}章《{ch.title}》\n\n{ch.content or '(空章节)'}\n\n---\n\n"
+                elif ch.summary:
+                    # Use summary for non-replaced chapters (if summary exists)
+                    formatted_context += f"第{ch.chapter_number}章《{ch.title}》摘要：{ch.summary}\n\n"
+                # If no summary and not replaced, skip (don't include)
+            
+            formatted_context += "---\n\n"
 
     # Add current chapter content at the end
     if chapter.content:
@@ -838,13 +850,12 @@ async def ai_auto_edit_stream(request):
     chapter_id = body.get('chapter_id')
 
     # Context customization parameters
-    chapter_selection = body.get('chapter_selection', 'past_1')
-    custom_chapter_count = body.get('custom_chapter_count', '3')
+    chapter_selection = body.get('chapter_selection', 'none')
+    custom_chapter_count = body.get('custom_chapter_count', '1')
     selected_lore_ids = body.get('selected_lore_ids', '')
     model = body.get('model')  # Let provider determine default model
     edit_requirement = body.get('edit_requirement', '')
     style_id = body.get('style_id', '')
-    use_summaries = body.get('use_summaries', False)
 
     if not all([work_id, chapter_id]):
         return HttpResponse(
@@ -867,7 +878,7 @@ async def ai_auto_edit_stream(request):
             # Build context
             formatted_context = await build_auto_edit_context(
                 work, chapter, user, style_id, selected_lore_ids,
-                chapter_selection, custom_chapter_count, use_summaries
+                chapter_selection, custom_chapter_count
             )
 
             # Get API key and AI settings

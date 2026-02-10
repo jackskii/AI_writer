@@ -3,7 +3,7 @@ import { X, ChevronLeft, ChevronRight, Square, Wand2, Check, RotateCcw, Settings
 import { Button } from '../ui/Button';
 import { Textarea } from '../ui/Input';
 import { useMobile } from '../../hooks/useMobile';
-import type { Work, Chapter, Faction, LoreEntry, WritingStyle } from '../../types';
+import type { Work, Act, Chapter, Faction, LoreEntry, WritingStyle } from '../../types';
 
 interface AutoEditModalProps {
   isOpen: boolean;
@@ -25,13 +25,12 @@ interface AutoEditModalProps {
 }
 
 export interface AutoEditContext {
-  chapterSelection: 'all' | 'past_1' | 'custom' | 'none';
+  chapterSelection: 'all' | 'custom' | 'none';
   customChapterCount?: number;
   selectedLoreEntries: number[]; // IDs of selected lore entries
   model: 'deepseek-chat' | 'deepseek-reasoner';
   editRequirement?: string; // Editing requirement/instruction
   styleId?: number; // Optional writing style ID
-  useSummaries?: boolean; // Use chapter summaries instead of full content
 }
 
 interface AutoEditVersion {
@@ -73,9 +72,8 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
 
   // State for customize panel
   const [showCustomize, setShowCustomize] = useState(false);
-  const [chapterSelection, setChapterSelection] = useState<'all' | 'past_1' | 'custom' | 'none'>('past_1');
+  const [chapterSelection, setChapterSelection] = useState<'all' | 'custom' | 'none'>('none');
   const [customChapterCount, setCustomChapterCount] = useState(1);
-  const [useSummaries, setUseSummaries] = useState(false);
   const [loreEntries, setLoreEntries] = useState<LoreEntry[]>([]);
   const [factions, setFactions] = useState<Faction[]>([]);
   
@@ -112,6 +110,8 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
 
   // All chapters for accurate prompt length calculation
   const [allChapters, setAllChapters] = useState<Chapter[]>([]);
+  // All acts for accurate prompt length calculation
+  const [allActs, setAllActs] = useState<Act[]>([]);
 
   // Track selected prefill key for persistence
   const [selectedPrefillKey, setSelectedPrefillKey] = useState<string>(() => {
@@ -157,20 +157,32 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
     }
   }, [isOpen]);
 
-  // Load all chapters when modal opens for accurate prompt length calculation
+  // Load all chapters and acts when modal opens for accurate prompt length calculation
   useEffect(() => {
     if (isOpen && work?.id) {
-      const loadChapters = async () => {
+      const loadData = async () => {
         try {
-          const { chaptersApi } = await import('../../services/api');
-          const response = await chaptersApi.list(work.id);
-          setAllChapters(response.data);
+          const { chaptersApi, actsApi } = await import('../../services/api');
+          const [chaptersResponse, actsResponse] = await Promise.all([
+            chaptersApi.list(work.id),
+            actsApi.list(work.id)
+          ]);
+          // Handle both array and paginated response formats
+          const chaptersData = Array.isArray(chaptersResponse.data) 
+            ? chaptersResponse.data 
+            : ((chaptersResponse.data as any)?.results || []);
+          const actsData = Array.isArray(actsResponse.data) 
+            ? actsResponse.data 
+            : ((actsResponse.data as any)?.results || []);
+          setAllChapters(chaptersData);
+          setAllActs(actsData);
         } catch (error) {
-          console.error('Failed to load chapters:', error);
+          console.error('Failed to load chapters/acts:', error);
           setAllChapters([]);
+          setAllActs([]);
         }
       };
-      loadChapters();
+      loadData();
     }
   }, [isOpen, work?.id]);
 
@@ -317,7 +329,6 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
       model: selectedModel,
       editRequirement: editRequirement.trim() || '修改',
       styleId: selectedStyleId || undefined,
-      useSummaries: useSummaries
     };
 
     // Create abort controller for this request
@@ -445,6 +456,14 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
   const calculatePromptLength = (): number => {
     let length = 0;
 
+    // Add writing style if selected (actual)
+    if (selectedStyleId) {
+      const selectedStyle = styles.find(s => s.id === selectedStyleId);
+      if (selectedStyle?.style_data) {
+        length += selectedStyle.style_data.length + 30; // +30 for "写作风格参考：\n\n" and "---\n\n"
+      }
+    }
+
     // Add work synopsis (actual)
     if (work.synopsis) {
       length += work.synopsis.length + 20; // +20 for "作品大纲：" etc
@@ -452,42 +471,94 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
 
     // Add selected lore entries (actual)
     const selectedLore = safeLoreeEntries.filter(entry => selectedLoreIds.includes(entry.id));
-    selectedLore.forEach(entry => {
-      length += entry.name.length + entry.description.length + 30; // +30 for formatting
-    });
-
-    // Calculate previous chapters from current act only
-    const previousChapters = allChapters
-      .filter(ch => ch.act === chapter.act && ch.chapter_number < chapter.chapter_number)
-      .sort((a, b) => b.chapter_number - a.chapter_number);
-
-    let chaptersToInclude: Chapter[] = [];
-    if (chapterSelection === 'none') {
-      chaptersToInclude = [];
-    } else if (chapterSelection === 'all') {
-      chaptersToInclude = previousChapters;
-    } else if (chapterSelection === 'past_1') {
-      chaptersToInclude = previousChapters.slice(0, 1);
-    } else if (chapterSelection === 'custom') {
-      chaptersToInclude = previousChapters.slice(0, customChapterCount);
+    if (selectedLore.length > 0) {
+      length += 20; // "世界观条目：\n\n"
+      selectedLore.forEach(entry => {
+        length += entry.name.length + entry.description.length + 20; // +20 for "【】\n\n" formatting
+      });
+      length += 10; // "---\n\n"
     }
 
-    // Use actual word_count from fetched chapters
-    if (useSummaries) {
-      // Summaries are much shorter - use actual summary length or estimate
-      chaptersToInclude.forEach(ch => {
-        length += (ch.summary?.length || 200) + 50; // +50 for chapter title formatting
-      });
+    // Ensure allActs is an array
+    const safeActs = Array.isArray(allActs) ? allActs : [];
+    
+    // Check if this is a side chapter
+    const currentAct = safeActs.find(a => a.id === chapter.act);
+    const isSideChapter = currentAct?.act_type === 'side_chapters';
+
+    if (isSideChapter) {
+      // For side chapters: include all normal act synopses
+      const normalActs = safeActs
+        .filter(a => a.act_type === 'normal' && a.synopsis)
+        .sort((a, b) => a.order - b.order);
+      
+      if (normalActs.length > 0) {
+        length += 20; // "正文章节摘要：\n\n"
+        normalActs.forEach(act => {
+          length += act.name.length + (act.synopsis?.length || 0) + 20; // +20 for "【】\n\n" formatting
+        });
+        length += 10; // "---\n\n"
+      }
     } else {
-      chaptersToInclude.forEach(ch => {
-        // word_count is Chinese characters, so length ≈ word_count
-        // Add formatting overhead per chapter
-        length += (ch.word_count || 0) + 50;
-      });
+      // For normal chapters: include previous act synopses
+      if (currentAct) {
+        const previousActs = safeActs
+          .filter(a => a.act_type === 'normal' && a.order < currentAct.order && a.synopsis)
+          .sort((a, b) => a.order - b.order);
+        
+        if (previousActs.length > 0) {
+          length += 20; // "前卷摘要：\n\n"
+          previousActs.forEach(act => {
+            length += act.name.length + (act.synopsis?.length || 0) + 20; // +20 for "【】\n\n" formatting
+          });
+          length += 10; // "---\n\n"
+        }
+      }
+
+      // Calculate previous chapters from current act only (sorted by chapter_number ascending)
+      const previousChapters = allChapters
+        .filter(ch => ch.act === chapter.act && ch.chapter_number < chapter.chapter_number)
+        .sort((a, b) => a.chapter_number - b.chapter_number);
+
+      // Always include all previous act synopses and chapter synopses
+      // If chapterSelection is not 'none', replace last x chapters with full text
+      let chaptersToReplaceWithFullText: Chapter[] = [];
+      if (chapterSelection === 'none') {
+        chaptersToReplaceWithFullText = [];
+      } else if (chapterSelection === 'all') {
+        chaptersToReplaceWithFullText = previousChapters;
+      } else if (chapterSelection === 'custom') {
+        // Get last x chapters (most recent, highest chapter numbers)
+        chaptersToReplaceWithFullText = previousChapters.slice(-customChapterCount);
+      }
+
+      // Add chapter summaries (or full text for replaced chapters)
+      if (previousChapters.length > 0) {
+        length += 20; // "本卷前文章节：\n\n"
+        
+        previousChapters.forEach(ch => {
+          if (chaptersToReplaceWithFullText.includes(ch)) {
+            // Full text length - use content if available, otherwise word_count (for Chinese, word_count ≈ char count)
+            const chapterTitle = `第${ch.chapter_number}章《${ch.title}》\n\n`;
+            const contentLength = ch.content?.length || ch.word_count || 0;
+            length += chapterTitle.length + contentLength + 10; // +10 for "\n\n---\n\n"
+          } else if (ch.summary) {
+            // Summary length
+            const chapterTitle = `第${ch.chapter_number}章《${ch.title}》摘要：`;
+            length += chapterTitle.length + ch.summary.length + 5; // +5 for "\n\n"
+          }
+          // If no summary and not replaced, skip (don't include)
+        });
+        
+        length += 10; // "---\n\n"
+      }
     }
 
     // Add current chapter content (actual)
-    length += chapter.content?.length || 0;
+    if (chapter.content) {
+      const currentChapterTitle = `当前章节《${chapter.title}》全文：\n\n`;
+      length += currentChapterTitle.length + chapter.content.length + 10; // +10 for "\n\n---\n\n"
+    }
 
     // Add original text (actual)
     length += originalText.length;
@@ -495,8 +566,8 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
     // Add edit requirement (actual)
     length += editRequirement.length;
 
-    // Add system prompt and formatting overhead
-    length += 500;
+    // Add system prompt and formatting overhead (for auto-edit prompt structure)
+    length += 1000; // System prompt + formatting overhead
 
     return length;
   };
@@ -698,25 +769,7 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
                       onChange={() => setChapterSelection('none')}
                       className="text-dark-primary"
                     />
-                    <span className="text-sm text-dark-text">不使用前文</span>
-                  </label>
-                  <label className="flex items-center gap-2">
-                    <input
-                      type="radio"
-                      checked={chapterSelection === 'past_1'}
-                      onChange={() => setChapterSelection('past_1')}
-                      className="text-dark-primary"
-                    />
-                    <span className="text-sm text-dark-text">最近1章</span>
-                  </label>
-                  <label className="flex items-center gap-2">
-                    <input
-                      type="radio"
-                      checked={chapterSelection === 'all'}
-                      onChange={() => setChapterSelection('all')}
-                      className="text-dark-primary"
-                    />
-                    <span className="text-sm text-dark-text">本卷所有前文 ({availablePreviousChapters} 章)</span>
+                    <span className="text-sm text-dark-text">不使用前文章节（仅摘要）</span>
                   </label>
                   <label className="flex items-center gap-2">
                     <input
@@ -725,39 +778,43 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
                       onChange={() => setChapterSelection('custom')}
                       className="text-dark-primary"
                     />
-                    <span className="text-sm text-dark-text">自定义数量</span>
-                  </label>
-                  {chapterSelection === 'custom' && (
-                    <div className="ml-6 flex items-center gap-2">
-                      <input
-                        type="number"
-                        min={0}
-                        max={availablePreviousChapters}
-                        value={customChapterCount}
-                        onChange={(e) => {
-                          const value = parseInt(e.target.value);
-                          if (isNaN(value)) {
-                            setCustomChapterCount(0);
-                          } else {
-                            setCustomChapterCount(Math.min(Math.max(0, value), availablePreviousChapters));
-                          }
-                        }}
-                        className="w-20 px-2 py-1 text-sm border border-dark-border rounded bg-dark-bg text-dark-text"
-                      />
-                    </div>
-                  )}
-                </div>
-                {chapterSelection !== 'none' && (
-                  <label className="flex items-center gap-2 mt-3 pt-3 border-t border-dark-border">
+                    <span className="text-sm text-dark-text">使用前</span>
                     <input
-                      type="checkbox"
-                      checked={useSummaries}
-                      onChange={(e) => setUseSummaries(e.target.checked)}
+                      type="number"
+                      min={0}
+                      max={availablePreviousChapters}
+                      value={customChapterCount}
+                      onChange={(e) => {
+                        const value = parseInt(e.target.value);
+                        if (isNaN(value)) {
+                          setCustomChapterCount(0);
+                        } else {
+                          const maxVal = Math.max(0, availablePreviousChapters);
+                          setCustomChapterCount(Math.min(Math.max(0, value), maxVal));
+                          if (value > maxVal) {
+                            setCustomChapterCount(maxVal);
+                          }
+                        }
+                      }}
+                      onClick={(e) => e.stopPropagation()}
+                      onFocus={(e) => e.stopPropagation()}
+                      className="w-16 px-2 py-1 text-sm border border-dark-border rounded bg-dark-bg text-dark-text text-center"
+                    />
+                    <span className="text-sm text-dark-text">章（替换为全文）</span>
+                  </label>
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="radio"
+                      checked={chapterSelection === 'all'}
+                      onChange={() => setChapterSelection('all')}
                       className="text-dark-primary"
                     />
-                    <span className="text-sm text-dark-text">使用摘要代替全文</span>
+                    <span className="text-sm text-dark-text">使用所有前文章节 ({availablePreviousChapters} 章)</span>
                   </label>
-                )}
+                </div>
+                <p className="text-xs text-dark-text-muted mt-2">
+                  提示：始终包含所有前卷摘要和本卷前文章节摘要。选择"使用前x章"或"使用所有前文章节"时，将用全文替换对应章节的摘要。
+                </p>
               </div>
 
               {/* Lore Entries */}
@@ -981,25 +1038,7 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
                       onChange={() => setChapterSelection('none')}
                       className="text-dark-primary"
                     />
-                    <span className="text-sm text-dark-text">不使用前文章节</span>
-                  </label>
-                  <label className="flex items-center gap-2">
-                    <input
-                      type="radio"
-                      checked={chapterSelection === 'past_1'}
-                      onChange={() => setChapterSelection('past_1')}
-                      className="text-dark-primary"
-                    />
-                    <span className="text-sm text-dark-text">最近1章</span>
-                  </label>
-                  <label className="flex items-center gap-2">
-                    <input
-                      type="radio"
-                      checked={chapterSelection === 'all'}
-                      onChange={() => setChapterSelection('all')}
-                      className="text-dark-primary"
-                    />
-                    <span className="text-sm text-dark-text">本卷所有前文章节 ({availablePreviousChapters} 章)</span>
+                    <span className="text-sm text-dark-text">不使用前文章节（仅摘要）</span>
                   </label>
                   <label className="flex items-center gap-2">
                     <input
@@ -1008,43 +1047,43 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
                       onChange={() => setChapterSelection('custom')}
                       className="text-dark-primary"
                     />
-                    <span className="text-sm text-dark-text">自定义数量</span>
-                  </label>
-                  {chapterSelection === 'custom' && (
-                    <div className="ml-6 flex items-center gap-2">
-                      <input
-                        type="number"
-                        min={0}
-                        max={availablePreviousChapters}
-                        value={customChapterCount}
-                        onChange={(e) => {
-                          const value = parseInt(e.target.value);
-                          if (isNaN(value)) {
-                            setCustomChapterCount(0);
-                          } else {
-                            setCustomChapterCount(Math.min(Math.max(0, value), availablePreviousChapters));
-                          }
-                        }}
-                        className="w-20 px-2 py-1 text-sm border border-dark-border rounded bg-dark-bg text-dark-text"
-                      />
-                      <span className="text-xs text-dark-text-muted">(0-{availablePreviousChapters})</span>
-                    </div>
-                  )}
-                </div>
-
-                {/* Use Summaries Toggle */}
-                {chapterSelection !== 'none' && (
-                  <label className="flex items-center gap-2 mt-3 pt-3 border-t border-dark-border">
+                    <span className="text-sm text-dark-text">使用前</span>
                     <input
-                      type="checkbox"
-                      checked={useSummaries}
-                      onChange={(e) => setUseSummaries(e.target.checked)}
+                      type="number"
+                      min={0}
+                      max={availablePreviousChapters}
+                      value={customChapterCount}
+                      onChange={(e) => {
+                        const value = parseInt(e.target.value);
+                        if (isNaN(value)) {
+                          setCustomChapterCount(0);
+                        } else {
+                          const maxVal = Math.max(0, availablePreviousChapters);
+                          setCustomChapterCount(Math.min(Math.max(0, value), maxVal));
+                          if (value > maxVal) {
+                            setCustomChapterCount(maxVal);
+                          }
+                        }
+                      }}
+                      onClick={(e) => e.stopPropagation()}
+                      onFocus={(e) => e.stopPropagation()}
+                      className="w-16 px-2 py-1 text-sm border border-dark-border rounded bg-dark-bg text-dark-text text-center"
+                    />
+                    <span className="text-sm text-dark-text">章（替换为全文）</span>
+                  </label>
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="radio"
+                      checked={chapterSelection === 'all'}
+                      onChange={() => setChapterSelection('all')}
                       className="text-dark-primary"
                     />
-                    <span className="text-sm text-dark-text">使用章节摘要代替全文</span>
-                    <span className="text-xs text-dark-text-muted">(减少token用量)</span>
+                    <span className="text-sm text-dark-text">使用所有前文章节 ({availablePreviousChapters} 章)</span>
                   </label>
-                )}
+                </div>
+                <p className="text-xs text-dark-text-muted mt-2">
+                  提示：始终包含所有前卷摘要和本卷前文章节摘要。选择"使用前x章"或"使用所有前文章节"时，将用全文替换对应章节的摘要。
+                </p>
               </div>
 
               {/* Lore Entries Selection */}
