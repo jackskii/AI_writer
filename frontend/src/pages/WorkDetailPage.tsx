@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, Plus, Edit3, Settings, Palette, BookOpen, Layers, FileText } from 'lucide-react';
+import { ArrowLeft, Plus, Edit3, Settings, Palette, BookOpen, Layers, FileText, MessageCircle } from 'lucide-react';
 import { worksApi, actsApi, chaptersApi, loreApi, factionsApi } from '../services/api';
 import { useWorkStore } from '../stores/useWorkStore';
 import { Button } from '../components/ui/Button';
@@ -34,7 +34,13 @@ export const WorkDetailPage: React.FC = () => {
   const { setCurrentWork, setChapters, loreEntries, setLoreEntries } = useWorkStore();
   
   const [activeTab, setActiveTab] = useState<'synopsis' | 'chapters' | 'lore'>('chapters');
-  const [loreViewMode, setLoreViewMode] = useState<'faction' | 'compact'>('faction');
+  const [mobileSynopsisTab, setMobileSynopsisTab] = useState<'synopsis' | 'chat'>('synopsis');
+  const [loreViewMode, setLoreViewMode] = useState<'faction' | 'compact'>(() => {
+    if (typeof window !== 'undefined' && window.innerWidth < 768) {
+      return 'compact';
+    }
+    return 'faction';
+  });
   const [isCreateLoreModalOpen, setIsCreateLoreModalOpen] = useState(false);
   const [createLoreDefaultFaction, setCreateLoreDefaultFaction] = useState<number | null>(null);
   const [editingLoreEntry, setEditingLoreEntry] = useState<LoreEntry | null>(null);
@@ -516,10 +522,11 @@ export const WorkDetailPage: React.FC = () => {
         </div>
       </div>
 
-      <main className="max-w-7xl mx-auto px-6 py-8">
+      <main className={`max-w-7xl mx-auto px-6 py-8 ${activeTab === 'synopsis' ? 'md:pb-8 pb-[80px]' : ''}`}>
         {activeTab === 'synopsis' && (
           <div className="grid gap-6 xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
-            <Card className="flex flex-col h-[670px] overflow-hidden">
+            {/* Desktop: synopsis + chat side by side */}
+            <Card className="hidden md:flex flex-col h-[670px] overflow-hidden">
               <CardHeader className="flex-shrink-0"><h3 className="text-lg font-semibold">作品大纲</h3></CardHeader>
               <CardContent className="flex-1 overflow-hidden">
                 {isEditingSynopsis ? (
@@ -533,7 +540,31 @@ export const WorkDetailPage: React.FC = () => {
                 )}
               </CardContent>
             </Card>
-            <div className="h-[670px]"><WorkChatPanel work={work} /></div>
+            <div className="hidden md:block h-[670px]"><WorkChatPanel work={work} /></div>
+
+            {/* Mobile: dedicated page switch between synopsis and chat */}
+            <div className="md:hidden">
+              {mobileSynopsisTab === 'synopsis' ? (
+                <Card className="flex flex-col h-[calc(100vh-240px)] overflow-hidden">
+                  <CardHeader className="flex-shrink-0"><h3 className="text-lg font-semibold">作品大纲</h3></CardHeader>
+                  <CardContent className="flex-1 overflow-hidden">
+                    {isEditingSynopsis ? (
+                      <Textarea value={synopsisContent} onChange={(e) => setSynopsisContent(e.target.value)} onBlur={handleSaveSynopsis} onKeyDown={handleSynopsisKeyDown} placeholder="请输入作品大纲..." rows={22} className="resize-none h-full min-h-0 overflow-y-auto" />
+                    ) : work.synopsis ? (
+                      <div className="chinese-text text-dark-text whitespace-pre-wrap leading-relaxed hover:bg-dark-surface/30 rounded p-3 cursor-pointer h-full overflow-y-auto" onClick={handleEditSynopsis}>{work.synopsis}</div>
+                    ) : (
+                      <div className="text-center py-8 text-dark-text-muted cursor-pointer h-full flex flex-col justify-center" onClick={handleEditSynopsis}>
+                        <Edit3 size={48} className="mx-auto mb-4 opacity-50" /><p>暂无大纲内容，点击添加</p>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              ) : (
+                <div className="h-[calc(100vh-240px)]">
+                  <WorkChatPanel work={work} />
+                </div>
+              )}
+            </div>
           </div>
         )}
 
@@ -649,6 +680,36 @@ export const WorkDetailPage: React.FC = () => {
       <DeleteActConfirmDialog act={deleteActModal?.act || null} actName={deleteActModal?.actName} isOpen={!!deleteActModal} onClose={() => setDeleteActModal(null)} onConfirm={handleConfirmDeleteAct} isDeleting={deleteActMutation.isPending} />
       <LoreTemplateModal work={work} isOpen={isLoreTemplateModalOpen} onClose={() => setIsLoreTemplateModalOpen(false)} />
       <ActSynopsisModal act={actSynopsisModalAct} workId={workIdNum} isOpen={!!actSynopsisModalAct} onClose={() => setActSynopsisModalAct(null)} onSynopsisUpdated={handleActSynopsisUpdated} />
+
+      {/* Mobile Bottom Tab Bar for Synopsis Page */}
+      {activeTab === 'synopsis' && (
+        <div className="fixed bottom-0 left-0 right-0 md:hidden bg-dark-surface border-t border-dark-border safe-area-bottom z-30">
+          <div className="flex h-[60px]">
+            <button
+              onClick={() => setMobileSynopsisTab('synopsis')}
+              className={`flex-1 flex flex-col items-center justify-center gap-1 transition-colors ${
+                mobileSynopsisTab === 'synopsis'
+                  ? 'text-dark-primary bg-dark-primary/10'
+                  : 'text-dark-text-muted'
+              }`}
+            >
+              <FileText size={20} />
+              <span className="text-xs">大纲</span>
+            </button>
+            <button
+              onClick={() => setMobileSynopsisTab('chat')}
+              className={`flex-1 flex flex-col items-center justify-center gap-1 transition-colors ${
+                mobileSynopsisTab === 'chat'
+                  ? 'text-dark-primary bg-dark-primary/10'
+                  : 'text-dark-text-muted'
+              }`}
+            >
+              <MessageCircle size={20} />
+              <span className="text-xs">AI助手</span>
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

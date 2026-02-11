@@ -2,7 +2,7 @@ import json
 import asyncio
 from typing import Dict, List, Optional, AsyncGenerator
 from django.conf import settings
-from apps.works.models import Work, Chapter, LoreEntry
+from apps.works.models import Work, Chapter, LoreEntry, Act
 from apps.chat.models import AIRequest
 from .models import Suggestion
 from . import prompts
@@ -208,7 +208,14 @@ class ContextBuilder:
 
     @staticmethod
     def build_context(chapter: Chapter, include_current_content: bool = True) -> Dict:
-        """Build AI context with full chapter content"""
+        """Build chapter chat context.
+
+        Required context for chapter chatbot:
+        - Work synopsis
+        - Past act synopses
+        - Chapter summaries for past chapters in current act
+        - Full text of current chapter
+        """
         work = chapter.work
 
         # Basic context
@@ -219,26 +226,26 @@ class ContextBuilder:
             "current_chapter_content": chapter.content if include_current_content else "",
         }
 
-        # Get triggered lore entries
-        lore_entries = ContextBuilder._get_triggered_lore_entries(chapter)
-        context["lore_entries"] = [
-            {
-                "name": entry.name,
-                "description": entry.description,
-                "triggers": entry.all_triggers
-            }
-            for entry in lore_entries
-        ]
+        # Chapter chatbot does not need lore/previous full chapter text in this mode
+        context["lore_entries"] = []
 
-        # Get ALL previous chapters with full content
-        previous_chapters = ContextBuilder._get_all_previous_chapters(chapter)
-        context["previous_chapters"] = previous_chapters
+        # Past act synopses
+        context["previous_act_synopses"] = ContextBuilder._get_previous_act_synopses(chapter)
+
+        # Past chapter summaries in current act
+        context["current_act_chapter_summaries"] = ContextBuilder._get_current_act_chapter_summaries(chapter)
 
         return context
 
     @staticmethod
     def build_work_overview_context(work: Work) -> Dict:
-        """Build context for work-level discussions with full chapter content"""
+        """Build work chat context.
+
+        Required context for work chatbot:
+        - Work synopsis
+        - All act synopses
+        - All lore entries
+        """
         context = {
             "context_scope": "work_overview",
             "work_title": work.title,
@@ -253,14 +260,9 @@ class ContextBuilder:
             ]
         }
 
-        # Get ALL chapters with full content
-        all_chapters = []
-        chapters = work.chapters.all().order_by('order')
-        for chapter in chapters:
-            chapter_text = f"第{chapter.chapter_number}章《{chapter.title}》\n\n{chapter.content or '(空章节)'}"
-            all_chapters.append(chapter_text)
-
-        context["all_chapters"] = all_chapters
+        # All act synopses in order (keep non-empty ones)
+        all_acts = Act.objects.filter(work=work).exclude(synopsis__isnull=True).exclude(synopsis='').order_by('order')
+        context["all_act_synopses"] = [f"【{act.name}】\n{act.synopsis}" for act in all_acts]
         return context
 
     @staticmethod
@@ -577,6 +579,18 @@ class AIService:
             if lore_info:
                 formatted_parts.append(lore_info)
 
+        # Previous act synopses (chapter chat)
+        if context.get('previous_act_synopses'):
+            formatted_parts.append("前卷摘要：\n\n" + "\n\n".join(context['previous_act_synopses']))
+
+        # Previous chapter summaries in current act (chapter chat)
+        if context.get('current_act_chapter_summaries'):
+            formatted_parts.append("本卷前文章节摘要：\n\n" + "\n\n".join(context['current_act_chapter_summaries']))
+
+        # All act synopses (work chat)
+        if context.get('all_act_synopses'):
+            formatted_parts.append("全书各卷摘要：\n\n" + "\n\n".join(context['all_act_synopses']))
+
         # Previous chapters with full content (for chapter-level chat)
         if context.get('previous_chapters'):
             previous_text = "前文章节：\n\n" + "\n\n---\n\n".join(context['previous_chapters'])
@@ -610,6 +624,18 @@ class AIService:
             lore_info = prompts.format_lore_entries(context['lore_entries'])
             if lore_info:
                 historic_parts.append(lore_info)
+
+        # Previous act synopses
+        if context.get('previous_act_synopses'):
+            historic_parts.append("前卷摘要：\n\n" + "\n\n".join(context['previous_act_synopses']))
+
+        # Current act chapter summaries
+        if context.get('current_act_chapter_summaries'):
+            historic_parts.append("本卷前文章节摘要：\n\n" + "\n\n".join(context['current_act_chapter_summaries']))
+
+        # All act synopses (work overview)
+        if context.get('all_act_synopses'):
+            historic_parts.append("全书各卷摘要：\n\n" + "\n\n".join(context['all_act_synopses']))
 
         # Previous chapters with full content
         if context.get('previous_chapters'):
