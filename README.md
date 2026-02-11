@@ -1,388 +1,199 @@
-# AI 小说写作助手 (AI Novel Writing Assistant)
+# AI 小说写作助手
 
-一个功能完备的AI驱动中文小说写作平台，集成智能续写、实时聊天、笔记管理和世界观构建于一体的专业写作工具。
+AI 驱动的中文小说创作平台，支持长篇写作、多卷管理、世界观条目、章节/卷摘要、AI 自动编辑、写作建议与跨设备使用。
 
-## ✨ 核心功能
+本项目当前以 `start.sh`（纯 Docker 命令）作为主要运行方式，不依赖 Docker Compose。
 
-### 🚀 已完成的主要功能
+## 当前核心功能
 
-- **🤖 AI智能续写**: 基于上下文的流式AI续写，支持自定义指导，包含重复文本检测和清理
-- **💬 实时AI聊天**: 上下文感知的AI助手，可理解当前章节内容并提供针对性建议
-- **📝 全屏写作编辑器**: 简洁高效的文本编辑器，专为中文写作优化
-- **📌 智能笔记系统**: 位置精确的文本链接笔记，支持颜色分类和一键跳转
-- **🎯 文本高亮**: 基于字符位置的高亮系统，选中文本即可创建笔记
-- **⚡ 实时流式响应**: 所有AI交互均采用SSE流式传输，提供实时体验
-- **💾 智能自动保存**: 5秒间隔自动保存，支持冲突检测和状态指示
-- **🌍 世界观管理**: 触发词系统自动加载相关设定到AI上下文
-- **📊 章节管理**: 支持多卷结构，AI自动生成章节摘要
-- **🔒 完整用户系统**: 注册登录、令牌认证、多用户支持
+- 章节编辑器（桌面/移动端适配）
+- 自动保存 + 手动保存
+- AI 自动编辑（流式），支持自定义编辑指引
+- 编辑指引预设（用户级配置，可新增/编辑，`增加细节`不可删除）
+- 章节摘要（AI 生成 + 手动编辑）
+- 卷摘要（AI 生成 + 编辑）
+- 多卷结构（含外传卷），章节可拖拽排序
+- 世界观条目与阵营管理（自动上下文注入）
+- 用户系统（注册、登录、个人设置、API key 加密存储）
+- 写作风格（创建、分析、应用）
 
-## 🛠 技术栈
+## 技术栈
 
-### 后端架构
-- **Django 5.0** + Django REST Framework - 主要API框架
-- **PostgreSQL 16** - 生产数据库
-- **Django Channels** - WebSocket实时通信
-- **Redis** - 缓存和消息队列
-- **DeepSeek API** - AI模型集成
-- **Token认证** - 支持流式传输的认证系统
+### Backend
 
-### 前端架构
-- **React 18** + TypeScript - 现代化前端框架
-- **Native Textarea** - 原生文本编辑器，轻量高效
-- **Tailwind CSS** - 优雅的深色主题设计
-- **Zustand** - 轻量级状态管理
-- **TanStack Query** - 智能数据获取和缓存
-- **Server-Sent Events** - 实时流式数据传输
+- Python 3.11
+- Django + Django REST Framework
+- PostgreSQL
+- Redis
+- Channels / Daphne
+- DeepSeek / Qwen（通过用户设置选择）
+
+### Frontend
+
+- React + TypeScript + Vite
+- Zustand
+- TanStack Query
+- Tailwind CSS
+- SSE 流式接口
 
 ## 项目结构
 
-```
+```text
 AI_writer/
-├── backend/            # Django 后端
-├── frontend/           # React 前端
-├── README.md           # 用户指南（本文件）
-├── CLAUDE.md           # 开发者指南
-├── docker-compose.yml  # Docker 编排配置
-└── start.sh            # 快速启动脚本
+├── backend/
+├── frontend/
+├── start.sh                 # 一键启动（创建/重建容器）
+├── stop.sh                  # 停止容器
+├── restart-frontend.sh      # 仅重建并重启前端
+├── restart-backend.sh       # 仅重启后端（可 --rebuild）
+└── README.md
 ```
 
-## 🚀 快速开始
-
-### 方式一：Docker 部署（推荐）
-
-这是最简单快速的启动方式，所有服务会在容器中自动配置和运行。
-
-#### 环境要求
-- Docker 20.10+
-- Docker Compose 2.0+
-
-#### 启动步骤
-
-**方法一：使用快速启动脚本（最简单）**
+## 快速启动（推荐）
 
 ```bash
-git clone <repository-url>
 cd AI_writer
-./start.sh  # 自动配置并启动所有服务
+bash start.sh
 ```
 
-脚本会自动：
-- 创建 .env 文件（如果不存在）
-- 启动所有 Docker 服务
-- 显示访问地址和常用命令
+默认访问地址：
 
-**注意**: DeepSeek API密钥现在存储在用户设置中，每个用户需要在登录后在账户设置中配置自己的API密钥。
+- 前端: `http://0.0.0.0:3000`
+- 后端: `http://0.0.0.0:8001`
 
-**方法二：手动启动**
+## 日常开发命令（当前流程）
 
-1. **克隆项目并进入目录**
+### 停止所有服务
+
 ```bash
-git clone <repository-url>
-cd AI_writer
+bash stop.sh
 ```
 
-2. **配置环境变量（可选）**
+### 仅更新前端（最常用）
+
 ```bash
-cp .env.example .env
-# 默认配置已经可以使用，如需自定义端口或其他设置请编辑 .env
+bash restart-frontend.sh
 ```
 
-3. **启动所有服务**
+### 仅重启后端
+
 ```bash
-docker-compose up -d
+bash restart-backend.sh
 ```
 
-等待构建完成后，服务将在以下端口运行：
-- **前端**: http://localhost:3000
-- **后端API**: http://localhost:8001
-- **PostgreSQL**: localhost:5432
-- **Redis**: localhost:6379
+### 后端依赖或镜像层有变化时
 
-4. **查看日志**
 ```bash
-docker-compose logs -f          # 所有服务日志
-docker-compose logs -f backend   # 仅后端日志
-docker-compose logs -f frontend  # 仅前端日志
+bash restart-backend.sh --rebuild
 ```
 
-5. **停止服务**
+## 运行模型说明
+
+- `start.sh` 会创建网络与 volume，并重新创建 `postgres / redis / backend / frontend` 容器。
+- 后端容器挂载了本地 `backend` 目录，启动时会自动执行迁移：
+  - `python manage.py migrate --noinput`
+- 前端是构建后静态镜像；前端代码更新需要重建前端镜像（`restart-frontend.sh`）。
+
+## BuildKit 说明
+
+脚本中已加入自动检测：
+
+- 有 `docker buildx`：启用 BuildKit
+- 无 `docker buildx`：自动回退到 classic build（不会中断脚本）
+
+安装 buildx（在宿主机，不是应用容器）：
+
 ```bash
-docker-compose down              # 停止服务
-docker-compose down -v           # 停止服务并删除数据卷
+sudo apt-get update
+sudo apt-get install -y docker-buildx-plugin
+docker buildx version
 ```
 
-#### 数据持久化
+## 环境变量
 
-所有数据会保存在 Docker volumes 中：
-- `postgres_data`: PostgreSQL 数据库数据
-- `redis_data`: Redis 缓存数据
-- `static_volume`: Django 静态文件
-- `media_volume`: 用户上传的媒体文件
-
-### 方式二：本地开发部署
-
-适合需要调试和开发的场景。
-
-#### 环境要求
-- Python 3.11+
-- Node.js 18+
-- PostgreSQL 16 (可选，开发环境使用SQLite)
-- Redis (WebSocket功能需要)
-
-#### 后端设置
-```bash
-cd backend
-pip install -r requirements.txt
-
-# 配置环境变量（可选）
-cp .env.example .env
-# 默认配置已经可以使用
-
-# 数据库迁移
-python manage.py migrate
-
-# 启动后端服务
-python manage.py runserver 0.0.0.0:8001
-```
-
-#### 前端设置
-```bash
-cd frontend
-npm install
-
-# 配置环境变量
-cp .env.example .env
-# 编辑 .env 文件，设置API_URL
-
-# 启动前端开发服务器
-npm run dev
-```
-
-### 首次使用
-
-无论使用哪种方式启动，首次使用需要：
-
-1. 访问 http://localhost:3000
-2. 注册新账号
-3. 在账户设置中配置您的 DeepSeek API 密钥
-4. 开始创作！
-
-
-## 📋 功能演示
-
-### 主要界面
-- **三面板布局**: 编辑器 + 笔记 + AI聊天
-- **实时写作**: 全屏编辑器提供专注写作体验
-- **智能提示**: 基于上下文的AI建议和续写
-- **笔记管理**: 基于字符位置精确绑定的笔记系统
-
-### AI功能
-- **流式续写**: 实时显示AI生成内容
-- **上下文聊天**: AI理解当前章节内容
-- **智能建议**: 选中文本获取写作建议
-- **自动摘要**: 章节完成后自动生成摘要
-
-## 📊 项目状态
-
-✅ **v1.0 已完成** - 所有核心功能已实现并稳定运行
-
-### 已实现功能清单
-- [x] 用户认证系统
-- [x] 作品和章节管理
-- [x] 全屏文本编辑器
-- [x] AI流式续写
-- [x] 实时AI聊天
-- [x] 智能笔记系统（位置跟踪）
-- [x] 文本高亮和跳转
-- [x] 自动保存（5秒间隔）
-- [x] 世界观管理
-- [x] 重复文本检测
-- [x] 响应式UI设计
-- [x] WebSocket实时通信
-
-## 📦 常用命令
-
-### Docker 管理
+可在项目根目录创建 `.env`（`start.sh` 会读取），常用项：
 
 ```bash
-# 启动服务
-docker-compose up -d
-
-# 停止服务
-docker-compose down
-
-# 查看服务状态
-docker-compose ps
-
-# 查看日志
-docker-compose logs -f                # 所有服务
-docker-compose logs -f backend        # 仅后端
-docker-compose logs -f frontend       # 仅前端
-
-# 重启服务
-docker-compose restart backend
-docker-compose restart frontend
-
-# 重新构建（代码更改后）
-docker-compose up -d --build
-
-# 完全清理（删除所有数据）
-docker-compose down -v
-```
-
-### Django 管理
-
-```bash
-# 进入后端容器
-docker-compose exec backend bash
-
-# 数据库迁移
-docker-compose exec backend python manage.py migrate
-
-# 创建超级用户
-docker-compose exec backend python manage.py createsuperuser
-
-# Django Shell
-docker-compose exec backend python manage.py shell
-
-# 收集静态文件
-docker-compose exec backend python manage.py collectstatic --noinput
-```
-
-### 数据库操作
-
-```bash
-# 连接到 PostgreSQL
-docker-compose exec postgres psql -U novel_user -d novel_ai_db
-
-# 备份数据库
-docker-compose exec postgres pg_dump -U novel_user novel_ai_db > backup.sql
-
-# 恢复数据库
-cat backup.sql | docker-compose exec -T postgres psql -U novel_user -d novel_ai_db
-
-# 查看所有表
-docker-compose exec postgres psql -U novel_user -d novel_ai_db -c "\dt"
-```
-
-### 监控和调试
-
-```bash
-# 查看资源使用
-docker-compose stats
-
-# 实时查看日志
-docker-compose logs -f --tail=100
-
-# 检查 Redis 连接
-docker-compose exec redis redis-cli ping
-
-# 检查 PostgreSQL 连接
-docker-compose exec postgres pg_isready -U novel_user
-```
-
-### 常见问题排查
-
-**服务无法启动？**
-```bash
-docker-compose logs backend
-docker-compose logs postgres
-docker-compose restart backend
-```
-
-**前端无法访问后端？**
-```bash
-# 检查 .env 配置
-cat .env | grep VITE_API_URL
-
-# 重新构建前端
-docker-compose up -d --build frontend
-```
-
-**数据库连接失败？**
-```bash
-# 等待 PostgreSQL 启动完成
-docker-compose exec postgres pg_isready -U novel_user
-sleep 5
-docker-compose restart backend
-```
-
-**完全重置（慎用）？**
-```bash
-docker-compose down -v
-docker system prune -a
-docker-compose up -d --build
-```
-
-## 🔧 环境变量配置
-
-创建 `.env` 文件来自定义配置：
-
-```bash
-# 数据库配置
 DB_NAME=novel_ai_db
 DB_USER=novel_user
 DB_PASSWORD=novel_password
-POSTGRES_PORT=5432
 
-# Redis 配置
-REDIS_PORT=6379
-
-# 后端配置
 BACKEND_PORT=8001
-DEBUG=True
-SECRET_KEY=your-secret-key-change-in-production
-ALLOWED_HOSTS=localhost,127.0.0.1
-
-# DeepSeek API（注意：API密钥在用户设置中配置，不在这里）
-DEEPSEEK_API_BASE=https://api.deepseek.com/v1
-
-# 前端配置
 FRONTEND_PORT=3000
-FRONTEND_URL=http://localhost:3000
-VITE_API_URL=http://localhost:8001/api
+
+DEBUG=True
+SECRET_KEY=change-me
+ALLOWED_HOSTS=*
+
+DEEPSEEK_API_BASE=https://api.deepseek.com/v1
+FRONTEND_URL=http://0.0.0.0:3000
+VITE_API_URL=/api
 ```
 
-## 🔐 API 密钥说明
+## API Key 机制
 
-**重要**: DeepSeek API 密钥现在是 **每用户独立配置**，而不是全局配置。
+- API key 为用户级配置（不是全局配置）
+- 在前端设置页中填写并保存
+- 后端加密存储
 
-- ✅ 每个用户在账户设置中配置自己的 API 密钥
-- ✅ API 密钥加密存储在数据库中
-- ✅ 支持多用户使用各自的 API 配额
-- ❌ 不再需要在 `.env` 文件中配置 `DEEPSEEK_API_KEY`
+## 数据安全与备份（强烈建议）
 
-### 配置步骤：
-1. 注册并登录应用
-2. 进入 "账户设置" 或 "用户设置"
-3. 在 API 密钥配置区域输入您的 DeepSeek API 密钥
-4. 保存后即可使用所有 AI 功能
+在任何重构/上线前先备份 PostgreSQL：
 
-## 📝 生产部署注意事项
+```bash
+cd AI_writer
+source .env
+docker exec -t novel_ai_postgres pg_dump -U "$DB_USER" -d "$DB_NAME" > backup_$(date +%F_%H%M%S).sql
+```
 
-部署到生产环境时：
+恢复：
 
-1. **安全配置**
-   - 设置强密码: `DB_PASSWORD`, `SECRET_KEY`
-   - 关闭调试模式: `DEBUG=False`
-   - 配置允许的域名: `ALLOWED_HOSTS=yourdomain.com`
+```bash
+source .env
+cat backup_xxx.sql | docker exec -i novel_ai_postgres psql -U "$DB_USER" -d "$DB_NAME"
+```
 
-2. **HTTPS 配置**
-   - 使用 SSL 证书
-   - 更新 `nginx.conf` 配置 SSL
-   - 设置 `FRONTEND_URL=https://yourdomain.com`
+## 故障排查
 
-3. **数据备份**
-   - 定期备份 PostgreSQL 数据库
-   - 定期备份 Docker volumes
-   - 使用 `docker-compose exec postgres pg_dump` 进行备份
+### 前端改了但页面没变化
 
-4. **监控和日志**
-   - 设置日志轮转
-   - 监控 Docker 容器资源使用
-   - 配置错误告警
+- 前端容器是静态镜像，`docker restart novel_ai_frontend` 不会重新构建。
+- 请使用：
 
-## 许可证
+```bash
+bash restart-frontend.sh
+```
 
-MIT License
+### 后端接口报数据库表不存在
+
+- 通常是迁移未执行或未生效，先重启后端：
+
+```bash
+bash restart-backend.sh
+```
+
+- 如果仍失败，进入后端容器手动迁移：
+
+```bash
+docker exec -it novel_ai_backend bash
+python manage.py migrate
+```
+
+### 查看日志
+
+```bash
+docker logs -f novel_ai_backend
+docker logs -f novel_ai_frontend
+docker logs -f novel_ai_postgres
+docker logs -f novel_ai_redis
+```
+
+## 其他文档
+
+- 后端说明：`backend/README.md`
+- 前端说明：`frontend/README.md`
+- AI 提示词说明：`backend/apps/ai_services/PROMPTS_README.md`
+
+## License
+
+MIT

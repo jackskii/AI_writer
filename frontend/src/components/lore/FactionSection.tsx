@@ -1,7 +1,6 @@
-import React, { useState, useEffect } from 'react';
-import { ChevronDown, ChevronRight, Plus, Edit, Trash2, Users, Globe } from 'lucide-react';
+import React from 'react';
+import { ChevronDown, ChevronRight, Plus, Trash2, Users, Globe } from 'lucide-react';
 import { Button } from '../ui/Button';
-import { Textarea } from '../ui/Input';
 import { Card, CardContent } from '../ui/Card';
 import type { Faction, LoreEntry } from '../../types';
 
@@ -10,7 +9,6 @@ interface FactionSectionProps {
   isCollapsed: boolean;
   loreEntries: LoreEntry[];
   onToggleCollapse: (factionId: number) => void;
-  onUpdateFaction: (factionId: number, name: string, description: string) => void;
   onDeleteFaction: (factionId: number) => void;
   onAddCharacter: (factionId: number) => void;
   onEditLoreEntry: (entry: LoreEntry) => void;
@@ -22,31 +20,13 @@ export const FactionSection: React.FC<FactionSectionProps> = ({
   isCollapsed,
   loreEntries,
   onToggleCollapse,
-  onUpdateFaction,
   onDeleteFaction,
   onAddCharacter,
   onEditLoreEntry,
   onDeleteLoreEntry
 }) => {
-  const [isEditingDescription, setIsEditingDescription] = useState(false);
-  const [editedDescription, setEditedDescription] = useState(faction.description || '');
-  
-  useEffect(() => {
-    setEditedDescription(faction.description || '');
-  }, [faction.description]);
-
   const isWorldbuilding = faction.faction_type === 'worldbuilding';
   const canDelete = !faction.is_default;
-
-  const handleSaveDescription = () => {
-    onUpdateFaction(faction.id, faction.name, editedDescription);
-    setIsEditingDescription(false);
-  };
-
-  const handleCancelEdit = () => {
-    setEditedDescription(faction.description);
-    setIsEditingDescription(false);
-  };
 
   const getAddButtonText = () => {
     if (isWorldbuilding) {
@@ -69,14 +49,17 @@ export const FactionSection: React.FC<FactionSectionProps> = ({
         className="flex items-center justify-between px-4 py-3 cursor-pointer hover:bg-dark-bg/50 transition-colors"
         onClick={() => onToggleCollapse(faction.id)}
       >
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 min-w-0">
           {isCollapsed ? (
             <ChevronRight size={20} className="text-dark-text-muted" />
           ) : (
             <ChevronDown size={20} className="text-dark-text-muted" />
           )}
           {getIcon()}
-          <h3 className="text-lg font-semibold text-dark-text">{faction.name}</h3>
+          <h3 className="text-lg font-semibold text-dark-text flex-shrink-0">{faction.name}</h3>
+          <span className="text-sm text-dark-text-muted truncate min-w-0">
+            {faction.description || '暂无描述'}
+          </span>
           <span className="text-sm text-dark-text-muted">
             ({loreEntries.length}个条目)
           </span>
@@ -106,36 +89,6 @@ export const FactionSection: React.FC<FactionSectionProps> = ({
         </div>
       </div>
 
-      {/* Faction Description */}
-      {!isCollapsed && (
-        <div className="px-4 pb-2 border-t border-dark-border">
-          {isEditingDescription ? (
-            <div className="pt-3">
-              <Textarea
-                value={editedDescription}
-                onChange={(e) => setEditedDescription(e.target.value)}
-                placeholder="添加阵营描述..."
-                rows={2}
-                className="mb-2"
-                autoFocus
-              />
-              <div className="flex gap-2">
-                <Button size="sm" onClick={handleSaveDescription}>保存</Button>
-                <Button size="sm" variant="outline" onClick={handleCancelEdit}>取消</Button>
-              </div>
-            </div>
-          ) : (
-            <div 
-              className="pt-3 text-sm text-dark-text-muted cursor-pointer hover:text-dark-text transition-colors flex items-start gap-2"
-              onClick={() => setIsEditingDescription(true)}
-            >
-              <Edit size={14} className="mt-0.5 flex-shrink-0 opacity-50" />
-              <span>{faction.description || '点击添加阵营描述...'}</span>
-            </div>
-          )}
-        </div>
-      )}
-
       {/* Lore Entries */}
       {!isCollapsed && (
         <CardContent className="pt-0">
@@ -151,27 +104,12 @@ export const FactionSection: React.FC<FactionSectionProps> = ({
                   onClick={() => onEditLoreEntry(entry)}
                   className="group relative p-3 bg-dark-bg rounded-lg border border-dark-border hover:border-dark-primary/50 hover:bg-dark-surface/50 transition-colors cursor-pointer"
                 >
-                  <h4 className="font-medium text-dark-text truncate pr-8">{entry.name}</h4>
-                  <p className="text-sm text-dark-text-muted line-clamp-2 mt-1">
-                    {entry.description}
-                  </p>
-                  {entry.triggers.length > 0 && (
-                    <div className="flex flex-wrap gap-1 mt-2">
-                      {entry.triggers.slice(0, 2).map((trigger, idx) => (
-                        <span 
-                          key={idx}
-                          className="px-2 py-0.5 text-xs bg-dark-surface rounded text-dark-text-muted"
-                        >
-                          {trigger}
-                        </span>
-                      ))}
-                      {entry.triggers.length > 2 && (
-                        <span className="px-2 py-0.5 text-xs text-dark-text-muted">
-                          +{entry.triggers.length - 2}
-                        </span>
-                      )}
-                    </div>
-                  )}
+                  <div className="flex items-start gap-2 pr-8">
+                    <h4 className="font-medium text-dark-text flex-shrink-0 max-w-[38%] truncate">{entry.name}</h4>
+                    <p className="text-sm text-dark-text-muted line-clamp-2 min-w-0 flex-1">
+                      {entry.description}
+                    </p>
+                  </div>
                   {/* Delete button - show on hover */}
                   <button
                     onClick={(e) => {

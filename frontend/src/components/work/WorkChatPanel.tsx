@@ -20,6 +20,7 @@ export const WorkChatPanel: React.FC<WorkChatPanelProps> = ({ work }) => {
   const [selectedModel, setSelectedModel] = useState<AIModel>('deepseek-chat');
   const [showModelSelector, setShowModelSelector] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const shouldAutoScrollRef = useRef(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const streamEventSourceRef = useRef<EventSource | null>(null);
 
@@ -28,6 +29,10 @@ export const WorkChatPanel: React.FC<WorkChatPanelProps> = ({ work }) => {
   };
 
   useEffect(() => {
+    // Only auto-scroll after user-triggered chat actions (send/regenerate/streaming).
+    if (!shouldAutoScrollRef.current) {
+      return;
+    }
     scrollToBottom();
   }, [messages, streamingMessage]);
 
@@ -49,6 +54,7 @@ export const WorkChatPanel: React.FC<WorkChatPanelProps> = ({ work }) => {
       return;
     }
 
+    shouldAutoScrollRef.current = true;
     setInputMessage('');
     if (inputRef.current) {
       inputRef.current.style.height = 'auto';
@@ -171,6 +177,7 @@ export const WorkChatPanel: React.FC<WorkChatPanelProps> = ({ work }) => {
     if (inputRef.current) {
       inputRef.current.style.height = 'auto';
       inputRef.current.style.height = `${Math.min(inputRef.current.scrollHeight, 200)}px`;
+      inputRef.current.style.overflowY = inputRef.current.scrollHeight > 200 ? 'auto' : 'hidden';
     }
   };
 
@@ -258,6 +265,7 @@ export const WorkChatPanel: React.FC<WorkChatPanelProps> = ({ work }) => {
     if (previousMessage.role !== 'user') return;
 
     try {
+      shouldAutoScrollRef.current = true;
       // Delete this AI message and all subsequent messages
       await chatApi.deleteWorkMessage(work.id, messageId);
 
@@ -548,8 +556,8 @@ export const WorkChatPanel: React.FC<WorkChatPanelProps> = ({ work }) => {
               value={inputMessage}
               onChange={handleInputChange}
               onKeyDown={handleKeyPress}
-              placeholder="向AI顾问询问故事走向、角色弧光或世界观建议...(Enter发送, Shift+Enter换行)"
-              className="bg-dark-bg border-dark-border text-sm resize-none overflow-hidden min-h-[40px] max-h-[200px]"
+              placeholder="与AI谈话获得建议。"
+              className="bg-dark-bg border-dark-border text-sm resize-none overflow-y-auto min-h-[40px] max-h-[200px]"
               rows={1}
               disabled={isStreamingChat}
             />

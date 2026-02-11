@@ -23,8 +23,10 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ work, chapter }) => {
   const [selectedModel, setSelectedModel] = useState<AIModel>('deepseek-chat');
   const [showModelSelector, setShowModelSelector] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const streamEventSourceRef = useRef<EventSource | null>(null);
+  const shouldAutoScrollRef = useRef(false);
 
   // Auto-scroll to bottom when new messages are added
   const scrollToBottom = () => {
@@ -32,6 +34,10 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ work, chapter }) => {
   };
 
   useEffect(() => {
+    // Only auto-scroll after user-triggered chat actions (send/regenerate/streaming).
+    if (!shouldAutoScrollRef.current) {
+      return;
+    }
     scrollToBottom();
   }, [messages, streamingMessage, errorMessage]);
 
@@ -55,6 +61,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ work, chapter }) => {
       return;
     }
 
+    shouldAutoScrollRef.current = true;
     setInputMessage('');
     // Reset textarea height
     if (inputRef.current) {
@@ -166,6 +173,11 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ work, chapter }) => {
 
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setInputMessage(e.target.value);
+    if (inputRef.current) {
+      inputRef.current.style.height = 'auto';
+      inputRef.current.style.height = `${Math.min(inputRef.current.scrollHeight, 200)}px`;
+      inputRef.current.style.overflowY = inputRef.current.scrollHeight > 200 ? 'auto' : 'hidden';
+    }
   };
 
   const handleStopGeneration = async () => {
@@ -254,6 +266,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ work, chapter }) => {
     if (previousMessage.role !== 'user') return;
 
     try {
+      shouldAutoScrollRef.current = true;
       // Delete this AI message and all subsequent messages
       await chatApi.deleteMessage(work.id, chapter.id, messageId);
 
@@ -331,7 +344,8 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ work, chapter }) => {
   useEffect(() => {
     if (inputRef.current) {
       inputRef.current.style.height = 'auto';
-      inputRef.current.style.height = inputRef.current.scrollHeight + 'px';
+      inputRef.current.style.height = `${Math.min(inputRef.current.scrollHeight, 200)}px`;
+      inputRef.current.style.overflowY = inputRef.current.scrollHeight > 200 ? 'auto' : 'hidden';
     }
   }, [inputMessage]);
 
@@ -451,7 +465,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ work, chapter }) => {
       </div>
 
       {/* Chat Messages */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+      <div ref={messagesContainerRef} className="flex-1 overflow-y-auto p-4 space-y-4">
         {messages.map((message) => (
           <div key={message.id} className="w-full">
             {/* Avatar on top */}
@@ -611,8 +625,8 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ work, chapter }) => {
               value={inputMessage}
               onChange={handleInputChange}
               onKeyDown={handleKeyPress}
-              placeholder="与AI助手聊天... (Enter发送, Shift+Enter换行)"
-              className="bg-dark-bg border-dark-border text-sm resize-none overflow-hidden min-h-[40px] max-h-[200px]"
+              placeholder="与AI谈话获得建议。"
+              className="bg-dark-bg border-dark-border text-sm resize-none overflow-y-auto min-h-[40px] max-h-[200px]"
               rows={1}
               disabled={isStreamingChat}
             />
