@@ -1,6 +1,15 @@
 #!/bin/bash
 set -e
 
+# Enable Docker BuildKit for faster image builds when buildx is available
+if docker buildx version >/dev/null 2>&1; then
+    export DOCKER_BUILDKIT=1
+    echo "⚡ BuildKit enabled"
+else
+    export DOCKER_BUILDKIT=0
+    echo "ℹ️  Buildx not found, using classic docker build"
+fi
+
 echo "🚀 AI Novel Writing Assistant - Quick Start"
 echo "=========================================="
 echo ""

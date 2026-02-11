@@ -1,12 +1,15 @@
 from rest_framework import status, generics
+from django.db import models
+from django.db.models import Max
+from django.db.utils import ProgrammingError, OperationalError
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.authtoken.models import Token
 from django.contrib.auth import login, logout
 from django.contrib.auth.models import User
-from .serializers import UserRegistrationSerializer, UserLoginSerializer, UserSerializer, UserSettingsSerializer
-from .models import UserSettings
+from .serializers import UserRegistrationSerializer, UserLoginSerializer, UserSerializer, UserSettingsSerializer, UserEditPrefillSerializer
+from .models import UserSettings, UserEditPrefill
 
 
 @api_view(['POST'])
@@ -20,6 +23,9 @@ def register_view(request):
 
         # 为新用户创建设置
         UserSettings.objects.create(user=user)
+
+        # 为新用户创建默认编辑指引预设
+        create_default_edit_prefills_for_user(user)
 
         # 为新用户创建模板作品
         create_template_work_for_user(user)
@@ -140,3 +146,124 @@ def update_user_settings_view(request):
             'data': serializer.data
         })
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+def create_default_edit_prefills_for_user(user):
+    """为新用户创建默认编辑指引预设"""
+    from apps.ai_services import prompts
+    
+    default_prefills = [
+        {
+            'name': '增加细节',
+            'prompt_text': prompts.AUTO_EDIT_PREFILLS['增加细节'],
+            'is_default': True,
+            'order': 0
+        },
+        {
+            'name': '润色',
+            'prompt_text': prompts.AUTO_EDIT_PREFILLS['润色'],
+            'is_default': False,
+            'order': 1
+        },
+        {
+            'name': '修改',
+            'prompt_text': prompts.AUTO_EDIT_PREFILLS['修改'],
+            'is_default': False,
+            'order': 2
+        },
+        {
+            'name': '续写',
+            'prompt_text': prompts.AUTO_EDIT_PREFILLS['续写'],
+            'is_default': False,
+            'order': 3
+        },
+    ]
+    
+    for prefill_data in default_prefills:
+        UserEditPrefill.objects.create(user=user, **prefill_data)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def list_edit_prefills_view(request):
+    """获取用户的所有编辑指引预设"""
+    try:
+        prefills = UserEditPrefill.objects.filter(user=request.user)
+    
+        # Lazy initialization: if user has no prefills, create defaults
+        if not prefills.exists():
+            create_default_edit_prefills_for_user(request.user)
+            prefills = UserEditPrefill.objects.filter(user=request.user)
+    
+        serializer = UserEditPrefillSerializer(prefills, many=True)
+        return Response(serializer.data)
+    except (ProgrammingError, OperationalError):
+        return Response(
+            {'error': '数据库结构未更新，请先执行后端迁移并重启服务'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def create_edit_prefill_view(request):
+    """创建新的编辑指引预设"""
+    # Check max limit (10 including the default one)
+    existing_count = UserEditPrefill.objects.filter(user=request.user).count()
+    if existing_count >= 10:
+        return Response(
+            {'error': '最多只能创建10个编辑指引预设'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    
+    serializer = UserEditPrefillSerializer(data=request.data, context={'request': request})
+    if serializer.is_valid():
+        # Set order to be after all existing prefills
+        max_order = UserEditPrefill.objects.filter(user=request.user).aggregate(
+            max_order=Max('order')
+        )['max_order'] or -1
+        prefill = serializer.save(user=request.user, order=max_order + 1)
+        return Response(UserEditPrefillSerializer(prefill).data, status=status.HTTP_201_CREATED)
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+@api_view(['PUT', 'PATCH'])
+@permission_classes([IsAuthenticated])
+def update_edit_prefill_view(request, prefill_id):
+    """更新编辑指引预设"""
+    try:
+        prefill = UserEditPrefill.objects.get(id=prefill_id, user=request.user)
+    except UserEditPrefill.DoesNotExist:
+        return Response(
+            {'error': '编辑指引预设不存在'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+    
+    serializer = UserEditPrefillSerializer(prefill, data=request.data, partial=True, context={'request': request})
+    if serializer.is_valid():
+        serializer.save()
+        return Response(serializer.data)
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+@api_view(['DELETE'])
+@permission_classes([IsAuthenticated])
+def delete_edit_prefill_view(request, prefill_id):
+    """删除编辑指引预设"""
+    try:
+        prefill = UserEditPrefill.objects.get(id=prefill_id, user=request.user)
+    except UserEditPrefill.DoesNotExist:
+        return Response(
+            {'error': '编辑指引预设不存在'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+    
+    # Cannot delete the default "增加细节" prefill
+    if prefill.is_default:
+        return Response(
+            {'error': '不能删除默认的"增加细节"预设'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    
+    prefill.delete()
+    return Response({'message': '删除成功'}, status=status.HTTP_200_OK)

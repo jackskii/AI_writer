@@ -130,3 +130,23 @@ class UserSettings(models.Model):
 
     def __str__(self):
         return f"{self.user.username}'s settings"
+
+
+class UserEditPrefill(models.Model):
+    """用户自定义的编辑指引预设"""
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='edit_prefills')
+    name = models.CharField('名称', max_length=50)  # Max 10 words, ~50 chars
+    prompt_text = models.TextField('提示文本', max_length=1000)  # Max 200 words, ~1000 chars
+    is_default = models.BooleanField('是否默认（增加细节）', default=False)  # Marks the special "增加细节" that can't be deleted
+    order = models.IntegerField('排序', default=0)
+    created_at = models.DateTimeField('创建时间', auto_now_add=True)
+    updated_at = models.DateTimeField('更新时间', auto_now=True)
+
+    class Meta:
+        verbose_name = '编辑指引预设'
+        verbose_name_plural = '编辑指引预设'
+        ordering = ['order', 'created_at']
+        unique_together = [['user', 'name']]  # Each user can't have duplicate names
+
+    def __str__(self):
+        return f"{self.user.username}'s {self.name}"

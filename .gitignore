@@ -114,3 +114,7 @@ jspm_packages/
 # Claude AI
 .claude/
 CLAUDE.md
+
+# Local dev helper scripts (do not commit)
+restart-frontend.sh
+restart-backend.sh

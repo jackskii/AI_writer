@@ -4,6 +4,8 @@ import { Button } from '../ui/Button';
 import { Textarea } from '../ui/Input';
 import { useMobile } from '../../hooks/useMobile';
 import type { Work, Act, Chapter, Faction, LoreEntry, WritingStyle } from '../../types';
+import { editPrefillsApi, type EditPrefill } from '../../services/api';
+import { EditPrefillModal } from './EditPrefillModal';
 
 interface AutoEditModalProps {
   isOpen: boolean;
@@ -98,8 +100,9 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
   const [editRequirement, setEditRequirement] = useState('');
 
   // Prefill options fetched from backend
-  const [prefills, setPrefills] = useState<Record<string, string>>({});
+  const [prefills, setPrefills] = useState<EditPrefill[]>([]);
   const [isLoadingPrefills, setIsLoadingPrefills] = useState(true);
+  const [showEditPrefillModal, setShowEditPrefillModal] = useState(false);
 
   // Writing styles
   const [styles, setStyles] = useState<WritingStyle[]>([]);
@@ -113,28 +116,46 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
   // All acts for accurate prompt length calculation
   const [allActs, setAllActs] = useState<Act[]>([]);
 
-  // Track selected prefill key for persistence
-  const [selectedPrefillKey, setSelectedPrefillKey] = useState<string>(() => {
-    return localStorage.getItem('autoEdit_selectedPrefillKey') || '修改';
+  // Track selected prefill ID for persistence
+  const [selectedPrefillId, setSelectedPrefillId] = useState<number | null>(() => {
+    const saved = localStorage.getItem('autoEdit_selectedPrefillId');
+    return saved ? parseInt(saved, 10) : null;
   });
 
   // Load prefills from backend on mount
-  useEffect(() => {
-    const loadPrefills = async () => {
-      try {
-        const { aiApi } = await import('../../services/api');
-        const response = await aiApi.getPrefills();
-        setPrefills(response.data.prefills);
-        // Use saved prefill key or default to '修改'
-        const savedKey = localStorage.getItem('autoEdit_selectedPrefillKey') || '修改';
-        setEditRequirement(response.data.prefills[savedKey] || response.data.prefills['修改'] || '');
-      } catch (error) {
-        console.error('Failed to load prefills:', error);
-        setPrefills({});
-      } finally {
-        setIsLoadingPrefills(false);
+  const loadPrefills = async () => {
+    try {
+      const response = await editPrefillsApi.list();
+      setPrefills(response.data);
+      // Use saved prefill ID or find default "增加细节" or "修改"
+      const savedId = localStorage.getItem('autoEdit_selectedPrefillId');
+      let selectedPrefill: EditPrefill | undefined;
+      
+      if (savedId) {
+        const id = parseInt(savedId, 10);
+        selectedPrefill = response.data.find(p => p.id === id);
       }
-    };
+      
+      if (!selectedPrefill) {
+        selectedPrefill = response.data.find(p => p.is_default) || 
+                         response.data.find(p => p.name === '修改') ||
+                         response.data[0];
+      }
+      
+      if (selectedPrefill) {
+        setSelectedPrefillId(selectedPrefill.id);
+        setEditRequirement(selectedPrefill.prompt_text);
+        localStorage.setItem('autoEdit_selectedPrefillId', selectedPrefill.id.toString());
+      }
+    } catch (error) {
+      console.error('Failed to load prefills:', error);
+      setPrefills([]);
+    } finally {
+      setIsLoadingPrefills(false);
+    }
+  };
+
+  useEffect(() => {
     loadPrefills();
   }, []);
 
@@ -194,7 +215,13 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
       setCurrentVersionIndex(-1);
       setCurrentEditedText('');
       setIsGenerating(false);
-      setEditRequirement(prefills[selectedPrefillKey] || prefills['修改'] || '');
+      const selectedPrefill = prefills.find(p => p.id === selectedPrefillId) || 
+                              prefills.find(p => p.is_default) ||
+                              prefills.find(p => p.name === '修改') ||
+                              prefills[0];
+      if (selectedPrefill) {
+        setEditRequirement(selectedPrefill.prompt_text);
+      }
       setSelectedFactionFilter('all'); // Reset faction filter
       loadLoreEntries();
       preselectTriggeredLoreEntries();
@@ -203,10 +230,13 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
 
   // Update edit requirement when prefill selection changes (without resetting modal)
   useEffect(() => {
-    if (isOpen && !isLoadingPrefills) {
-      setEditRequirement(prefills[selectedPrefillKey] || prefills['修改'] || '');
+    if (isOpen && !isLoadingPrefills && prefills.length > 0 && selectedPrefillId) {
+      const selectedPrefill = prefills.find(p => p.id === selectedPrefillId);
+      if (selectedPrefill) {
+        setEditRequirement(selectedPrefill.prompt_text);
+      }
     }
-  }, [selectedPrefillKey, isOpen, isLoadingPrefills, prefills]);
+  }, [selectedPrefillId, isOpen, isLoadingPrefills, prefills]);
 
   // Load lore entries and factions for the work
   const loadLoreEntries = async () => {
@@ -640,25 +670,36 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
 
           {/* 编辑指引 - Full Width */}
           <div>
-            <label className="text-sm font-medium text-dark-text mb-2 block">
-              编辑指引
-            </label>
+            <div className="flex items-center justify-between mb-2">
+              <label className="text-sm font-medium text-dark-text">
+                编辑指引
+              </label>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setShowEditPrefillModal(true)}
+                className="text-xs"
+              >
+                <Settings size={14} className="mr-1" />
+                设置
+              </Button>
+            </div>
             <div className="flex flex-wrap gap-2 mb-2">
-              {Object.keys(prefills).map(key => (
+              {prefills.map(prefill => (
                 <button
-                  key={key}
+                  key={prefill.id}
                   onClick={() => {
-                    setEditRequirement(prefills[key]);
-                    setSelectedPrefillKey(key);
-                    localStorage.setItem('autoEdit_selectedPrefillKey', key);
+                    setEditRequirement(prefill.prompt_text);
+                    setSelectedPrefillId(prefill.id);
+                    localStorage.setItem('autoEdit_selectedPrefillId', prefill.id.toString());
                   }}
                   className={`px-3 py-1.5 text-sm rounded transition-colors ${
-                    selectedPrefillKey === key
+                    selectedPrefillId === prefill.id
                       ? 'bg-dark-primary text-white'
                       : 'bg-dark-bg text-dark-text border border-dark-border'
                   }`}
                 >
-                  {key}
+                  {prefill.name}
                 </button>
               ))}
             </div>
@@ -1169,34 +1210,45 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
                 />
 
                 {/* Editing Guide Section */}
-                <div className="mt-3 flex-1 flex flex-col min-h-0">
-                  <label className="text-sm font-medium text-dark-text mb-2 block flex-shrink-0">
-                    编辑指引
-                  </label>
-                  <div className="flex gap-2 mb-2 flex-shrink-0">
-                    {Object.keys(prefills).map(key => (
+                <div className="mt-3 flex flex-col">
+                  <div className="flex items-center justify-between mb-2 flex-shrink-0">
+                    <label className="text-sm font-medium text-dark-text">
+                      编辑指引
+                    </label>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setShowEditPrefillModal(true)}
+                      className="text-xs h-6"
+                    >
+                      <Settings size={12} className="mr-1" />
+                      设置
+                    </Button>
+                  </div>
+                  <div className="flex gap-2 mb-2 flex-shrink-0 flex-wrap">
+                    {prefills.map(prefill => (
                       <button
-                        key={key}
+                        key={prefill.id}
                         onClick={() => {
-                          setEditRequirement(prefills[key]);
-                          setSelectedPrefillKey(key);
-                          localStorage.setItem('autoEdit_selectedPrefillKey', key);
+                          setEditRequirement(prefill.prompt_text);
+                          setSelectedPrefillId(prefill.id);
+                          localStorage.setItem('autoEdit_selectedPrefillId', prefill.id.toString());
                         }}
                         className={`px-3 py-1 text-sm rounded transition-colors ${
-                          selectedPrefillKey === key
+                          selectedPrefillId === prefill.id
                             ? 'bg-dark-primary text-white'
                             : 'bg-dark-bg text-dark-text border border-dark-border hover:border-dark-primary'
                         }`}
                       >
-                        {key}
+                        {prefill.name}
                       </button>
                     ))}
                   </div>
                   <Textarea
                     value={editRequirement}
                     onChange={(e) => setEditRequirement(e.target.value)}
-                    className="flex-1 font-mono text-sm resize-none"
-                    style={{ minHeight: '400px' }}
+                    className="font-mono text-sm resize-none"
+                    style={{ height: '225px', minHeight: '225px', maxHeight: '225px' }}
                     placeholder="输入编辑要求..."
                     maxLength={50000}
                   />
@@ -1235,8 +1287,8 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
                 <Textarea
                   value={currentEditedText}
                   onChange={(e) => setCurrentEditedText(e.target.value)}
-                  className="flex-1 font-mono text-sm resize-none"
-                  style={{ minHeight: '400px', height: '100%' }}
+                  className="font-mono text-sm resize-none"
+                  style={{ height: '415px', minHeight: '415px', maxHeight: '415px' }}
                   placeholder={isGenerating ? "生成中..." : "编辑文本将在这里显示..."}
                   disabled={isGenerating}
                 />
@@ -1315,6 +1367,15 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Edit Prefill Modal */}
+      <EditPrefillModal
+        isOpen={showEditPrefillModal}
+        onClose={() => setShowEditPrefillModal(false)}
+        onPrefillsUpdated={() => {
+          loadPrefills();
+        }}
+      />
     </div>
   );
 };

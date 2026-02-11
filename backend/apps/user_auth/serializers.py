@@ -1,7 +1,7 @@
 from rest_framework import serializers
 from django.contrib.auth.models import User
 from django.contrib.auth import authenticate
-from .models import UserSettings
+from .models import UserSettings, UserEditPrefill
 
 
 class UserRegistrationSerializer(serializers.ModelSerializer):
@@ -171,3 +171,46 @@ class UserSettingsSerializer(serializers.ModelSerializer):
 
         instance.save()
         return instance
+
+
+class UserEditPrefillSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = UserEditPrefill
+        fields = ('id', 'name', 'prompt_text', 'is_default', 'order', 'created_at', 'updated_at')
+        read_only_fields = ('id', 'is_default', 'created_at', 'updated_at')
+
+    def validate_name(self, value):
+        """Validate name length (max 10 words)"""
+        if not value or not value.strip():
+            raise serializers.ValidationError("名称不能为空")
+        words = value.strip().split()
+        if len(words) > 10:
+            raise serializers.ValidationError("名称最多10个字")
+        if len(value) > 50:
+            raise serializers.ValidationError("名称过长")
+        return value.strip()
+
+    def validate_prompt_text(self, value):
+        """Validate prompt text length (max 200 words)"""
+        if not value or not value.strip():
+            raise serializers.ValidationError("提示文本不能为空")
+        words = value.strip().split()
+        if len(words) > 200:
+            raise serializers.ValidationError("提示文本最多200字")
+        if len(value) > 1000:
+            raise serializers.ValidationError("提示文本过长")
+        return value.strip()
+
+    def validate(self, attrs):
+        """Check for duplicate names within the same user"""
+        user = self.context['request'].user
+        name = attrs.get('name', self.instance.name if self.instance else None)
+        
+        if name:
+            existing = UserEditPrefill.objects.filter(user=user, name=name)
+            if self.instance:
+                existing = existing.exclude(id=self.instance.id)
+            if existing.exists():
+                raise serializers.ValidationError({'name': '该名称已存在'})
+        
+        return attrs

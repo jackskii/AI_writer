@@ -5,6 +5,7 @@ from rest_framework.response import Response
 from django.shortcuts import get_object_or_404
 from django.http import StreamingHttpResponse, JsonResponse
 from django.db import models
+from django.db.utils import ProgrammingError, OperationalError
 from asgiref.sync import sync_to_async
 from apps.works.models import Work, Act, Chapter, LoreEntry
 from .services import AIService, run_async_ai_task
@@ -300,6 +301,32 @@ def get_user_api_key(user):
 @permission_classes([AllowAny])
 def ai_prefills(request):
     """Get auto-edit prefill options"""
+    from apps.user_auth.models import UserEditPrefill
+    from apps.user_auth.views import create_default_edit_prefills_for_user
+    
+    # Get user's custom prefills, or fall back to defaults if none exist
+    if request.user.is_authenticated:
+        try:
+            user_prefills = UserEditPrefill.objects.filter(user=request.user)
+
+            # Lazy initialization: if user has no prefills, create defaults
+            if not user_prefills.exists():
+                create_default_edit_prefills_for_user(request.user)
+                user_prefills = UserEditPrefill.objects.filter(user=request.user)
+
+            if user_prefills.exists():
+                # Convert to dict format for backward compatibility
+                prefills_dict = {prefill.name: prefill.prompt_text for prefill in user_prefills}
+                return Response({
+                    'prefills': prefills_dict
+                })
+        except (ProgrammingError, OperationalError):
+            # Migration not applied yet; fall back to static defaults
+            return Response({
+                'prefills': prompts.AUTO_EDIT_PREFILLS
+            })
+    
+    # Fall back to default prefills for unauthenticated users or users without custom prefills
     return Response({
         'prefills': prompts.AUTO_EDIT_PREFILLS
     })

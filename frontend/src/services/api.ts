@@ -889,6 +889,26 @@ export const aiApi = {
   },
 };
 
+// Edit Prefills API
+export interface EditPrefill {
+  id: number;
+  name: string;
+  prompt_text: string;
+  is_default: boolean;
+  order: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export const editPrefillsApi = {
+  list: () => api.get<EditPrefill[]>('/auth/edit-prefills/'),
+  create: (data: { name: string; prompt_text: string }) =>
+    api.post<EditPrefill>('/auth/edit-prefills/create/', data),
+  update: (id: number, data: Partial<{ name: string; prompt_text: string }>) =>
+    api.patch<EditPrefill>(`/auth/edit-prefills/${id}/`, data),
+  delete: (id: number) => api.delete(`/auth/edit-prefills/${id}/delete/`),
+};
+
 // 写作风格相关 API
 export const stylesApi = {
   list: () => api.get<WritingStyle[]>('/styles/'),
