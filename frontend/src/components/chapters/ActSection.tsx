@@ -172,8 +172,8 @@ export const ActSection: React.FC<ActSectionProps> = ({
               onDeleteAct(actData.id);
             }}
             className="h-7 px-1.5 md:px-2 hover:bg-red-500/20 hover:text-red-400 text-dark-text-muted flex items-center gap-0.5 md:gap-1 transition-colors"
-            title={chapters.length > 0 ? "请先删除所有章节" : "删除空卷"}
-            disabled={chapters.length > 0}
+            title={isSideChapters ? "外传卷不可删除" : (chapters.length > 0 ? "请先删除所有章节" : "删除空卷")}
+            disabled={chapters.length > 0 || isSideChapters}
           >
             <Trash2 size={12} className="hidden md:block" />
             <span className="text-xs">删除</span>

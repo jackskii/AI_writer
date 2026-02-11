@@ -86,6 +86,13 @@ class ActViewSet(viewsets.ModelViewSet):
         
         serializer.save(work=work, order=next_order)
 
+    def perform_destroy(self, instance):
+        """禁止删除外传卷"""
+        if instance.act_type == 'side_chapters':
+            from rest_framework.exceptions import PermissionDenied
+            raise PermissionDenied("外传卷不可删除")
+        super().perform_destroy(instance)
+
 
 class ChapterViewSet(viewsets.ModelViewSet):
     serializer_class = ChapterSerializer
@@ -226,30 +233,50 @@ class ChapterViewSet(viewsets.ModelViewSet):
             )
 
         from django.db import transaction
+        from django.db.models import F
 
         with transaction.atomic():
-            # Get the minimum order value for this act's chapters
-            # to determine where to start the reordering
-            act_chapters = Chapter.objects.filter(work=work, act=act).order_by('order')
-            if act_chapters.exists():
-                min_order = act_chapters.first().order
+            # Lock all chapters in this work to avoid concurrent reorder races
+            all_chapters = list(
+                Chapter.objects.select_for_update()
+                .filter(work=work)
+                .select_related('act')
+                .order_by('act__order', 'order')
+            )
 
-                # Update order values for the reordered chapters
-                chapters_dict = {ch.id: ch for ch in chapters}
-                for index, chapter_id in enumerate(chapter_ids):
-                    chapter = chapters_dict[chapter_id]
-                    chapter.order = min_order + index
-                    chapter.save(update_fields=['order'])
+            if not all_chapters:
+                return Response({'status': 'success', 'updated': 0})
 
-                # Now we need to fix the order values for chapters in other acts
-                # to ensure they remain sequential without gaps
-                all_chapters = list(Chapter.objects.filter(work=work).order_by('act__order', 'order'))
-                for i, chapter in enumerate(all_chapters):
-                    if chapter.order != i + 1:
-                        chapter.order = i + 1
-                        chapter.save(update_fields=['order'])
+            # Ensure chapter_ids contains exactly all chapters in target act
+            act_chapter_ids = [ch.id for ch in all_chapters if ch.act_id == act.id]
+            if set(act_chapter_ids) != set(chapter_ids):
+                return Response(
+                    {'error': 'chapter_ids must include all chapters in the target act exactly once'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
 
-            # Renumber all chapters to ensure continuous numbering
+            # Build stable act ordering, replacing only target act's chapter order
+            chapters_by_act = {}
+            for ch in all_chapters:
+                chapters_by_act.setdefault(ch.act_id, []).append(ch)
+
+            reordered_act_chapters = [next(ch for ch in chapters_by_act[act.id] if ch.id == cid) for cid in chapter_ids]
+            chapters_by_act[act.id] = reordered_act_chapters
+
+            # Flatten to final global chapter order: by act.order, then chapter order within each act
+            act_sequence = list(Act.objects.filter(work=work).order_by('order').values_list('id', flat=True))
+            final_sequence = []
+            for act_id in act_sequence:
+                final_sequence.extend(chapters_by_act.get(act_id, []))
+
+            # Two-phase update to avoid unique_together(work, order) collisions:
+            # first move all orders to a high range, then assign final 1..N.
+            Chapter.objects.filter(work=work).update(order=F('order') + 1000000)
+            for idx, ch in enumerate(final_sequence, start=1):
+                ch.order = idx
+            Chapter.objects.bulk_update(final_sequence, ['order'])
+
+            # Renumber all chapter_number to ensure continuity
             self._renumber_all_chapters(work)
 
         return Response({'status': 'success', 'updated': len(chapter_ids)})
