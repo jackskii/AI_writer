@@ -8,11 +8,12 @@ import type { Work, ChatMessage } from '../../types';
 
 interface WorkChatPanelProps {
   work: Work;
+  scrollToLatestOnMount?: boolean;
 }
 
 type AIModel = 'deepseek-chat' | 'deepseek-reasoner';
 
-export const WorkChatPanel: React.FC<WorkChatPanelProps> = ({ work }) => {
+export const WorkChatPanel: React.FC<WorkChatPanelProps> = ({ work, scrollToLatestOnMount = false }) => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputMessage, setInputMessage] = useState('');
   const [isStreamingChat, setIsStreamingChat] = useState(false);
@@ -23,6 +24,7 @@ export const WorkChatPanel: React.FC<WorkChatPanelProps> = ({ work }) => {
   const shouldAutoScrollRef = useRef(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const streamEventSourceRef = useRef<EventSource | null>(null);
+  const hasInitialScrollRef = useRef(false);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -35,6 +37,17 @@ export const WorkChatPanel: React.FC<WorkChatPanelProps> = ({ work }) => {
     }
     scrollToBottom();
   }, [messages, streamingMessage]);
+
+  useEffect(() => {
+    // One-time jump to latest when entering dedicated chat page.
+    if (!scrollToLatestOnMount || hasInitialScrollRef.current || messages.length === 0) {
+      return;
+    }
+    hasInitialScrollRef.current = true;
+    requestAnimationFrame(() => {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
+    });
+  }, [messages.length, scrollToLatestOnMount]);
 
   useEffect(() => {
     return () => {

@@ -161,7 +161,7 @@ export const EditorPage: React.FC = () => {
       autoSaveTimerRef.current = null;
     }
     // Use provided content if available, otherwise fall back to current state
-    const content = contentToSave ?? editorContent;
+    const content = typeof contentToSave === 'string' ? contentToSave : editorContent;
     // Force save for manual saves - always save even if content unchanged
     performAutoSave(content, true);
   }, [performAutoSave, editorContent]);
@@ -297,7 +297,7 @@ export const EditorPage: React.FC = () => {
             <AutoSaveIndicator />
             <Button
               size="sm"
-              onClick={handleManualSave}
+              onClick={() => handleManualSave()}
               disabled={isAutoSaving}
               className="flex items-center gap-2"
             >
@@ -348,7 +348,7 @@ export const EditorPage: React.FC = () => {
             <AutoSaveIndicator />
             <Button
               size="sm"
-              onClick={handleManualSave}
+              onClick={() => handleManualSave()}
               disabled={isAutoSaving}
               className="p-2"
             >

@@ -65,6 +65,37 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
   const [isGenerating, setIsGenerating] = useState(false);
   const abortControllerRef = useRef<AbortController | null>(null);
   const accumulatedTextRef = useRef<string>('');
+  const streamInactivityTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const streamMaxDurationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const clearStreamTimers = () => {
+    if (streamInactivityTimerRef.current) {
+      clearTimeout(streamInactivityTimerRef.current);
+      streamInactivityTimerRef.current = null;
+    }
+    if (streamMaxDurationTimerRef.current) {
+      clearTimeout(streamMaxDurationTimerRef.current);
+      streamMaxDurationTimerRef.current = null;
+    }
+  };
+
+  const stopGenerationSafely = () => {
+    clearStreamTimers();
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    const cleanedText = cleanAutoEditOutput(accumulatedTextRef.current);
+    setCurrentEditedText(cleanedText);
+    setEditedVersions(prev => {
+      const updated = [...prev];
+      if (updated.length > 0) {
+        updated[updated.length - 1] = { ...updated[updated.length - 1], text: cleanedText };
+      }
+      return updated;
+    });
+    setIsGenerating(false);
+  };
 
   // Helper to clean up trailing "---" and newline before it from auto-edit output
   const cleanAutoEditOutput = (text: string): string => {
@@ -215,6 +246,11 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
       setCurrentVersionIndex(-1);
       setCurrentEditedText('');
       setIsGenerating(false);
+      clearStreamTimers();
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+        abortControllerRef.current = null;
+      }
       const selectedPrefill = prefills.find(p => p.id === selectedPrefillId) || 
                               prefills.find(p => p.is_default) ||
                               prefills.find(p => p.name === '修改') ||
@@ -322,24 +358,7 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
   // Handle generate auto edit
   const handleGenerateEdit = async () => {
     if (isGenerating) {
-      // Stop current generation - abort the request
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort();
-        abortControllerRef.current = null;
-      }
-
-      // Clean up the current version's text
-      const cleanedText = cleanAutoEditOutput(accumulatedTextRef.current);
-      setCurrentEditedText(cleanedText);
-      setEditedVersions(prev => {
-        const updated = [...prev];
-        if (updated.length > 0) {
-          updated[updated.length - 1] = { ...updated[updated.length - 1], text: cleanedText };
-        }
-        return updated;
-      });
-
-      setIsGenerating(false);
+      stopGenerationSafely();
       return;
     }
 
@@ -365,15 +384,35 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
 
+    const resetInactivityTimer = () => {
+      if (streamInactivityTimerRef.current) {
+        clearTimeout(streamInactivityTimerRef.current);
+      }
+      // If no chunk arrives for 45s, consider stream stale and unlock UI.
+      streamInactivityTimerRef.current = setTimeout(() => {
+        console.warn('Auto-edit stream inactive for too long, stopping safely.');
+        stopGenerationSafely();
+      }, 45000);
+    };
+    resetInactivityTimer();
+
+    // Hard cap to prevent modal from getting stuck in generating state indefinitely.
+    streamMaxDurationTimerRef.current = setTimeout(() => {
+      console.warn('Auto-edit stream exceeded max duration, stopping safely.');
+      stopGenerationSafely();
+    }, 8 * 60 * 1000);
+
     await onGenerateEdit(
       originalText,
       context,
       (chunk: string) => {
+        resetInactivityTimer();
         accumulatedTextRef.current += chunk;
         setCurrentEditedText(prev => prev + chunk);
       },
       () => {
         // On end - clean up text, version already exists
+        clearStreamTimers();
         const cleanedText = cleanAutoEditOutput(accumulatedTextRef.current);
         setCurrentEditedText(cleanedText);
         setEditedVersions(prev => {
@@ -388,6 +427,7 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
       },
       (error: string) => {
         // On error - clean up version with whatever text we have
+        clearStreamTimers();
         console.error('Auto edit error:', error);
         const cleanedText = cleanAutoEditOutput(accumulatedTextRef.current);
         if (cleanedText.trim()) {
@@ -450,6 +490,9 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
 
   // Handle close - with confirmation if there's unsaved work
   const handleClose = () => {
+    if (isGenerating) {
+      stopGenerationSafely();
+    }
     if (editedVersions.length > 0) {
       if (confirm('你有未保存的编辑内容。确定要关闭吗？')) {
         onClose();
@@ -458,6 +501,16 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
       onClose();
     }
   };
+
+  useEffect(() => {
+    return () => {
+      clearStreamTimers();
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+        abortControllerRef.current = null;
+      }
+    };
+  }, []);
 
   // Handle lore entry toggle
   const toggleLoreEntry = (id: number) => {

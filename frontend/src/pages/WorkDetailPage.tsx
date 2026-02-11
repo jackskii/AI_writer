@@ -561,7 +561,7 @@ export const WorkDetailPage: React.FC = () => {
                 </Card>
               ) : (
                 <div className="h-[calc(100vh-240px)]">
-                  <WorkChatPanel work={work} />
+                  <WorkChatPanel work={work} scrollToLatestOnMount />
                 </div>
               )}
             </div>
