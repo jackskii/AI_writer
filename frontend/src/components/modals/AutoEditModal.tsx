@@ -1164,16 +1164,16 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
                   value={originalText}
                   onChange={(e) => setOriginalText(e.target.value)}
                   className="font-mono text-sm resize-none"
-                  style={{ minHeight: '200px', height: '66%' }}
+                  style={{ minHeight: '150px', flex: '0 0 auto' }}
                   placeholder={initialOriginalText ? "原始文本..." : "输入提示词来引导 AI 生成（可留空）..."}
                 />
 
                 {/* Editing Guide Section */}
-                <div className="mt-3 flex-shrink-0" style={{ height: '30%' }}>
-                  <label className="text-sm font-medium text-dark-text mb-2 block">
+                <div className="mt-3 flex-1 flex flex-col min-h-0">
+                  <label className="text-sm font-medium text-dark-text mb-2 block flex-shrink-0">
                     编辑指引
                   </label>
-                  <div className="flex gap-2 mb-2">
+                  <div className="flex gap-2 mb-2 flex-shrink-0">
                     {Object.keys(prefills).map(key => (
                       <button
                         key={key}
@@ -1195,7 +1195,8 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
                   <Textarea
                     value={editRequirement}
                     onChange={(e) => setEditRequirement(e.target.value)}
-                    className="font-mono text-sm resize-none h-full"
+                    className="flex-1 font-mono text-sm resize-none"
+                    style={{ minHeight: '400px' }}
                     placeholder="输入编辑要求..."
                     maxLength={50000}
                   />
