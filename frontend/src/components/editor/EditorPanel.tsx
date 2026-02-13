@@ -617,6 +617,11 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
   // Allow parent (mobile top bar) to trigger the same auto-edit flow.
   useEffect(() => {
     if (typeof autoEditTriggerKey !== 'number') return;
+    // On first mount, only sync baseline key; don't auto-open modal.
+    if (lastHandledAutoEditTriggerRef.current === null) {
+      lastHandledAutoEditTriggerRef.current = autoEditTriggerKey;
+      return;
+    }
     if (lastHandledAutoEditTriggerRef.current === autoEditTriggerKey) return;
     lastHandledAutoEditTriggerRef.current = autoEditTriggerKey;
     handleAutoEdit();
@@ -1678,17 +1683,19 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
       )}
 
       {/* New Auto Edit Modal */}
-      <AutoEditModal
-        isOpen={showAutoEditModal}
-        onClose={() => setShowAutoEditModal(false)}
-        originalText={autoEditOriginalText}
-        work={work}
-        chapter={chapter}
-        onAccept={handleAutoEditAccept}
-        onRevert={handleAutoEditRevert}
-        onGenerateEdit={handleAutoEditGenerate}
-        isMobile={isMobile}
-      />
+      {showAutoEditModal && (
+        <AutoEditModal
+          isOpen={showAutoEditModal}
+          onClose={() => setShowAutoEditModal(false)}
+          originalText={autoEditOriginalText}
+          work={work}
+          chapter={chapter}
+          onAccept={handleAutoEditAccept}
+          onRevert={handleAutoEditRevert}
+          onGenerateEdit={handleAutoEditGenerate}
+          isMobile={isMobile}
+        />
+      )}
       </div>
     </>
   );

@@ -31,6 +31,22 @@ class ChapterSerializer(serializers.ModelSerializer):
         read_only_fields = ['work', 'order', 'chapter_number', 'act_name', 'act_order', 'created_at', 'updated_at', 'last_autosave']
 
 
+class ChapterOverviewSerializer(serializers.ModelSerializer):
+    act_name = serializers.CharField(source='act.name', read_only=True)
+    act_order = serializers.IntegerField(source='act.order', read_only=True)
+
+    class Meta:
+        model = Chapter
+        fields = [
+            'id', 'work', 'title', 'order', 'act', 'act_name', 'act_order', 'chapter_number',
+            'summary', 'created_at', 'updated_at', 'last_autosave'
+        ]
+        read_only_fields = [
+            'work', 'order', 'chapter_number', 'act_name', 'act_order',
+            'created_at', 'updated_at', 'last_autosave'
+        ]
+
+
 class WorkSerializer(serializers.ModelSerializer):
     word_count = serializers.ReadOnlyField()
     chapter_count = serializers.ReadOnlyField()
@@ -47,7 +63,8 @@ class WorkSerializer(serializers.ModelSerializer):
 
 
 class WorkDetailSerializer(WorkSerializer):
-    chapters = ChapterSerializer(many=True, read_only=True)
+    # Keep work detail lightweight: chapter full text should be fetched via chapter detail API.
+    chapters = ChapterOverviewSerializer(many=True, read_only=True)
     acts = ActSerializer(many=True, read_only=True)
     
     class Meta(WorkSerializer.Meta):

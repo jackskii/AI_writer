@@ -5,6 +5,7 @@ from rest_framework.permissions import IsAuthenticated, AllowAny
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.db import models
+from django.db.models import Prefetch
 from .models import Work, Act, Chapter, Faction, LoreEntry, WritingStyle
 from .serializers import WorkSerializer, WorkDetailSerializer, ActSerializer, ChapterSerializer, FactionSerializer, LoreEntrySerializer, WritingStyleSerializer
 
@@ -30,7 +31,22 @@ class WorkViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        return Work.objects.filter(author=self.request.user)
+        queryset = Work.objects.filter(author=self.request.user)
+        if self.action == 'retrieve':
+            lightweight_chapters = Chapter.objects.select_related('act').only(
+                'id', 'work_id', 'title', 'order', 'act_id',
+                'chapter_number', 'summary', 'created_at',
+                'updated_at', 'last_autosave', 'act__name', 'act__order'
+            ).order_by('act__order', 'chapter_number')
+            lightweight_acts = Act.objects.only(
+                'id', 'work_id', 'name', 'order', 'synopsis',
+                'act_type', 'created_at', 'updated_at'
+            ).order_by('order')
+            queryset = queryset.prefetch_related(
+                Prefetch('chapters', queryset=lightweight_chapters),
+                Prefetch('acts', queryset=lightweight_acts),
+            )
+        return queryset
 
     def get_serializer_class(self):
         if self.action == 'retrieve':
