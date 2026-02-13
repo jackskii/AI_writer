@@ -55,6 +55,7 @@ export const EditorPage: React.FC = () => {
   // Mobile-specific state
   const [mobileTab, setMobileTab] = useState<MobileTab>('editor');
   const [mobileAutoEditTriggerKey, setMobileAutoEditTriggerKey] = useState(0);
+  const [mobileHeaderViewportTop, setMobileHeaderViewportTop] = useState(0);
   
   const lastSaveContentRef = useRef('');
   const autoSaveTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -223,6 +224,32 @@ export const EditorPage: React.FC = () => {
     setMobileAutoEditTriggerKey(prev => prev + 1);
   };
 
+  // iOS keyboard can shift visual viewport; keep mobile top bar pinned to visible top.
+  useEffect(() => {
+    if (!isMobile || typeof window === 'undefined') {
+      setMobileHeaderViewportTop(0);
+      return;
+    }
+
+    const updateViewportTop = () => {
+      const viewportTop = window.visualViewport?.offsetTop ?? 0;
+      setMobileHeaderViewportTop(Math.max(0, Math.round(viewportTop)));
+    };
+
+    updateViewportTop();
+
+    const viewport = window.visualViewport;
+    viewport?.addEventListener('resize', updateViewportTop);
+    viewport?.addEventListener('scroll', updateViewportTop);
+    window.addEventListener('scroll', updateViewportTop, { passive: true });
+
+    return () => {
+      viewport?.removeEventListener('resize', updateViewportTop);
+      viewport?.removeEventListener('scroll', updateViewportTop);
+      window.removeEventListener('scroll', updateViewportTop);
+    };
+  }, [isMobile]);
+
   // Cleanup timer on unmount
   useEffect(() => {
     return () => {
@@ -340,7 +367,10 @@ export const EditorPage: React.FC = () => {
       </header>
 
       {/* Header - Mobile (simplified) */}
-      <header className="fixed top-0 left-0 right-0 z-30 border-b border-dark-border bg-dark-surface md:hidden">
+      <header
+        className="fixed left-0 right-0 z-30 border-b border-dark-border bg-dark-surface md:hidden"
+        style={{ top: `${mobileHeaderViewportTop}px` }}
+      >
         <div className="flex items-center justify-between px-3 py-2">
           <div className="flex items-center gap-2 min-w-0 flex-1">
             <Button
