@@ -68,9 +68,15 @@ export const CreateLoreModal: React.FC<CreateLoreModalProps> = ({
   }, [factions, isWorldbuildingEntry]);
 
   useEffect(() => {
-    // Always reset dropdown state when modal opens/closes or entry changes
+    // Only initialize form when modal is opened or edit target changes.
+    // Avoid resetting user input on background refetch.
+    if (!isOpen) {
+      setIsFactionDropdownOpen(false);
+      return;
+    }
+
     setIsFactionDropdownOpen(false);
-    
+
     if (editEntry) {
       setName(editEntry.name);
       setDescription(editEntry.description);
@@ -89,7 +95,6 @@ export const CreateLoreModal: React.FC<CreateLoreModalProps> = ({
       if (defaultFactionId) {
         const defaultFaction = factions.find(f => f.id === defaultFactionId);
         if (defaultFaction?.faction_type === 'no_faction') {
-          // Creating from 无归属: don't select any faction
           setSelectedFactions([]);
         } else {
           setSelectedFactions([defaultFactionId]);
@@ -98,7 +103,7 @@ export const CreateLoreModal: React.FC<CreateLoreModalProps> = ({
         setSelectedFactions([]);
       }
     }
-  }, [editEntry, defaultFactionId, isOpen, factions]);
+  }, [isOpen, editEntry?.id, defaultFactionId]);
 
   const saveMutation = useMutation({
     mutationFn: (loreData: { name: string; description: string; triggers: string[]; factions: number[] }) => {

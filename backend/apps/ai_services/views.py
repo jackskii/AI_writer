@@ -7,7 +7,7 @@ from django.http import StreamingHttpResponse, JsonResponse
 from django.db import models
 from django.db.utils import ProgrammingError, OperationalError
 from asgiref.sync import sync_to_async
-from apps.works.models import Work, Act, Chapter, LoreEntry
+from apps.works.models import Work, Act, Chapter, LoreEntry, Faction
 from .services import AIService, run_async_ai_task
 from .models import Suggestion
 from . import prompts
@@ -164,7 +164,7 @@ def get_lore_entries_for_act(act):
 
 
 @sync_to_async
-def build_auto_edit_context(work, chapter, user, style_id, selected_lore_ids, chapter_selection, custom_chapter_count):
+def build_auto_edit_context(work, chapter, user, style_id, selected_lore_ids, selected_faction_ids, chapter_selection, custom_chapter_count):
     """Build context for auto-edit (async version)
     
     New logic:
@@ -201,6 +201,17 @@ def build_auto_edit_context(work, chapter, user, style_id, selected_lore_ids, ch
                 formatted_context += "世界观条目：\n\n"
                 for entry in lore_entries:
                     formatted_context += f"【{entry.name}】\n{entry.description}\n\n"
+                formatted_context += "---\n\n"
+
+    # Add selected factions as lore-like context entries
+    if selected_faction_ids:
+        faction_ids = [int(id.strip()) for id in selected_faction_ids.split(',') if id.strip()]
+        if faction_ids:
+            factions = Faction.objects.filter(id__in=faction_ids, work=work)
+            if factions:
+                formatted_context += "阵营条目：\n\n"
+                for faction in factions:
+                    formatted_context += f"【{faction.name}】\n{faction.description or '(无描述)'}\n\n"
                 formatted_context += "---\n\n"
 
     # For side chapters, only add normal act synopses (no chapter content)
@@ -880,6 +891,7 @@ async def ai_auto_edit_stream(request):
     chapter_selection = body.get('chapter_selection', 'none')
     custom_chapter_count = body.get('custom_chapter_count', '1')
     selected_lore_ids = body.get('selected_lore_ids', '')
+    selected_faction_ids = body.get('selected_faction_ids', '')
     model = body.get('model')  # Let provider determine default model
     edit_requirement = body.get('edit_requirement', '')
     style_id = body.get('style_id', '')
@@ -904,7 +916,7 @@ async def ai_auto_edit_stream(request):
         try:
             # Build context
             formatted_context = await build_auto_edit_context(
-                work, chapter, user, style_id, selected_lore_ids,
+                work, chapter, user, style_id, selected_lore_ids, selected_faction_ids,
                 chapter_selection, custom_chapter_count
             )
 

@@ -214,7 +214,9 @@ class LoreEntry(models.Model):
     name = models.CharField('条目名称', max_length=200)
     description = models.TextField('详细描述')
     triggers = models.JSONField('触发词', default=list, help_text='当内容中包含这些词时会触发此条目')
-    extra_triggers = models.JSONField('额外触发词', default=list, help_text='用户自定义的额外触发词')
+    # NOTE: Kept for backward compatibility / future extension.
+    # Current frontend UI does not provide an editor for this field.
+    extra_triggers = models.JSONField('额外触发词', default=list, help_text='保留字段：当前前端UI未提供编辑入口')
     factions = models.ManyToManyField(
         Faction,
         related_name='lore_entries',

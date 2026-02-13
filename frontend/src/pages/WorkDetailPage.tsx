@@ -3,9 +3,10 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, Plus, Edit3, Settings, Palette, BookOpen, Layers, FileText, MessageCircle } from 'lucide-react';
+import { ArrowLeft, Plus, Edit3, Settings, Palette, BookOpen, Layers, FileText, MessageCircle, ChevronDown, ChevronRight, Pencil, Trash2 } from 'lucide-react';
 import { worksApi, actsApi, chaptersApi, loreApi, factionsApi } from '../services/api';
 import { useWorkStore } from '../stores/useWorkStore';
+import { useMobile } from '../hooks/useMobile';
 import { Button } from '../components/ui/Button';
 import { Card, CardContent, CardHeader } from '../components/ui/Card';
 import { LoadingScreen } from '../components/ui/Loading';
@@ -61,9 +62,11 @@ export const WorkDetailPage: React.FC = () => {
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [titleContent, setTitleContent] = useState('');
   const [collapsedFactions, setCollapsedFactions] = useState<Set<number>>(new Set());
+  const [collapsedCompactFactions, setCollapsedCompactFactions] = useState<Set<number>>(new Set());
 
   const workIdNum = parseInt(workId!);
   const queryClient = useQueryClient();
+  const isMobile = useMobile();
 
   // Work mutations
   const updateSynopsisMutation = useMutation({
@@ -323,6 +326,10 @@ export const WorkDetailPage: React.FC = () => {
     setEditingFaction(null);
     setIsCreateFactionModalOpen(true);
   };
+  const handleEditFaction = (faction: Faction) => {
+    setEditingFaction(faction);
+    setIsCreateFactionModalOpen(true);
+  };
 
   const handleFactionSubmit = (name: string, description: string) => {
     if (editingFaction) {
@@ -341,6 +348,14 @@ export const WorkDetailPage: React.FC = () => {
         newSet.add(factionId);
       }
       return newSet;
+    });
+  };
+  const handleToggleCompactFactionCollapse = (factionId: number) => {
+    setCollapsedCompactFactions(prev => {
+      const next = new Set(prev);
+      if (next.has(factionId)) next.delete(factionId);
+      else next.add(factionId);
+      return next;
     });
   };
   const handleUpdateFaction = (factionId: number, name: string, description: string) => updateFactionMutation.mutate({ factionId, name, description });
@@ -385,6 +400,7 @@ export const WorkDetailPage: React.FC = () => {
     createActMutation.mutate({ name: `第${nextOrder}卷`, order: nextOrder });
   };
   const handleReorderChapters = (actId: number, chapterIds: number[]) => reorderChaptersMutation.mutate({ actId, chapterIds });
+  const effectiveLoreViewMode: 'faction' | 'compact' = isMobile ? 'compact' : loreViewMode;
 
   const tabs = [
     { id: 'chapters', label: '章节', icon: BookOpen },
@@ -457,7 +473,7 @@ export const WorkDetailPage: React.FC = () => {
                 <button onClick={() => setActiveTab(id)} className={`flex items-center gap-1 py-2 px-2 text-xs border-b-2 transition-colors ${activeTab === id ? 'border-dark-primary text-dark-primary' : 'border-transparent text-dark-text-muted'}`}>
                   <Icon size={14} />{label}
                 </button>
-                {id === 'lore' && activeTab === 'lore' && (
+                {id === 'lore' && activeTab === 'lore' && !isMobile && (
                   <button
                     onClick={() => setLoreViewMode(loreViewMode === 'compact' ? 'faction' : 'compact')}
                     className="ml-1 px-2 py-1 text-xs rounded border border-dark-border text-dark-text-muted hover:text-dark-text"
@@ -499,7 +515,7 @@ export const WorkDetailPage: React.FC = () => {
                   <button onClick={() => setActiveTab(id)} className={`flex items-center gap-2 py-4 px-2 border-b-2 transition-colors ${activeTab === id ? 'border-dark-primary text-dark-primary' : 'border-transparent text-dark-text-muted hover:text-dark-text'}`}>
                     <Icon size={18} />{label}
                   </button>
-                  {id === 'lore' && activeTab === 'lore' && (
+                  {id === 'lore' && activeTab === 'lore' && !isMobile && (
                     <button
                       onClick={() => setLoreViewMode(loreViewMode === 'compact' ? 'faction' : 'compact')}
                       className="ml-2 px-2 py-1 text-xs rounded border border-dark-border text-dark-text-muted hover:text-dark-text"
@@ -606,10 +622,10 @@ export const WorkDetailPage: React.FC = () => {
                 <Button onClick={handleCreateFaction} className="flex items-center gap-2"><Plus size={18} />创建第一个阵营</Button>
               </CardContent></Card>
             ) : (
-              loreViewMode === 'faction' ? (
+              effectiveLoreViewMode === 'faction' ? (
                 <div className="space-y-4">
                   {sortedFactions.map((faction) => (
-                  <FactionSection key={faction.id} faction={faction} isCollapsed={collapsedFactions.has(faction.id)} loreEntries={getLoreEntriesForFaction(faction.id)} onToggleCollapse={handleToggleFactionCollapse} onDeleteFaction={handleDeleteFaction} onAddCharacter={(factionId) => handleCreateLore(factionId)} onEditLoreEntry={handleEditLoreEntry} onDeleteLoreEntry={handleDeleteLoreEntry} />
+                  <FactionSection key={faction.id} faction={faction} isCollapsed={collapsedFactions.has(faction.id)} loreEntries={getLoreEntriesForFaction(faction.id)} onToggleCollapse={handleToggleFactionCollapse} onEditFaction={handleEditFaction} onDeleteFaction={handleDeleteFaction} onAddCharacter={(factionId) => handleCreateLore(factionId)} onEditLoreEntry={handleEditLoreEntry} onDeleteLoreEntry={handleDeleteLoreEntry} />
                   ))}
                   <div className="flex justify-center pt-4">
                     <Button onClick={handleCreateFaction} variant="outline" className="flex items-center gap-2"><Plus size={18} />新建阵营</Button>
@@ -627,37 +643,60 @@ export const WorkDetailPage: React.FC = () => {
                     compactLoreFactions.map(({ faction, entries }) => (
                       <div key={faction.id} className="border border-dark-border rounded-md p-2 bg-dark-surface/20">
                         <div className="flex items-center justify-between mb-2">
-                          <h4 className="text-sm font-medium text-dark-text truncate">{faction.name}</h4>
+                          <div className="flex items-center gap-1 min-w-0 flex-1">
+                            <button
+                              onClick={() => handleToggleCompactFactionCollapse(faction.id)}
+                              className="p-1 rounded hover:bg-dark-bg text-dark-text-muted hover:text-dark-text flex-shrink-0"
+                              title={collapsedCompactFactions.has(faction.id) ? '展开' : '收起'}
+                            >
+                              {collapsedCompactFactions.has(faction.id) ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
+                            </button>
+                            <h4 className="text-sm font-medium text-dark-text truncate flex-shrink-0">{faction.name}</h4>
+                            {faction.faction_type === 'normal' && (
+                              <button
+                                onClick={() => handleEditFaction(faction)}
+                                className="p-1 rounded hover:bg-dark-bg text-dark-text-muted hover:text-dark-primary flex-shrink-0"
+                                title="编辑阵营"
+                              >
+                                <Pencil size={12} />
+                              </button>
+                            )}
+                            <span className="text-xs text-dark-text-muted truncate min-w-0">
+                              {faction.description || '暂无描述'}
+                            </span>
+                          </div>
                           <button
                             onClick={() => handleCreateLore(faction.id)}
-                            className="p-1 rounded hover:bg-dark-primary/20 text-dark-primary"
+                            className="p-1 rounded hover:bg-dark-primary/20 text-dark-primary ml-2 flex-shrink-0"
                             title="在该阵营创建条目"
                           >
                             <Plus size={14} />
                           </button>
                         </div>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-1.5">
-                          {entries.map((entry) => (
-                            <div
-                              key={entry.id}
-                              className="flex items-center justify-between gap-2 rounded border border-dark-border/60 px-2 py-1 bg-dark-bg/50"
-                            >
-                              <button onClick={() => handleEditLoreEntry(entry)} className="text-left hover:text-dark-primary flex-1 min-w-0">
-                                <div className="flex items-start gap-2">
-                                  <span className="text-xs text-dark-text truncate flex-shrink-0 max-w-[40%]">{entry.name}</span>
-                                  <span className="text-xs text-dark-text-muted line-clamp-2 min-w-0 flex-1">{entry.description}</span>
-                                </div>
-                              </button>
-                              <button
-                                onClick={() => handleDeleteLoreEntry(entry)}
-                                className="text-xs text-red-400 hover:text-red-300 px-1"
-                                title="删除条目"
+                        {!collapsedCompactFactions.has(faction.id) && (
+                          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-1.5">
+                            {entries.map((entry) => (
+                              <div
+                                key={entry.id}
+                                className="flex items-center justify-between gap-2 rounded border border-dark-border/60 px-2 py-1 bg-dark-bg/50"
                               >
-                                删
-                              </button>
-                            </div>
-                          ))}
-                        </div>
+                                <button onClick={() => handleEditLoreEntry(entry)} className="text-left hover:text-dark-primary flex-1 min-w-0">
+                                  <div className="flex items-start gap-2">
+                                    <span className="text-xs text-dark-text truncate flex-shrink-0 max-w-[40%]">{entry.name}</span>
+                                    <span className="text-xs text-dark-text-muted line-clamp-2 min-w-0 flex-1">{entry.description}</span>
+                                  </div>
+                                </button>
+                                <button
+                                  onClick={() => handleDeleteLoreEntry(entry)}
+                                  className="p-1 rounded text-dark-text-muted hover:text-red-400 hover:bg-dark-bg transition-colors"
+                                  title="删除条目"
+                                >
+                                  <Trash2 size={12} />
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     ))
                   )}

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { X, ChevronLeft, ChevronRight, Square, Wand2, Check, RotateCcw, Settings } from 'lucide-react';
+import { X, ChevronLeft, ChevronRight, ChevronDown, Square, Wand2, Check, RotateCcw, Settings } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { Textarea } from '../ui/Input';
 import { useMobile } from '../../hooks/useMobile';
@@ -30,6 +30,7 @@ export interface AutoEditContext {
   chapterSelection: 'all' | 'custom' | 'none';
   customChapterCount?: number;
   selectedLoreEntries: number[]; // IDs of selected lore entries
+  selectedFactions?: number[]; // IDs of selected factions
   model: 'deepseek-chat' | 'deepseek-reasoner';
   editRequirement?: string; // Editing requirement/instruction
   styleId?: number; // Optional writing style ID
@@ -120,8 +121,14 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
       return a.order - b.order;
     });
   }, [factions]);
+  const selectableContextFactions = React.useMemo(
+    () => sortedFactions.filter((faction) => faction.faction_type === 'normal'),
+    [sortedFactions]
+  );
   
   const [selectedFactionFilter, setSelectedFactionFilter] = useState<number | 'all'>('all');
+  const [selectedFactionIds, setSelectedFactionIds] = useState<number[]>([]);
+  const [isFactionContextDropdownOpen, setIsFactionContextDropdownOpen] = useState(false);
   const [selectedLoreIds, setSelectedLoreIds] = useState<number[]>([]);
   const [loreCurrentPage, setLoreCurrentPage] = useState(1);
   const [selectedModel, setSelectedModel] = useState<'deepseek-chat' | 'deepseek-reasoner'>('deepseek-chat');
@@ -259,8 +266,10 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
         setEditRequirement(selectedPrefill.prompt_text);
       }
       setSelectedFactionFilter('all'); // Reset faction filter
+      setSelectedFactionIds([]);
+      setIsFactionContextDropdownOpen(false);
       loadLoreEntries();
-      preselectTriggeredLoreEntries();
+      preselectTriggeredContextEntries(initialOriginalText);
     }
   }, [isOpen, initialOriginalText, isLoadingPrefills, prefills]);
 
@@ -310,26 +319,37 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
     }
   };
 
-  // Preselect lore entries triggered by original text
-  const preselectTriggeredLoreEntries = () => {
-    const triggeredIds: number[] = [];
+  // Auto-select lore/faction context triggered by text.
+  // Lore keys include name + triggers; faction keys include faction name.
+  const preselectTriggeredContextEntries = (sourceText: string) => {
+    const text = sourceText || '';
+    const triggeredLoreIds: number[] = [];
+    const triggeredFactionIds: number[] = [];
+
     loreEntries.forEach(entry => {
-      const allTriggers = [...entry.triggers, ...entry.extra_triggers];
-      const isTriggered = allTriggers.some(trigger =>
-        initialOriginalText.includes(trigger)
-      );
+      const allTriggers = [entry.name, ...(entry.triggers || []), ...(entry.extra_triggers || [])]
+        .filter(Boolean);
+      const isTriggered = allTriggers.some(trigger => text.includes(trigger));
       if (isTriggered) {
-        triggeredIds.push(entry.id);
+        triggeredLoreIds.push(entry.id);
       }
     });
-    setSelectedLoreIds(triggeredIds);
+
+    selectableContextFactions.forEach(faction => {
+      if (faction.name && text.includes(faction.name)) {
+        triggeredFactionIds.push(faction.id);
+      }
+    });
+
+    setSelectedLoreIds(triggeredLoreIds);
+    setSelectedFactionIds(triggeredFactionIds);
   };
 
   useEffect(() => {
-    if (loreEntries.length > 0) {
-      preselectTriggeredLoreEntries();
+    if (loreEntries.length > 0 || factions.length > 0) {
+      preselectTriggeredContextEntries(initialOriginalText);
     }
-  }, [loreEntries, initialOriginalText]);
+  }, [loreEntries, selectableContextFactions, initialOriginalText]);
 
   // Real-time trigger detection as user types in originalText
   useEffect(() => {
@@ -337,7 +357,7 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
 
     const newTriggeredIds: number[] = [];
     loreEntries.forEach(entry => {
-      const allTriggers = [...entry.triggers, ...entry.extra_triggers];
+      const allTriggers = [entry.name, ...(entry.triggers || []), ...(entry.extra_triggers || [])].filter(Boolean);
       const isTriggered = allTriggers.some(trigger =>
         originalText.includes(trigger)
       );
@@ -354,6 +374,19 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
       setSelectedLoreIds(prev => [...new Set([...prev, ...newlyTriggered])]);
     }
   }, [originalText, loreEntries]);
+
+  // Real-time faction auto-selection by faction name mention.
+  useEffect(() => {
+    if (selectableContextFactions.length === 0) return;
+    const newTriggeredFactionIds = selectableContextFactions
+      .filter(faction => faction.name && originalText.includes(faction.name))
+      .map(faction => faction.id);
+
+    const newlyTriggered = newTriggeredFactionIds.filter(id => !selectedFactionIds.includes(id));
+    if (newlyTriggered.length > 0) {
+      setSelectedFactionIds(prev => [...new Set([...prev, ...newlyTriggered])]);
+    }
+  }, [originalText, selectableContextFactions, selectedFactionIds]);
 
   // Handle generate auto edit
   const handleGenerateEdit = async () => {
@@ -375,6 +408,7 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
       chapterSelection,
       customChapterCount: chapterSelection === 'custom' ? customChapterCount : undefined,
       selectedLoreEntries: selectedLoreIds,
+      selectedFactions: selectedFactionIds,
       model: selectedModel,
       editRequirement: editRequirement.trim() || '修改',
       styleId: selectedStyleId || undefined,
@@ -519,6 +553,12 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
     );
   };
 
+  const toggleFactionContext = (id: number) => {
+    setSelectedFactionIds(prev =>
+      prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]
+    );
+  };
+
   // Filter and paginate lore entries by faction
   const safeLoreeEntries = Array.isArray(loreEntries) ? loreEntries : [];
   const filteredLoreEntries = selectedFactionFilter === 'all' 
@@ -558,6 +598,16 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
       length += 20; // "世界观条目：\n\n"
       selectedLore.forEach(entry => {
         length += entry.name.length + entry.description.length + 20; // +20 for "【】\n\n" formatting
+      });
+      length += 10; // "---\n\n"
+    }
+
+    // Add selected factions as context entries (actual)
+    const selectedFactions = (Array.isArray(factions) ? factions : []).filter(f => selectedFactionIds.includes(f.id));
+    if (selectedFactions.length > 0) {
+      length += 20; // "阵营条目：\n\n"
+      selectedFactions.forEach(faction => {
+        length += faction.name.length + (faction.description?.length || 0) + 20; // +20 for "【】\n\n"
       });
       length += 10; // "---\n\n"
     }
@@ -913,6 +963,44 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
 
               {/* Lore Entries */}
               <div>
+                <h4 className="text-sm font-medium text-dark-text mb-2">阵营上下文</h4>
+                <div className="relative mb-4">
+                  <button
+                    type="button"
+                    onClick={() => setIsFactionContextDropdownOpen(prev => !prev)}
+                    className="w-full flex items-center justify-between px-3 py-2 bg-dark-bg border border-dark-border rounded-lg text-left hover:border-dark-primary/50 transition-colors"
+                  >
+                    <span className="text-sm text-dark-text truncate">
+                      {selectedFactionIds.length === 0 ? '选择阵营（可自动触发）...' : `已选择 ${selectedFactionIds.length} 个阵营`}
+                    </span>
+                    <ChevronDown
+                      size={16}
+                      className={`text-dark-text-muted transition-transform ${isFactionContextDropdownOpen ? 'rotate-180' : ''}`}
+                    />
+                  </button>
+                  {isFactionContextDropdownOpen && (
+                    <div className="absolute top-full left-0 w-full mt-1 py-1 bg-dark-surface border border-dark-border rounded-lg shadow-lg max-h-56 overflow-y-auto z-[90]">
+                      {selectableContextFactions.length > 0 ? (
+                        selectableContextFactions.map((faction) => (
+                          <button
+                            key={faction.id}
+                            type="button"
+                            onClick={() => toggleFactionContext(faction.id)}
+                            className="w-full flex items-center justify-between px-3 py-2 text-sm text-left hover:bg-dark-bg transition-colors"
+                          >
+                            <span className="text-dark-text">{faction.name}</span>
+                            {selectedFactionIds.includes(faction.id) && (
+                              <Check size={16} className="text-dark-primary" />
+                            )}
+                          </button>
+                        ))
+                      ) : (
+                        <div className="px-3 py-2 text-sm text-dark-text-muted">暂无可选阵营</div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
                 <h4 className="text-sm font-medium text-dark-text mb-2">世界观条目</h4>
                 {/* Faction Filter Dropdown */}
                 {sortedFactions.length > 0 && (
@@ -1182,6 +1270,44 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
 
               {/* Lore Entries Selection */}
               <div>
+                <h4 className="text-sm font-medium text-dark-text mb-2">阵营上下文</h4>
+                <div className="relative mb-4">
+                  <button
+                    type="button"
+                    onClick={() => setIsFactionContextDropdownOpen(prev => !prev)}
+                    className="w-full flex items-center justify-between px-3 py-1.5 bg-dark-surface border border-dark-border rounded text-left hover:border-dark-primary/50 transition-colors"
+                  >
+                    <span className="text-sm text-dark-text truncate">
+                      {selectedFactionIds.length === 0 ? '选择阵营（可自动触发）...' : `已选择 ${selectedFactionIds.length} 个阵营`}
+                    </span>
+                    <ChevronDown
+                      size={16}
+                      className={`text-dark-text-muted transition-transform ${isFactionContextDropdownOpen ? 'rotate-180' : ''}`}
+                    />
+                  </button>
+                  {isFactionContextDropdownOpen && (
+                    <div className="absolute top-full left-0 w-full mt-1 py-1 bg-dark-surface border border-dark-border rounded-lg shadow-lg max-h-56 overflow-y-auto z-50">
+                      {selectableContextFactions.length > 0 ? (
+                        selectableContextFactions.map((faction) => (
+                          <button
+                            key={faction.id}
+                            type="button"
+                            onClick={() => toggleFactionContext(faction.id)}
+                            className="w-full flex items-center justify-between px-3 py-2 text-sm text-left hover:bg-dark-bg transition-colors"
+                          >
+                            <span className="text-dark-text">{faction.name}</span>
+                            {selectedFactionIds.includes(faction.id) && (
+                              <Check size={16} className="text-dark-primary" />
+                            )}
+                          </button>
+                        ))
+                      ) : (
+                        <div className="px-3 py-2 text-sm text-dark-text-muted">暂无可选阵营</div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
                 <h4 className="text-sm font-medium text-dark-text mb-2">世界观条目</h4>
                 {/* Faction Filter Dropdown */}
                 {sortedFactions.length > 0 && (

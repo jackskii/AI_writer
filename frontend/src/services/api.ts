@@ -428,6 +428,7 @@ export const aiApi = {
       chapterSelection: 'all' | 'custom' | 'none';
       customChapterCount?: number;
       selectedLoreEntries: number[];
+      selectedFactions?: number[];
       model: 'deepseek-chat' | 'deepseek-reasoner';
       editRequirement?: string;
       styleId?: number;
@@ -457,6 +458,10 @@ export const aiApi = {
 
     if (context.selectedLoreEntries.length > 0) {
       requestBody.selected_lore_ids = context.selectedLoreEntries.join(',');
+    }
+
+    if (context.selectedFactions && context.selectedFactions.length > 0) {
+      requestBody.selected_faction_ids = context.selectedFactions.join(',');
     }
 
     if (context.editRequirement) {

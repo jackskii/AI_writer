@@ -1,5 +1,5 @@
 import React from 'react';
-import { ChevronDown, ChevronRight, Plus, Trash2, Users, Globe } from 'lucide-react';
+import { ChevronDown, ChevronRight, Plus, Trash2, Users, Globe, Pencil } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { Card, CardContent } from '../ui/Card';
 import type { Faction, LoreEntry } from '../../types';
@@ -9,6 +9,7 @@ interface FactionSectionProps {
   isCollapsed: boolean;
   loreEntries: LoreEntry[];
   onToggleCollapse: (factionId: number) => void;
+  onEditFaction: (faction: Faction) => void;
   onDeleteFaction: (factionId: number) => void;
   onAddCharacter: (factionId: number) => void;
   onEditLoreEntry: (entry: LoreEntry) => void;
@@ -20,12 +21,14 @@ export const FactionSection: React.FC<FactionSectionProps> = ({
   isCollapsed,
   loreEntries,
   onToggleCollapse,
+  onEditFaction,
   onDeleteFaction,
   onAddCharacter,
   onEditLoreEntry,
   onDeleteLoreEntry
 }) => {
   const isWorldbuilding = faction.faction_type === 'worldbuilding';
+  const canEditFaction = faction.faction_type === 'normal';
   const canDelete = !faction.is_default;
 
   const getAddButtonText = () => {
@@ -57,6 +60,18 @@ export const FactionSection: React.FC<FactionSectionProps> = ({
           )}
           {getIcon()}
           <h3 className="text-lg font-semibold text-dark-text flex-shrink-0">{faction.name}</h3>
+          {canEditFaction && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onEditFaction(faction);
+              }}
+              className="p-1 rounded text-dark-text-muted hover:text-dark-primary hover:bg-dark-bg/60 transition-colors flex-shrink-0"
+              title="编辑阵营"
+            >
+              <Pencil size={14} />
+            </button>
+          )}
           <span className="text-sm text-dark-text-muted truncate min-w-0">
             {faction.description || '暂无描述'}
           </span>

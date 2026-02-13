@@ -59,6 +59,7 @@ export interface LoreEntry {
   name: string;
   description: string;
   triggers: string[];
+  // Reserved field from backend; current frontend UI does not edit it.
   extra_triggers: string[];
   factions: number[];
   created_at: string;
