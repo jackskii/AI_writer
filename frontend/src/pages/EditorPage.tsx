@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, Save, MessageCircle, Settings, Palette, Pencil, FileText } from 'lucide-react';
+import { ArrowLeft, Save, MessageCircle, Settings, Palette, Pencil, FileText, Wand2 } from 'lucide-react';
 import { worksApi, chaptersApi } from '../services/api';
 import { useWorkStore } from '../stores/useWorkStore';
 import { useUIStore } from '../stores/useUIStore';
@@ -54,6 +54,7 @@ export const EditorPage: React.FC = () => {
 
   // Mobile-specific state
   const [mobileTab, setMobileTab] = useState<MobileTab>('editor');
+  const [mobileAutoEditTriggerKey, setMobileAutoEditTriggerKey] = useState(0);
   
   const lastSaveContentRef = useRef('');
   const autoSaveTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -211,6 +212,17 @@ export const EditorPage: React.FC = () => {
     }
   };
 
+  const handleMobileTopAutoEdit = () => {
+    if (mobileTab !== 'editor') {
+      setMobileTab('editor');
+      requestAnimationFrame(() => {
+        setMobileAutoEditTriggerKey(prev => prev + 1);
+      });
+      return;
+    }
+    setMobileAutoEditTriggerKey(prev => prev + 1);
+  };
+
   // Cleanup timer on unmount
   useEffect(() => {
     return () => {
@@ -328,9 +340,9 @@ export const EditorPage: React.FC = () => {
       </header>
 
       {/* Header - Mobile (simplified) */}
-      <header className="flex-shrink-0 border-b border-dark-border bg-dark-surface md:hidden">
+      <header className="fixed top-0 left-0 right-0 z-30 border-b border-dark-border bg-dark-surface md:hidden">
         <div className="flex items-center justify-between px-3 py-2">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 min-w-0 flex-1">
             <Button
               variant="ghost"
               size="sm"
@@ -344,7 +356,19 @@ export const EditorPage: React.FC = () => {
             </span>
           </div>
 
-          <div className="flex items-center gap-1">
+          <div className="mx-3 flex-shrink-0">
+            <Button
+              size="sm"
+              onClick={handleMobileTopAutoEdit}
+              className="h-8 px-3 bg-blue-600 text-white hover:bg-blue-500"
+              title="自动编辑"
+            >
+              <Wand2 size={14} className="mr-1" />
+              自动编辑
+            </Button>
+          </div>
+
+          <div className="flex items-center gap-1 flex-1 justify-end">
             <AutoSaveIndicator />
             <Button
               size="sm"
@@ -399,7 +423,7 @@ export const EditorPage: React.FC = () => {
       </div>
 
       {/* Main Editor Area - Mobile (tabbed) */}
-      <div className="flex-1 flex flex-col md:hidden min-h-0 pb-[60px]">
+      <div className="flex-1 flex flex-col md:hidden min-h-0 pb-[60px] pt-[56px]">
         {/* Editor Tab Content */}
         {mobileTab === 'editor' && (
           <div className="flex-1 flex flex-col min-h-0">
@@ -410,6 +434,7 @@ export const EditorPage: React.FC = () => {
               chapter={currentChapterData}
               onSave={handleManualSave}
               isMobile={true}
+              autoEditTriggerKey={mobileAutoEditTriggerKey}
             />
           </div>
         )}

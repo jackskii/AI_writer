@@ -24,7 +24,6 @@ export const WorkChatPanel: React.FC<WorkChatPanelProps> = ({ work, scrollToLate
   const shouldAutoScrollRef = useRef(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const streamEventSourceRef = useRef<EventSource | null>(null);
-  const hasInitialScrollRef = useRef(false);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -39,11 +38,10 @@ export const WorkChatPanel: React.FC<WorkChatPanelProps> = ({ work, scrollToLate
   }, [messages, streamingMessage]);
 
   useEffect(() => {
-    // One-time jump to latest when entering dedicated chat page.
-    if (!scrollToLatestOnMount || hasInitialScrollRef.current || messages.length === 0) {
+    // Jump to latest whenever this chat page is opened and messages are present.
+    if (!scrollToLatestOnMount || messages.length === 0) {
       return;
     }
-    hasInitialScrollRef.current = true;
     requestAnimationFrame(() => {
       messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
     });

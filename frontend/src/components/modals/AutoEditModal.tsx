@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { X, ChevronLeft, ChevronRight, ChevronDown, Square, Wand2, Check, RotateCcw, Settings } from 'lucide-react';
+import { X, ChevronLeft, ChevronRight, Square, Wand2, Check, RotateCcw, Settings } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { Textarea } from '../ui/Input';
 import { useMobile } from '../../hooks/useMobile';
@@ -52,6 +52,8 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
   onGenerateEdit,
   isMobile: isMobileProp
 }) => {
+  const FACTION_FILTER_GROUP = '__factions__' as const;
+
   // Mobile detection - use prop if provided, otherwise detect
   const isMobileHook = useMobile();
   const isMobile = isMobileProp !== undefined ? isMobileProp : isMobileHook;
@@ -106,6 +108,7 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
 
   // State for customize panel
   const [showCustomize, setShowCustomize] = useState(false);
+  const [mobileView, setMobileView] = useState<'input' | 'output'>('input');
   const [chapterSelection, setChapterSelection] = useState<'all' | 'custom' | 'none'>('none');
   const [customChapterCount, setCustomChapterCount] = useState(1);
   const [loreEntries, setLoreEntries] = useState<LoreEntry[]>([]);
@@ -126,9 +129,8 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
     [sortedFactions]
   );
   
-  const [selectedFactionFilter, setSelectedFactionFilter] = useState<number | 'all'>('all');
+  const [selectedFactionFilter, setSelectedFactionFilter] = useState<number | 'all' | typeof FACTION_FILTER_GROUP>('all');
   const [selectedFactionIds, setSelectedFactionIds] = useState<number[]>([]);
-  const [isFactionContextDropdownOpen, setIsFactionContextDropdownOpen] = useState(false);
   const [selectedLoreIds, setSelectedLoreIds] = useState<number[]>([]);
   const [loreCurrentPage, setLoreCurrentPage] = useState(1);
   const [selectedModel, setSelectedModel] = useState<'deepseek-chat' | 'deepseek-reasoner'>('deepseek-chat');
@@ -253,6 +255,7 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
       setCurrentVersionIndex(-1);
       setCurrentEditedText('');
       setIsGenerating(false);
+      setMobileView('input');
       clearStreamTimers();
       if (abortControllerRef.current) {
         abortControllerRef.current.abort();
@@ -267,11 +270,36 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
       }
       setSelectedFactionFilter('all'); // Reset faction filter
       setSelectedFactionIds([]);
-      setIsFactionContextDropdownOpen(false);
       loadLoreEntries();
       preselectTriggeredContextEntries(initialOriginalText);
     }
   }, [isOpen, initialOriginalText, isLoadingPrefills, prefills]);
+
+  // Lock background editor scroll when mobile auto-edit is open.
+  useEffect(() => {
+    if (!isOpen || !isMobile) return;
+    const scrollY = window.scrollY;
+    const { style } = document.body;
+    const prev = {
+      overflow: style.overflow,
+      position: style.position,
+      top: style.top,
+      width: style.width,
+    };
+
+    style.overflow = 'hidden';
+    style.position = 'fixed';
+    style.top = `-${scrollY}px`;
+    style.width = '100%';
+
+    return () => {
+      style.overflow = prev.overflow;
+      style.position = prev.position;
+      style.top = prev.top;
+      style.width = prev.width;
+      window.scrollTo(0, scrollY);
+    };
+  }, [isOpen, isMobile]);
 
   // Update edit requirement when prefill selection changes (without resetting modal)
   useEffect(() => {
@@ -396,6 +424,9 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
     }
 
     setIsGenerating(true);
+    if (isMobile) {
+      setMobileView('output');
+    }
     setCurrentEditedText(''); // Clear current text
     accumulatedTextRef.current = ''; // Reset accumulated text ref
 
@@ -561,11 +592,25 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
 
   // Filter and paginate lore entries by faction
   const safeLoreeEntries = Array.isArray(loreEntries) ? loreEntries : [];
-  const filteredLoreEntries = selectedFactionFilter === 'all' 
-    ? safeLoreeEntries 
+  const isFactionAsEntriesMode = selectedFactionFilter === FACTION_FILTER_GROUP;
+  const filteredLoreEntries = selectedFactionFilter === 'all' || isFactionAsEntriesMode
+    ? safeLoreeEntries
     : safeLoreeEntries.filter(entry => entry.factions?.includes(selectedFactionFilter as number));
-  const totalLorePages = Math.ceil(filteredLoreEntries.length / LORE_PAGE_SIZE);
-  const paginatedLoreEntries = filteredLoreEntries.slice(
+  const contextItems = isFactionAsEntriesMode
+    ? selectableContextFactions.map(faction => ({
+        id: faction.id,
+        name: faction.name,
+        description: faction.description || '',
+        itemType: 'faction' as const,
+      }))
+    : filteredLoreEntries.map(entry => ({
+        id: entry.id,
+        name: entry.name,
+        description: entry.description || '',
+        itemType: 'lore' as const,
+      }));
+  const totalLorePages = Math.ceil(contextItems.length / LORE_PAGE_SIZE);
+  const paginatedContextItems = contextItems.slice(
     (loreCurrentPage - 1) * LORE_PAGE_SIZE,
     loreCurrentPage * LORE_PAGE_SIZE
   );
@@ -756,103 +801,121 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
         </div>
 
         {/* Mobile Content - Scrollable */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-4">
-          {/* 提示词 (Original Text / Prompt) - Full Width */}
-          <div>
-            <label className="text-sm font-medium text-dark-text mb-2 block">
-              {initialOriginalText ? '原始文本' : '提示词（可选）'}
-            </label>
-            <Textarea
-              value={originalText}
-              onChange={(e) => setOriginalText(e.target.value)}
-              className="font-mono text-sm resize-none w-full"
-              style={{ minHeight: '120px' }}
-              placeholder={initialOriginalText ? "原始文本..." : "输入提示词来引导 AI 生成（可留空）..."}
-            />
-          </div>
-
-          {/* 编辑指引 - Full Width */}
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <label className="text-sm font-medium text-dark-text">
-                编辑指引
-              </label>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setShowEditPrefillModal(true)}
-                className="text-xs"
-              >
-                <Settings size={14} className="mr-1" />
-                设置
-              </Button>
-            </div>
-            <div className="flex flex-wrap gap-2 mb-2">
-              {prefills.map(prefill => (
+        <div className="flex-1 overflow-y-auto p-4">
+          {mobileView === 'input' ? (
+            <div className="space-y-4">
+              {/* Prompt Page Header */}
+              <div className="flex items-center justify-between mb-2">
+                <label className="text-sm font-medium text-dark-text">
+                  {initialOriginalText ? '原始文本' : '提示词（可选）'}
+                </label>
                 <button
-                  key={prefill.id}
-                  onClick={() => {
-                    setEditRequirement(prefill.prompt_text);
-                    setSelectedPrefillId(prefill.id);
-                    localStorage.setItem('autoEdit_selectedPrefillId', prefill.id.toString());
-                  }}
-                  className={`px-3 py-1.5 text-sm rounded transition-colors ${
-                    selectedPrefillId === prefill.id
-                      ? 'bg-dark-primary text-white'
-                      : 'bg-dark-bg text-dark-text border border-dark-border'
-                  }`}
+                  onClick={() => setMobileView('output')}
+                  className="p-1 rounded border border-dark-border text-dark-text-muted hover:text-dark-text hover:border-dark-primary"
+                  title="查看编辑文本"
                 >
-                  {prefill.name}
+                  <ChevronRight size={18} />
                 </button>
-              ))}
-            </div>
-            <Textarea
-              value={editRequirement}
-              onChange={(e) => setEditRequirement(e.target.value)}
-              className="font-mono text-sm resize-none w-full"
-              style={{ minHeight: '80px' }}
-              placeholder="输入编辑要求..."
-              maxLength={50000}
-            />
-          </div>
+              </div>
+              <Textarea
+                value={originalText}
+                onChange={(e) => setOriginalText(e.target.value)}
+                className="font-mono text-sm resize-none w-full"
+                style={{ minHeight: '260px' }}
+                placeholder={initialOriginalText ? "原始文本..." : "输入提示词来引导 AI 生成（可留空）..."}
+              />
 
-          {/* 编辑文本 (Generated Text) - Full Width, Centered, Readable */}
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <label className="text-sm font-medium text-dark-text">编辑文本</label>
-              {/* Version Navigation */}
-              {editedVersions.length > 0 && (
+              {/* 编辑指引 */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="text-sm font-medium text-dark-text">
+                    编辑指引
+                  </label>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setShowEditPrefillModal(true)}
+                    className="text-xs"
+                  >
+                    <Settings size={14} className="mr-1" />
+                    设置
+                  </Button>
+                </div>
+                <div className="flex flex-wrap gap-2 mb-2">
+                  {prefills.map(prefill => (
+                    <button
+                      key={prefill.id}
+                      onClick={() => {
+                        setEditRequirement(prefill.prompt_text);
+                        setSelectedPrefillId(prefill.id);
+                        localStorage.setItem('autoEdit_selectedPrefillId', prefill.id.toString());
+                      }}
+                      className={`px-3 py-1.5 text-sm rounded transition-colors ${
+                        selectedPrefillId === prefill.id
+                          ? 'bg-dark-primary text-white'
+                          : 'bg-dark-bg text-dark-text border border-dark-border'
+                      }`}
+                    >
+                      {prefill.name}
+                    </button>
+                  ))}
+                </div>
+                <Textarea
+                  value={editRequirement}
+                  onChange={(e) => setEditRequirement(e.target.value)}
+                  className="font-mono text-sm resize-none w-full"
+                  style={{ minHeight: '260px' }}
+                  placeholder="输入编辑要求..."
+                  maxLength={50000}
+                />
+              </div>
+            </div>
+          ) : (
+            <div className="h-full flex flex-col">
+              <div className="flex items-center justify-between mb-2">
                 <div className="flex items-center gap-2">
                   <button
-                    onClick={handlePreviousVersion}
-                    disabled={currentVersionIndex <= 0}
-                    className="p-1 hover:bg-dark-bg rounded disabled:opacity-50"
+                    onClick={() => setMobileView('input')}
+                    className="p-1 rounded border border-dark-border text-dark-text-muted hover:text-dark-text hover:border-dark-primary"
+                    title="返回提示词"
                   >
                     <ChevronLeft size={18} />
                   </button>
-                  <span className="text-xs text-dark-text-muted">
-                    {currentVersionIndex + 1}/{editedVersions.length}
-                  </span>
-                  <button
-                    onClick={handleNextVersion}
-                    disabled={currentVersionIndex >= editedVersions.length - 1}
-                    className="p-1 hover:bg-dark-bg rounded disabled:opacity-50"
-                  >
-                    <ChevronRight size={18} />
-                  </button>
+                  <label className="text-sm font-medium text-dark-text">编辑文本</label>
                 </div>
-              )}
+                {/* Version Navigation */}
+                {editedVersions.length > 0 && (
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={handlePreviousVersion}
+                      disabled={currentVersionIndex <= 0}
+                      className="p-1 hover:bg-dark-bg rounded disabled:opacity-50"
+                    >
+                      <ChevronLeft size={18} />
+                    </button>
+                    <span className="text-xs text-dark-text-muted">
+                      {currentVersionIndex + 1}/{editedVersions.length}
+                    </span>
+                    <button
+                      onClick={handleNextVersion}
+                      disabled={currentVersionIndex >= editedVersions.length - 1}
+                      className="p-1 hover:bg-dark-bg rounded disabled:opacity-50"
+                    >
+                      <ChevronRight size={18} />
+                    </button>
+                  </div>
+                )}
+              </div>
+              <Textarea
+                value={currentEditedText}
+                onChange={(e) => setCurrentEditedText(e.target.value)}
+                className="font-mono text-sm resize-none w-full leading-relaxed flex-1"
+                style={{ minHeight: 'calc(100vh - 300px)' }}
+                placeholder={isGenerating ? "生成中..." : "编辑文本将在这里显示..."}
+                disabled={isGenerating}
+              />
             </div>
-            {/* Generated text box - full width, scrollable */}
-            <Textarea
-              value={currentEditedText}
-              onChange={(e) => setCurrentEditedText(e.target.value)}
-              className="font-mono text-sm resize-none w-full leading-relaxed"
-              style={{ minHeight: '150px' }}
-              placeholder={isGenerating ? "生成中..." : "编辑文本将在这里显示..."}
-              disabled={isGenerating}
-            />
-          </div>
+          )}
         </div>
 
         {/* Mobile Customize Overlay - Bottom Sheet Style (2/3 height) */}
@@ -961,79 +1024,53 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
                 </p>
               </div>
 
-              {/* Lore Entries */}
+              {/* Lore/Faction Context Entries */}
               <div>
-                <h4 className="text-sm font-medium text-dark-text mb-2">阵营上下文</h4>
-                <div className="relative mb-4">
-                  <button
-                    type="button"
-                    onClick={() => setIsFactionContextDropdownOpen(prev => !prev)}
-                    className="w-full flex items-center justify-between px-3 py-2 bg-dark-bg border border-dark-border rounded-lg text-left hover:border-dark-primary/50 transition-colors"
-                  >
-                    <span className="text-sm text-dark-text truncate">
-                      {selectedFactionIds.length === 0 ? '选择阵营（可自动触发）...' : `已选择 ${selectedFactionIds.length} 个阵营`}
-                    </span>
-                    <ChevronDown
-                      size={16}
-                      className={`text-dark-text-muted transition-transform ${isFactionContextDropdownOpen ? 'rotate-180' : ''}`}
-                    />
-                  </button>
-                  {isFactionContextDropdownOpen && (
-                    <div className="absolute top-full left-0 w-full mt-1 py-1 bg-dark-surface border border-dark-border rounded-lg shadow-lg max-h-56 overflow-y-auto z-[90]">
-                      {selectableContextFactions.length > 0 ? (
-                        selectableContextFactions.map((faction) => (
-                          <button
-                            key={faction.id}
-                            type="button"
-                            onClick={() => toggleFactionContext(faction.id)}
-                            className="w-full flex items-center justify-between px-3 py-2 text-sm text-left hover:bg-dark-bg transition-colors"
-                          >
-                            <span className="text-dark-text">{faction.name}</span>
-                            {selectedFactionIds.includes(faction.id) && (
-                              <Check size={16} className="text-dark-primary" />
-                            )}
-                          </button>
-                        ))
-                      ) : (
-                        <div className="px-3 py-2 text-sm text-dark-text-muted">暂无可选阵营</div>
-                      )}
-                    </div>
-                  )}
-                </div>
-
                 <h4 className="text-sm font-medium text-dark-text mb-2">世界观条目</h4>
                 {/* Faction Filter Dropdown */}
                 {sortedFactions.length > 0 && (
                   <select
                     value={selectedFactionFilter}
-                    onChange={(e) => setSelectedFactionFilter(e.target.value === 'all' ? 'all' : parseInt(e.target.value))}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      if (value === 'all' || value === FACTION_FILTER_GROUP) {
+                        setSelectedFactionFilter(value);
+                      } else {
+                        setSelectedFactionFilter(parseInt(value));
+                      }
+                    }}
                     className="w-full mb-3 bg-dark-surface border border-dark-border rounded px-3 py-2 text-sm text-dark-text focus:outline-none focus:ring-2 focus:ring-dark-primary"
                   >
                     <option value="all">全部阵营</option>
-                    {sortedFactions.map((faction) => (
-                      <option key={faction.id} value={faction.id}>
-                        {faction.name}
-                      </option>
+                    {sortedFactions.filter((f) => f.faction_type !== 'worldbuilding').map((faction) => (
+                      <option key={faction.id} value={faction.id}>{faction.name}</option>
+                    ))}
+                    <option value={FACTION_FILTER_GROUP}>阵营</option>
+                    {sortedFactions.filter((f) => f.faction_type === 'worldbuilding').map((faction) => (
+                      <option key={faction.id} value={faction.id}>{faction.name}</option>
                     ))}
                   </select>
                 )}
                 <div className="grid grid-cols-2 gap-2 mb-3">
-                  {paginatedLoreEntries.map(entry => (
+                  {paginatedContextItems.map(item => (
                     <label
-                      key={entry.id}
+                      key={`${item.itemType}-${item.id}`}
                       className="flex items-start gap-2 p-2 bg-dark-bg rounded border border-dark-border cursor-pointer"
                     >
                       <input
                         type="checkbox"
-                        checked={selectedLoreIds.includes(entry.id)}
-                        onChange={() => toggleLoreEntry(entry.id)}
+                        checked={item.itemType === 'faction' ? selectedFactionIds.includes(item.id) : selectedLoreIds.includes(item.id)}
+                        onChange={() => item.itemType === 'faction' ? toggleFactionContext(item.id) : toggleLoreEntry(item.id)}
                         className="mt-0.5"
                       />
-                      <span className="text-xs text-dark-text line-clamp-2">{entry.name}</span>
+                      <span className="text-xs text-dark-text line-clamp-2">
+                        {item.name}
+                        {item.description ? `：${item.description}` : ''}
+                      </span>
                     </label>
                   ))}
                 </div>
-                {filteredLoreEntries.length === 0 && (
+                {contextItems.length === 0 && (
                   <p className="text-xs text-dark-text-muted text-center py-2">该阵营暂无条目</p>
                 )}
                 {totalLorePages > 1 && (
@@ -1270,78 +1307,52 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
 
               {/* Lore Entries Selection */}
               <div>
-                <h4 className="text-sm font-medium text-dark-text mb-2">阵营上下文</h4>
-                <div className="relative mb-4">
-                  <button
-                    type="button"
-                    onClick={() => setIsFactionContextDropdownOpen(prev => !prev)}
-                    className="w-full flex items-center justify-between px-3 py-1.5 bg-dark-surface border border-dark-border rounded text-left hover:border-dark-primary/50 transition-colors"
-                  >
-                    <span className="text-sm text-dark-text truncate">
-                      {selectedFactionIds.length === 0 ? '选择阵营（可自动触发）...' : `已选择 ${selectedFactionIds.length} 个阵营`}
-                    </span>
-                    <ChevronDown
-                      size={16}
-                      className={`text-dark-text-muted transition-transform ${isFactionContextDropdownOpen ? 'rotate-180' : ''}`}
-                    />
-                  </button>
-                  {isFactionContextDropdownOpen && (
-                    <div className="absolute top-full left-0 w-full mt-1 py-1 bg-dark-surface border border-dark-border rounded-lg shadow-lg max-h-56 overflow-y-auto z-50">
-                      {selectableContextFactions.length > 0 ? (
-                        selectableContextFactions.map((faction) => (
-                          <button
-                            key={faction.id}
-                            type="button"
-                            onClick={() => toggleFactionContext(faction.id)}
-                            className="w-full flex items-center justify-between px-3 py-2 text-sm text-left hover:bg-dark-bg transition-colors"
-                          >
-                            <span className="text-dark-text">{faction.name}</span>
-                            {selectedFactionIds.includes(faction.id) && (
-                              <Check size={16} className="text-dark-primary" />
-                            )}
-                          </button>
-                        ))
-                      ) : (
-                        <div className="px-3 py-2 text-sm text-dark-text-muted">暂无可选阵营</div>
-                      )}
-                    </div>
-                  )}
-                </div>
-
                 <h4 className="text-sm font-medium text-dark-text mb-2">世界观条目</h4>
                 {/* Faction Filter Dropdown */}
                 {sortedFactions.length > 0 && (
                   <select
                     value={selectedFactionFilter}
-                    onChange={(e) => setSelectedFactionFilter(e.target.value === 'all' ? 'all' : parseInt(e.target.value))}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      if (value === 'all' || value === FACTION_FILTER_GROUP) {
+                        setSelectedFactionFilter(value);
+                      } else {
+                        setSelectedFactionFilter(parseInt(value));
+                      }
+                    }}
                     className="w-full mb-3 bg-dark-surface border border-dark-border rounded px-3 py-1.5 text-sm text-dark-text focus:outline-none focus:ring-2 focus:ring-dark-primary"
                   >
                     <option value="all">全部阵营</option>
-                    {sortedFactions.map((faction) => (
-                      <option key={faction.id} value={faction.id}>
-                        {faction.name}
-                      </option>
+                    {sortedFactions.filter((f) => f.faction_type !== 'worldbuilding').map((faction) => (
+                      <option key={faction.id} value={faction.id}>{faction.name}</option>
+                    ))}
+                    <option value={FACTION_FILTER_GROUP}>阵营</option>
+                    {sortedFactions.filter((f) => f.faction_type === 'worldbuilding').map((faction) => (
+                      <option key={faction.id} value={faction.id}>{faction.name}</option>
                     ))}
                   </select>
                 )}
                 <div className="grid grid-cols-2 gap-2 mb-3">
-                  {paginatedLoreEntries.map(entry => (
+                  {paginatedContextItems.map(item => (
                     <label
-                      key={entry.id}
+                      key={`${item.itemType}-${item.id}`}
                       className="flex items-start gap-2 p-2 bg-dark-bg rounded border border-dark-border hover:border-dark-primary transition-colors cursor-pointer"
                     >
                       <input
                         type="checkbox"
-                        checked={selectedLoreIds.includes(entry.id)}
-                        onChange={() => toggleLoreEntry(entry.id)}
+                        checked={item.itemType === 'faction' ? selectedFactionIds.includes(item.id) : selectedLoreIds.includes(item.id)}
+                        onChange={() => item.itemType === 'faction' ? toggleFactionContext(item.id) : toggleLoreEntry(item.id)}
                         className="mt-0.5"
                       />
-                      <span className="text-xs text-dark-text line-clamp-2">{entry.name}</span>
+                      <span className="text-xs text-dark-text line-clamp-2">
+                        {item.name}
+                        {item.description ? `：${item.description}` : ''}
+                      </span>
                     </label>
                   ))}
                 </div>
 
-                {filteredLoreEntries.length === 0 && (
+                {contextItems.length === 0 && (
                   <p className="text-xs text-dark-text-muted text-center py-2">该阵营暂无条目</p>
                 )}
 

@@ -18,6 +18,7 @@ interface EditorPanelProps {
   chapter: Chapter;
   onSave?: (content?: string) => void;
   isMobile?: boolean;
+  autoEditTriggerKey?: number;
 }
 
 const NOTE_COLORS = [
@@ -35,7 +36,8 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
   work,
   chapter,
   onSave,
-  isMobile = false
+  isMobile = false,
+  autoEditTriggerKey
 }) => {
   // ALL HOOKS MUST BE CALLED BEFORE ANY EARLY RETURNS
   const editorRef = useRef<HTMLTextAreaElement | null>(null);
@@ -77,6 +79,7 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
   // New auto edit modal states
   const [showAutoEditModal, setShowAutoEditModal] = useState(false);
   const [autoEditOriginalText, setAutoEditOriginalText] = useState('');
+  const lastHandledAutoEditTriggerRef = useRef<number | null>(null);
 
   const {
     isAISuggestLoading,
@@ -610,6 +613,14 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
     setAutoEditOriginalText(selectedText || '');
     setShowAutoEditModal(true);
   };
+
+  // Allow parent (mobile top bar) to trigger the same auto-edit flow.
+  useEffect(() => {
+    if (typeof autoEditTriggerKey !== 'number') return;
+    if (lastHandledAutoEditTriggerRef.current === autoEditTriggerKey) return;
+    lastHandledAutoEditTriggerRef.current = autoEditTriggerKey;
+    handleAutoEdit();
+  }, [autoEditTriggerKey]);
 
   // Handle auto edit modal generate
   const handleAutoEditGenerate = async (

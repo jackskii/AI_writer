@@ -120,6 +120,7 @@ export const WorkDetailPage: React.FC = () => {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['factions', workIdNum] });
       setEditingFaction(null);
+      setIsCreateFactionModalOpen(false);
     }
   });
 
@@ -556,7 +557,7 @@ export const WorkDetailPage: React.FC = () => {
                 )}
               </CardContent>
             </Card>
-            <div className="hidden md:block h-[670px]"><WorkChatPanel work={work} /></div>
+            <div className="hidden md:block h-[670px]"><WorkChatPanel work={work} scrollToLatestOnMount /></div>
 
             {/* Mobile: dedicated page switch between synopsis and chat */}
             <div className="md:hidden">
