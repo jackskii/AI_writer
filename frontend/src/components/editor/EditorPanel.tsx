@@ -285,6 +285,19 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
     };
   }, []);
 
+  // Allow parent (mobile top bar) to trigger the same auto-edit flow.
+  useEffect(() => {
+    if (typeof autoEditTriggerKey !== 'number') return;
+    // On first mount, only sync baseline key; don't auto-open modal.
+    if (lastHandledAutoEditTriggerRef.current === null) {
+      lastHandledAutoEditTriggerRef.current = autoEditTriggerKey;
+      return;
+    }
+    if (lastHandledAutoEditTriggerRef.current === autoEditTriggerKey) return;
+    lastHandledAutoEditTriggerRef.current = autoEditTriggerKey;
+    handleAutoEdit();
+  }, [autoEditTriggerKey]);
+
   // Early return AFTER all hooks are called
   if (!work || !chapter) {
     return (
@@ -613,19 +626,6 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
     setAutoEditOriginalText(selectedText || '');
     setShowAutoEditModal(true);
   };
-
-  // Allow parent (mobile top bar) to trigger the same auto-edit flow.
-  useEffect(() => {
-    if (typeof autoEditTriggerKey !== 'number') return;
-    // On first mount, only sync baseline key; don't auto-open modal.
-    if (lastHandledAutoEditTriggerRef.current === null) {
-      lastHandledAutoEditTriggerRef.current = autoEditTriggerKey;
-      return;
-    }
-    if (lastHandledAutoEditTriggerRef.current === autoEditTriggerKey) return;
-    lastHandledAutoEditTriggerRef.current = autoEditTriggerKey;
-    handleAutoEdit();
-  }, [autoEditTriggerKey]);
 
   // Handle auto edit modal generate
   const handleAutoEditGenerate = async (

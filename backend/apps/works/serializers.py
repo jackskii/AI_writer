@@ -16,6 +16,20 @@ class ActSerializer(serializers.ModelSerializer):
         read_only_fields = ['work', 'created_at', 'updated_at']
 
 
+class ActOverviewSerializer(serializers.ModelSerializer):
+    word_count = serializers.ReadOnlyField()
+    chapter_count = serializers.ReadOnlyField()
+
+    class Meta:
+        model = Act
+        fields = [
+            'id', 'work', 'name', 'order', 'act_type',
+            'word_count', 'chapter_count',
+            'created_at', 'updated_at'
+        ]
+        read_only_fields = ['work', 'created_at', 'updated_at']
+
+
 class ChapterSerializer(serializers.ModelSerializer):
     word_count = serializers.ReadOnlyField()
     act_name = serializers.CharField(source='act.name', read_only=True)
@@ -39,11 +53,28 @@ class ChapterOverviewSerializer(serializers.ModelSerializer):
         model = Chapter
         fields = [
             'id', 'work', 'title', 'order', 'act', 'act_name', 'act_order', 'chapter_number',
-            'summary', 'created_at', 'updated_at', 'last_autosave'
+            'created_at', 'updated_at', 'last_autosave'
         ]
         read_only_fields = [
             'work', 'order', 'chapter_number', 'act_name', 'act_order',
             'created_at', 'updated_at', 'last_autosave'
+        ]
+
+
+class ChapterListSerializer(serializers.ModelSerializer):
+    act_name = serializers.CharField(source='act.name', read_only=True)
+    act_order = serializers.IntegerField(source='act.order', read_only=True)
+    word_count = serializers.ReadOnlyField()
+
+    class Meta:
+        model = Chapter
+        fields = [
+            'id', 'work', 'title', 'order', 'act', 'act_name', 'act_order', 'chapter_number',
+            'word_count', 'created_at', 'updated_at', 'last_autosave'
+        ]
+        read_only_fields = [
+            'work', 'order', 'chapter_number', 'act_name', 'act_order',
+            'word_count', 'created_at', 'updated_at', 'last_autosave'
         ]
 
 
@@ -65,7 +96,7 @@ class WorkSerializer(serializers.ModelSerializer):
 class WorkDetailSerializer(WorkSerializer):
     # Keep work detail lightweight: chapter full text should be fetched via chapter detail API.
     chapters = ChapterOverviewSerializer(many=True, read_only=True)
-    acts = ActSerializer(many=True, read_only=True)
+    acts = ActOverviewSerializer(many=True, read_only=True)
     
     class Meta(WorkSerializer.Meta):
         fields = WorkSerializer.Meta.fields + ['chapters', 'acts']

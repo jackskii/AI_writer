@@ -7,7 +7,17 @@ from django.utils import timezone
 from django.db import models
 from django.db.models import Prefetch
 from .models import Work, Act, Chapter, Faction, LoreEntry, WritingStyle
-from .serializers import WorkSerializer, WorkDetailSerializer, ActSerializer, ChapterSerializer, FactionSerializer, LoreEntrySerializer, WritingStyleSerializer
+from .serializers import (
+    WorkSerializer,
+    WorkDetailSerializer,
+    ActSerializer,
+    ActOverviewSerializer,
+    ChapterSerializer,
+    ChapterListSerializer,
+    FactionSerializer,
+    LoreEntrySerializer,
+    WritingStyleSerializer,
+)
 
 
 def get_user_api_key(user):
@@ -35,11 +45,11 @@ class WorkViewSet(viewsets.ModelViewSet):
         if self.action == 'retrieve':
             lightweight_chapters = Chapter.objects.select_related('act').only(
                 'id', 'work_id', 'title', 'order', 'act_id',
-                'chapter_number', 'summary', 'created_at',
+                'chapter_number', 'created_at',
                 'updated_at', 'last_autosave', 'act__name', 'act__order'
             ).order_by('act__order', 'chapter_number')
             lightweight_acts = Act.objects.only(
-                'id', 'work_id', 'name', 'order', 'synopsis',
+                'id', 'work_id', 'name', 'order',
                 'act_type', 'created_at', 'updated_at'
             ).order_by('order')
             queryset = queryset.prefetch_related(
@@ -74,6 +84,11 @@ class ActViewSet(viewsets.ModelViewSet):
             ),
             'order'
         )
+
+    def get_serializer_class(self):
+        if self.action == 'list':
+            return ActOverviewSerializer
+        return ActSerializer
 
     def perform_create(self, serializer):
         work_id = self.kwargs.get('work_pk')
@@ -118,7 +133,19 @@ class ChapterViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         work_id = self.kwargs.get('work_pk')
         work = get_object_or_404(Work, id=work_id, author=self.request.user)
-        return Chapter.objects.filter(work=work)
+        queryset = Chapter.objects.filter(work=work)
+        if self.action == 'list':
+            return queryset.select_related('act').only(
+                'id', 'work_id', 'title', 'order', 'act_id',
+                'chapter_number', 'created_at', 'updated_at',
+                'last_autosave', 'act__name', 'act__order'
+            )
+        return queryset
+
+    def get_serializer_class(self):
+        if self.action == 'list':
+            return ChapterListSerializer
+        return ChapterSerializer
 
     def _renumber_all_chapters(self, work):
         """重新编号整个作品的所有章节，使其连续编号"""

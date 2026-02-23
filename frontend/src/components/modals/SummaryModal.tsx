@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { X, FileText, Sparkles, Zap } from 'lucide-react';
 import { chaptersApi, aiApi } from '../../services/api';
 import { Button } from '../ui/Button';
@@ -25,13 +25,25 @@ export const SummaryModal: React.FC<SummaryModalProps> = ({
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamEventSource, setStreamEventSource] = useState<EventSource | null>(null);
   const queryClient = useQueryClient();
+  const { data: chapterDetail } = useQuery({
+    queryKey: ['chapter', chapter?.work, chapter?.id, 'summary-modal'],
+    queryFn: async () => {
+      if (!chapter) return null;
+      const response = await chaptersApi.get(chapter.work, chapter.id);
+      return response.data;
+    },
+    enabled: isOpen && !!chapter,
+  });
+
+  const effectiveChapter = chapterDetail || chapter;
+  const effectiveContent = effectiveChapter?.content || '';
 
   useEffect(() => {
     if (chapter && isOpen) {
       // Refresh summary from chapter data when modal opens
-      setSummary(chapter.summary || '');
+      setSummary((chapterDetail?.summary ?? chapter.summary) || '');
     }
-  }, [chapter, isOpen]);
+  }, [chapter, chapterDetail, isOpen]);
 
   // Cleanup on component unmount
   useEffect(() => {
@@ -136,7 +148,7 @@ export const SummaryModal: React.FC<SummaryModalProps> = ({
   if (!isOpen || !chapter) return null;
 
   const MIN_CHAPTER_WORDS = 1000;
-  const chapterWordCount = chapter.content?.length || 0;
+  const chapterWordCount = effectiveContent.length;
   const hasEnoughWords = chapterWordCount >= MIN_CHAPTER_WORDS;
 
   return (
@@ -183,7 +195,7 @@ export const SummaryModal: React.FC<SummaryModalProps> = ({
               <Button
                 variant="outline"
                 onClick={handleGenerate}
-                disabled={isGenerating || !chapter.content || !hasEnoughWords}
+                disabled={isGenerating || !effectiveContent || !hasEnoughWords}
                 className="flex items-center gap-2"
               >
                 {isStreaming ? (
@@ -227,7 +239,7 @@ export const SummaryModal: React.FC<SummaryModalProps> = ({
             </div>
           </div>
 
-          {!chapter.content && (
+          {!effectiveContent && (
             <div className="bg-yellow-900/20 border border-yellow-700/30 rounded-lg p-3">
               <p className="text-sm text-yellow-300">
                 💡 章节内容为空，AI无法生成摘要。请先编写章节内容。
@@ -235,7 +247,7 @@ export const SummaryModal: React.FC<SummaryModalProps> = ({
             </div>
           )}
 
-          {chapter.content && !hasEnoughWords && (
+          {effectiveContent && !hasEnoughWords && (
             <div className="bg-yellow-900/20 border border-yellow-700/30 rounded-lg p-3">
               <p className="text-sm text-yellow-300">
                 💡 章节字数不足，需要至少{MIN_CHAPTER_WORDS.toLocaleString()}字才能生成摘要（当前{chapterWordCount.toLocaleString()}字）

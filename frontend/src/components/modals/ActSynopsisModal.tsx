@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { X, FileText, Sparkles, Zap, CheckCircle, AlertCircle, SkipForward } from 'lucide-react';
 import { actsApi, aiApi } from '../../services/api';
 import { Button } from '../ui/Button';
@@ -35,12 +35,23 @@ export const ActSynopsisModal: React.FC<ActSynopsisModalProps> = ({
   const [progressMessage, setProgressMessage] = useState('');
   const queryClient = useQueryClient();
   const abortControllerRef = useRef<AbortController | null>(null);
+  const { data: actDetail } = useQuery({
+    queryKey: ['act', workId, act?.id, 'synopsis-modal'],
+    queryFn: async () => {
+      if (!act) return null;
+      const response = await actsApi.get(workId, act.id);
+      return response.data;
+    },
+    enabled: isOpen && !!act,
+  });
+
+  const effectiveAct = actDetail || act;
 
   useEffect(() => {
     if (act) {
-      setSynopsis(act.synopsis || '');
+      setSynopsis((actDetail?.synopsis ?? act.synopsis) || '');
     }
-  }, [act]);
+  }, [act, actDetail]);
 
   // Reset state when modal closes
   useEffect(() => {
@@ -67,7 +78,7 @@ export const ActSynopsisModal: React.FC<ActSynopsisModalProps> = ({
   };
 
   const handleGenerate = async () => {
-    if (!act || isGenerating) return;
+    if (!effectiveAct || isGenerating) return;
 
     setIsGenerating(true);
     setCurrentPhase('chapters');
@@ -76,7 +87,7 @@ export const ActSynopsisModal: React.FC<ActSynopsisModalProps> = ({
     setProgressMessage('');
 
     try {
-      await aiApi.generateActSynopsisStream(workId, act.id, {
+      await aiApi.generateActSynopsisStream(workId, effectiveAct.id, {
         onStart: () => {
           setProgressMessage('开始生成卷摘要...');
         },
@@ -184,7 +195,7 @@ export const ActSynopsisModal: React.FC<ActSynopsisModalProps> = ({
               <FileText size={20} className="text-dark-primary" />
               <div>
                 <h3 className="text-lg font-semibold text-dark-text">卷摘要</h3>
-                <p className="text-sm text-dark-text-muted">{act.name}</p>
+                <p className="text-sm text-dark-text-muted">{effectiveAct?.name || act.name}</p>
               </div>
             </div>
             <button
@@ -275,7 +286,7 @@ export const ActSynopsisModal: React.FC<ActSynopsisModalProps> = ({
               <Button
                 variant="outline"
                 onClick={handleGenerate}
-                disabled={isGenerating || act.chapter_count < 3}
+                disabled={isGenerating || (effectiveAct?.chapter_count || 0) < 3}
                 className="flex items-center gap-2"
               >
                 {isGenerating ? (
@@ -321,10 +332,10 @@ export const ActSynopsisModal: React.FC<ActSynopsisModalProps> = ({
           </div>
 
           {/* Warning if insufficient chapters */}
-          {act.chapter_count < 3 && (
+          {(effectiveAct?.chapter_count || 0) < 3 && (
             <div className="bg-yellow-900/20 border border-yellow-700/30 rounded-lg p-3">
               <p className="text-sm text-yellow-300">
-                💡 本卷章节不足，需要至少3个章节才能生成卷摘要（当前{act.chapter_count}章）
+                💡 本卷章节不足，需要至少3个章节才能生成卷摘要（当前{effectiveAct?.chapter_count || 0}章）
               </p>
             </div>
           )}

@@ -109,7 +109,7 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
   // State for customize panel
   const [showCustomize, setShowCustomize] = useState(false);
   const [mobileView, setMobileView] = useState<'input' | 'output'>('input');
-  const [chapterSelection, setChapterSelection] = useState<'all' | 'custom' | 'none'>('none');
+  const [chapterSelection, setChapterSelection] = useState<'all' | 'custom' | 'none'>('custom');
   const [customChapterCount, setCustomChapterCount] = useState(1);
   const [loreEntries, setLoreEntries] = useState<LoreEntry[]>([]);
   const [factions, setFactions] = useState<Faction[]>([]);
@@ -268,6 +268,9 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
       if (selectedPrefill) {
         setEditRequirement(selectedPrefill.prompt_text);
       }
+      // Default customize context to previous 1 chapter.
+      setChapterSelection('custom');
+      setCustomChapterCount(1);
       setSelectedFactionFilter('all'); // Reset faction filter
       setSelectedFactionIds([]);
       loadLoreEntries();
