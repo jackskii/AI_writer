@@ -371,9 +371,6 @@ export const WorkDetailPage: React.FC = () => {
   const handleChapterSummary = (chapter: Chapter) => setSummaryModalChapter(chapter);
   const handleChapterDelete = (chapter: Chapter) => setDeleteModalChapter(chapter);
   const handleConfirmDelete = () => { if (deleteModalChapter) deleteChapterMutation.mutate(deleteModalChapter); };
-  // Keep modal open after AI generation; only explicit "保存" persists data.
-  const handleSummaryUpdated = () => {};
-
   const handleEditSynopsis = () => { setIsEditingSynopsis(true); setSynopsisContent(work?.synopsis || ''); };
   const handleSaveSynopsis = () => updateSynopsisMutation.mutate(synopsisContent);
   const handleCancelSynopsis = () => { setIsEditingSynopsis(false); setSynopsisContent(work?.synopsis || ''); };
@@ -714,7 +711,7 @@ export const WorkDetailPage: React.FC = () => {
       <SettingsModal isOpen={isSettingsModalOpen} onClose={() => setIsSettingsModalOpen(false)} />
       <StyleManagerModal isOpen={isStyleManagerOpen} onClose={() => setIsStyleManagerOpen(false)} onCreateNew={() => { setIsStyleManagerOpen(false); setIsCreateStyleOpen(true); }} />
       <CreateStyleModal isOpen={isCreateStyleOpen} onClose={() => setIsCreateStyleOpen(false)} />
-      <SummaryModal chapter={summaryModalChapter} isOpen={!!summaryModalChapter} onClose={() => setSummaryModalChapter(null)} onSummaryUpdated={handleSummaryUpdated} />
+      <SummaryModal chapter={summaryModalChapter} isOpen={!!summaryModalChapter} onClose={() => setSummaryModalChapter(null)} />
       <DeleteConfirmDialog chapter={deleteModalChapter} isOpen={!!deleteModalChapter} onClose={() => setDeleteModalChapter(null)} onConfirm={handleConfirmDelete} isDeleting={deleteChapterMutation.isPending} />
       <DeleteLoreConfirmDialog loreEntry={deletingLoreEntry} isOpen={!!deletingLoreEntry} onClose={() => setDeletingLoreEntry(null)} onConfirm={handleConfirmDeleteLoreEntry} isDeleting={deleteLoreEntryMutation.isPending} />
       <EditActNameModal isOpen={!!editActNameModal} onClose={() => setEditActNameModal(null)} onSave={handleSaveActName} currentName={editActNameModal?.currentName} actNumber={editActNameModal?.act || 1} />

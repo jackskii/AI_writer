@@ -11,14 +11,12 @@ interface SummaryModalProps {
   chapter: Chapter | null;
   isOpen: boolean;
   onClose: () => void;
-  onSummaryUpdated: (summary: string) => void;
 }
 
 export const SummaryModal: React.FC<SummaryModalProps> = ({
   chapter,
   isOpen,
-  onClose,
-  onSummaryUpdated
+  onClose
 }) => {
   const [summary, setSummary] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
