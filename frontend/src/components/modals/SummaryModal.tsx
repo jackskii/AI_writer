@@ -102,8 +102,7 @@ export const SummaryModal: React.FC<SummaryModalProps> = ({
           setIsGenerating(false);
           setStreamEventSource(null);
           setSummary(finalSummary);
-          // Call onSummaryUpdated to update parent component but don't close modal
-          onSummaryUpdated(finalSummary);
+          // Do not auto-save/auto-close. User must click "保存" explicitly.
         },
         // onError
         (error: string) => {
@@ -257,7 +256,7 @@ export const SummaryModal: React.FC<SummaryModalProps> = ({
 
           <div className="text-xs text-dark-text-muted border-t pt-3">
             <p>快捷键：Ctrl/Cmd + Enter 保存手动编辑，Esc 关闭</p>
-            <p className="mt-1">提示：AI生成的摘要会自动保存</p>
+            <p className="mt-1">提示：AI生成后不会自动保存，请点击“保存”后生效</p>
           </div>
         </CardContent>
       </Card>

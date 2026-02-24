@@ -371,7 +371,8 @@ export const WorkDetailPage: React.FC = () => {
   const handleChapterSummary = (chapter: Chapter) => setSummaryModalChapter(chapter);
   const handleChapterDelete = (chapter: Chapter) => setDeleteModalChapter(chapter);
   const handleConfirmDelete = () => { if (deleteModalChapter) deleteChapterMutation.mutate(deleteModalChapter); };
-  const handleSummaryUpdated = () => { setSummaryModalChapter(null); queryClient.invalidateQueries({ queryKey: ['chapters', workIdNum] }); };
+  // Keep modal open after AI generation; only explicit "保存" persists data.
+  const handleSummaryUpdated = () => {};
 
   const handleEditSynopsis = () => { setIsEditingSynopsis(true); setSynopsisContent(work?.synopsis || ''); };
   const handleSaveSynopsis = () => updateSynopsisMutation.mutate(synopsisContent);

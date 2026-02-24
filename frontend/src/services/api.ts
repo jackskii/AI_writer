@@ -85,7 +85,10 @@ export const worksApi = {
 
 // 章节相关 API
 export const chaptersApi = {
-  list: (workId: number) => api.get<Chapter[]>(`/works/${workId}/chapters/`),
+  list: (workId: number, options?: { includeSummary?: boolean }) =>
+    api.get<Chapter[]>(`/works/${workId}/chapters/`, {
+      params: options?.includeSummary ? { include_summary: 1 } : undefined,
+    }),
   get: (workId: number, id: number) => api.get<Chapter>(`/works/${workId}/chapters/${id}/`),
   create: (workId: number, data: Partial<Chapter>) =>
     api.post<Chapter>(`/works/${workId}/chapters/`, data),
@@ -105,7 +108,10 @@ export const chaptersApi = {
 
 // 卷相关 API
 export const actsApi = {
-  list: (workId: number) => api.get<Act[]>(`/works/${workId}/acts/`),
+  list: (workId: number, options?: { includeSynopsis?: boolean }) =>
+    api.get<Act[]>(`/works/${workId}/acts/`, {
+      params: options?.includeSynopsis ? { include_synopsis: 1 } : undefined,
+    }),
   get: (workId: number, id: number) => api.get<Act>(`/works/${workId}/acts/${id}/`),
   create: (workId: number, data: Partial<Act>) => 
     api.post<Act>(`/works/${workId}/acts/`, data),
