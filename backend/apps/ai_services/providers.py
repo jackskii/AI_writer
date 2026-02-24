@@ -123,6 +123,8 @@ class LLMProvider(ABC):
 
         try:
             response = await self.client.chat.completions.create(**params)
+            reasoning_started = False
+            answer_started = False
 
             async for chunk in response:
                 if chunk.choices and len(chunk.choices) > 0:
@@ -130,10 +132,16 @@ class LLMProvider(ABC):
 
                     # Handle reasoning content (for providers that support it)
                     if hasattr(delta, 'reasoning_content') and delta.reasoning_content:
-                        yield f"【思考过程】\n{delta.reasoning_content}\n【回答】\n"
+                        if not reasoning_started:
+                            yield "【思考过程】\n"
+                            reasoning_started = True
+                        yield delta.reasoning_content
 
                     # Handle regular content
                     if delta.content:
+                        if reasoning_started and not answer_started:
+                            yield "\n\n【回答】\n"
+                            answer_started = True
                         yield delta.content
 
         except Exception as e:
