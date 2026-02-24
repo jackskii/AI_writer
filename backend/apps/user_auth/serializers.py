@@ -2,6 +2,7 @@ from rest_framework import serializers
 from django.contrib.auth.models import User
 from django.contrib.auth import authenticate
 from .models import UserSettings, UserEditPrefill
+from apps.ai_services.providers import OPENROUTER_MODELS
 
 
 class UserRegistrationSerializer(serializers.ModelSerializer):
@@ -83,14 +84,18 @@ class UserSettingsSerializer(serializers.ModelSerializer):
     # API Keys - write-only for setting, separate for each provider
     deepseek_api_key = serializers.CharField(write_only=True, required=False, allow_blank=True)
     qwen_api_key = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    openrouter_api_key = serializers.CharField(write_only=True, required=False, allow_blank=True)
 
     # Masked API keys - read-only for display
     masked_deepseek_api_key = serializers.SerializerMethodField(read_only=True)
     masked_qwen_api_key = serializers.SerializerMethodField(read_only=True)
+    masked_openrouter_api_key = serializers.SerializerMethodField(read_only=True)
 
     # Has API key flags - read-only
     has_deepseek_api_key = serializers.SerializerMethodField(read_only=True)
     has_qwen_api_key = serializers.SerializerMethodField(read_only=True)
+    has_openrouter_api_key = serializers.SerializerMethodField(read_only=True)
+    openrouter_models = serializers.SerializerMethodField(read_only=True)
 
     # Legacy fields for backward compatibility
     masked_api_key = serializers.SerializerMethodField(read_only=True)
@@ -110,6 +115,8 @@ class UserSettingsSerializer(serializers.ModelSerializer):
             'api_provider',
             'deepseek_api_key', 'masked_deepseek_api_key', 'has_deepseek_api_key',
             'qwen_api_key', 'masked_qwen_api_key', 'has_qwen_api_key',
+            'openrouter_api_key', 'masked_openrouter_api_key', 'has_openrouter_api_key',
+            'openrouter_model', 'openrouter_models',
             # Legacy fields
             'masked_api_key', 'has_api_key',
             # AI Settings
@@ -121,7 +128,9 @@ class UserSettingsSerializer(serializers.ModelSerializer):
         )
         read_only_fields = (
             'masked_deepseek_api_key', 'masked_qwen_api_key',
-            'has_deepseek_api_key', 'has_qwen_api_key',
+            'masked_openrouter_api_key',
+            'has_deepseek_api_key', 'has_qwen_api_key', 'has_openrouter_api_key',
+            'openrouter_models',
             'masked_api_key', 'has_api_key',
             'updated_at'
         )
@@ -144,6 +153,19 @@ class UserSettingsSerializer(serializers.ModelSerializer):
         """返回是否有有效的Qwen API密钥"""
         return obj.has_api_key_for_provider('qwen')
 
+    # OpenRouter API key methods
+    def get_masked_openrouter_api_key(self, obj):
+        """返回脱敏后的OpenRouter API密钥"""
+        return obj.get_masked_api_key_for_provider('openrouter')
+
+    def get_has_openrouter_api_key(self, obj):
+        """返回是否有有效的OpenRouter API密钥"""
+        return obj.has_api_key_for_provider('openrouter')
+
+    def get_openrouter_models(self, obj):
+        """返回可选的OpenRouter模型列表"""
+        return OPENROUTER_MODELS
+
     # Legacy methods (for current provider)
     def get_masked_api_key(self, obj):
         """返回当前provider脱敏后的API密钥"""
@@ -152,6 +174,12 @@ class UserSettingsSerializer(serializers.ModelSerializer):
     def get_has_api_key(self, obj):
         """返回当前provider是否有有效的API密钥"""
         return obj.has_valid_api_key()
+
+    def validate_openrouter_model(self, value):
+        valid_ids = {m.get('id') for m in OPENROUTER_MODELS}
+        if value and value not in valid_ids:
+            raise serializers.ValidationError("不支持的OpenRouter模型")
+        return value
 
     def update(self, instance, validated_data):
         """更新设置"""
@@ -164,6 +192,11 @@ class UserSettingsSerializer(serializers.ModelSerializer):
         if 'qwen_api_key' in validated_data:
             api_key = validated_data.pop('qwen_api_key')
             instance.qwen_api_key = api_key
+
+        # Handle OpenRouter API key separately (encrypted)
+        if 'openrouter_api_key' in validated_data:
+            api_key = validated_data.pop('openrouter_api_key')
+            instance.openrouter_api_key = api_key
 
         # Update all other fields
         for field, value in validated_data.items():

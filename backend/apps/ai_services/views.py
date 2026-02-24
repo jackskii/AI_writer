@@ -27,9 +27,10 @@ def get_user_api_key_async(user):
     settings = UserSettings.objects.get(user=user)
     api_key = settings.get_api_key_for_provider()
     provider = settings.api_provider
+    default_model = settings.get_default_model()
     if not api_key:
         raise ValueError("API密钥未配置")
-    return api_key, provider
+    return api_key, provider, default_model
 
 
 @sync_to_async
@@ -45,6 +46,7 @@ def get_user_ai_settings(user):
             'frequency_penalty': settings.frequency_penalty,
             'presence_penalty': settings.presence_penalty,
             'provider': settings.api_provider,
+            'default_model': settings.get_default_model(),
         }
     except UserSettings.DoesNotExist:
         # Return defaults if settings don't exist
@@ -55,6 +57,7 @@ def get_user_ai_settings(user):
             'frequency_penalty': 0.0,
             'presence_penalty': 0.0,
             'provider': 'deepseek',
+            'default_model': 'deepseek-chat',
         }
 
 
@@ -299,9 +302,10 @@ def get_user_api_key(user):
         settings = UserSettings.objects.get(user=user)
         api_key = settings.get_api_key_for_provider()
         provider = settings.api_provider
+        default_model = settings.get_default_model()
         if not api_key:
             raise ValueError("API密钥未配置")
-        return api_key, provider
+        return api_key, provider, default_model
     except UserSettings.DoesNotExist:
         raise ValueError("用户设置不存在，请先配置API密钥")
     except Exception as e:
@@ -362,8 +366,8 @@ def ai_suggest(request):
     chapter = get_object_or_404(Chapter, id=chapter_id, work=work)
     
     try:
-        api_key, provider = get_user_api_key(request.user)
-        ai_service = AIService(api_key=api_key, provider_name=provider)
+        api_key, provider, default_model = get_user_api_key(request.user)
+        ai_service = AIService(api_key=api_key, provider_name=provider, default_model=default_model)
         suggestions = run_async_ai_task(
             ai_service.generate_suggestions(chapter, target_text)
         )
@@ -443,9 +447,9 @@ async def ai_chat_stream(request):
             context = await sync_to_async(ContextBuilder.build_context)(chapter)
 
             # Get API key and AI settings
-            api_key, provider = await get_user_api_key_async(user)
+            api_key, provider, default_model = await get_user_api_key_async(user)
             ai_settings = await get_user_ai_settings(user)
-            ai_service = AIService(api_key=api_key, provider_name=provider)
+            ai_service = AIService(api_key=api_key, provider_name=provider, default_model=default_model)
 
             # Send start event
             yield f'data: {json.dumps({"type": "start", "message": "AI聊天开始"})}\n\n'
@@ -539,9 +543,9 @@ async def ai_work_chat_stream(request):
             from .services import ContextBuilder
             context = await sync_to_async(ContextBuilder.build_work_overview_context)(work)
 
-            api_key, provider = await get_user_api_key_async(user)
+            api_key, provider, default_model = await get_user_api_key_async(user)
             ai_settings = await get_user_ai_settings(user)
-            ai_service = AIService(api_key=api_key, provider_name=provider)
+            ai_service = AIService(api_key=api_key, provider_name=provider, default_model=default_model)
 
             yield f'data: {json.dumps({"type": "start", "message": "AI作品聊天开始"})}\n\n'
 
@@ -636,8 +640,8 @@ async def ai_summarize_stream(request):
     async def generate_stream():
         """生成SSE数据流 (async generator)"""
         try:
-            api_key, provider = await get_user_api_key_async(user)
-            ai_service = AIService(api_key=api_key, provider_name=provider)
+            api_key, provider, default_model = await get_user_api_key_async(user)
+            ai_service = AIService(api_key=api_key, provider_name=provider, default_model=default_model)
 
             yield f"data: {json.dumps({'type': 'start', 'message': 'AI摘要生成开始'})}\n\n"
 
@@ -738,8 +742,8 @@ async def ai_generate_act_synopsis(request):
     async def generate_stream():
         """生成SSE数据流"""
         try:
-            api_key, provider = await get_user_api_key_async(user)
-            ai_service = AIService(api_key=api_key, provider_name=provider)
+            api_key, provider, default_model = await get_user_api_key_async(user)
+            ai_service = AIService(api_key=api_key, provider_name=provider, default_model=default_model)
 
             yield f"data: {json.dumps({'type': 'start', 'message': '开始生成卷摘要'})}\n\n"
 
@@ -921,9 +925,9 @@ async def ai_auto_edit_stream(request):
             )
 
             # Get API key and AI settings
-            api_key, provider = await get_user_api_key_async(user)
+            api_key, provider, default_model = await get_user_api_key_async(user)
             ai_settings = await get_user_ai_settings(user)
-            ai_service = AIService(api_key=api_key, provider_name=provider)
+            ai_service = AIService(api_key=api_key, provider_name=provider, default_model=default_model)
 
             yield f'data: {json.dumps({"type": "start", "message": "AI自动编辑开始"})}\n\n'
 
@@ -1141,8 +1145,8 @@ async def ai_auto_describe_entry(request):
                 return
 
             # Get API key
-            api_key, provider = await get_user_api_key_async(user)
-            ai_service = AIService(api_key=api_key, provider_name=provider)
+            api_key, provider, default_model = await get_user_api_key_async(user)
+            ai_service = AIService(api_key=api_key, provider_name=provider, default_model=default_model)
 
             yield f'data: {json.dumps({"type": "start", "message": "AI描述生成开始", "used_chapters": used_chapters_info})}\n\n'
 

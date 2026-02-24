@@ -3,18 +3,23 @@ from django.contrib.auth.models import User
 from django.conf import settings
 from cryptography.fernet import Fernet
 import base64
+from apps.ai_services.providers import OPENROUTER_MODELS as OPENROUTER_MODEL_CONFIGS
 
 
 # Supported providers configuration
 PROVIDER_CHOICES = [
     ('deepseek', 'DeepSeek'),
     ('qwen', 'Qwen (通义千问)'),
+    ('openrouter', 'OpenRouter'),
 ]
 
 PROVIDER_DEFAULT_MODELS = {
     'deepseek': 'deepseek-chat',
     'qwen': 'qwen-max',
+    'openrouter': OPENROUTER_MODEL_CONFIGS[0]['id'],
 }
+
+OPENROUTER_MODELS = [model['id'] for model in OPENROUTER_MODEL_CONFIGS]
 
 
 class UserSettings(models.Model):
@@ -27,6 +32,12 @@ class UserSettings(models.Model):
     # API Keys (encrypted) - one per provider
     _encrypted_deepseek_api_key = models.TextField('DeepSeek API Key (加密)', blank=True, default='')
     _encrypted_qwen_api_key = models.TextField('Qwen API Key (加密)', blank=True, default='')
+    _encrypted_openrouter_api_key = models.TextField('OpenRouter API Key (加密)', blank=True, default='')
+    openrouter_model = models.CharField(
+        'OpenRouter Model',
+        max_length=100,
+        default=PROVIDER_DEFAULT_MODELS['openrouter']
+    )
 
     # AI Settings
     temperature = models.FloatField('Temperature', default=0.7)
@@ -93,6 +104,17 @@ class UserSettings(models.Model):
         """设置并加密Qwen API密钥"""
         self._encrypted_qwen_api_key = self._encrypt_value(value)
 
+    # OpenRouter API Key
+    @property
+    def openrouter_api_key(self):
+        """获取解密后的OpenRouter API密钥"""
+        return self._decrypt_value(self._encrypted_openrouter_api_key)
+
+    @openrouter_api_key.setter
+    def openrouter_api_key(self, value):
+        """设置并加密OpenRouter API密钥"""
+        self._encrypted_openrouter_api_key = self._encrypt_value(value)
+
     # Generic methods for any provider
     def get_api_key_for_provider(self, provider=None):
         """获取指定provider的API密钥"""
@@ -101,6 +123,8 @@ class UserSettings(models.Model):
             return self.deepseek_api_key
         elif provider == 'qwen':
             return self.qwen_api_key
+        elif provider == 'openrouter':
+            return self.openrouter_api_key
         return ''
 
     def has_api_key_for_provider(self, provider=None):
@@ -117,6 +141,8 @@ class UserSettings(models.Model):
 
     def get_default_model(self):
         """获取当前provider的默认模型"""
+        if self.api_provider == 'openrouter':
+            return self.openrouter_model or PROVIDER_DEFAULT_MODELS['openrouter']
         return PROVIDER_DEFAULT_MODELS.get(self.api_provider, 'deepseek-chat')
 
     # Legacy methods for backward compatibility

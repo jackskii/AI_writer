@@ -113,6 +113,12 @@ export interface UserSettings {
   masked_qwen_api_key: string;
   has_qwen_api_key: boolean;
 
+  // OpenRouter API
+  masked_openrouter_api_key: string;
+  has_openrouter_api_key: boolean;
+  openrouter_model: string;
+  openrouter_models: Array<{ id: string; name: string }>;
+
   // Legacy fields (for current provider)
   masked_api_key: string;
   has_api_key: boolean;
@@ -132,11 +138,13 @@ export interface UserSettings {
 
 export interface UserSettingsUpdate {
   // Provider selection
-  api_provider?: 'deepseek' | 'qwen';
+  api_provider?: 'deepseek' | 'qwen' | 'openrouter';
 
   // API Keys (per provider)
   deepseek_api_key?: string;
   qwen_api_key?: string;
+  openrouter_api_key?: string;
+  openrouter_model?: string;
 
   // AI Settings
   temperature?: number;

@@ -92,13 +92,14 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 settings = UserSettings.objects.get(user=user)
                 api_key = settings.get_api_key_for_provider()
                 provider = settings.api_provider
+                default_model = settings.get_default_model()
                 if not api_key:
                     return '请先配置API密钥'
             except UserSettings.DoesNotExist:
                 return '请先配置API密钥'
 
             # Create AI service with user's provider
-            ai_service = AIService(api_key=api_key, provider_name=provider)
+            ai_service = AIService(api_key=api_key, provider_name=provider, default_model=default_model)
             # Note: The chat method doesn't exist - this consumer might need updating
             # For now, return a placeholder
             return '请使用聊天面板进行AI对话'

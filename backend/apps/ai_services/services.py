@@ -547,14 +547,14 @@ class ContextBuilder:
 class AIService:
     """AI Service Manager"""
 
-    def __init__(self, api_key: str = None, provider_name: str = 'deepseek'):
+    def __init__(self, api_key: str = None, provider_name: str = 'deepseek', default_model: str = None):
         self.provider_name = provider_name
         # Use provider abstraction for supported providers
         if provider_name in PROVIDER_CONFIG:
-            self.provider = get_provider(provider_name, api_key)
+            self.provider = get_provider(provider_name, api_key, default_model=default_model)
         else:
             # Fallback to DeepSeek for backward compatibility
-            self.provider = get_provider('deepseek', api_key)
+            self.provider = get_provider('deepseek', api_key, default_model=default_model)
 
         # Keep deepseek reference for backward compatibility with existing code
         # that specifically uses deepseek-reasoner (like style analysis)

@@ -27,9 +27,10 @@ def get_user_api_key(user):
         settings = UserSettings.objects.get(user=user)
         api_key = settings.get_api_key_for_provider()
         provider = settings.api_provider
+        default_model = settings.get_default_model()
         if not api_key:
             raise ValueError("API密钥未配置")
-        return api_key, provider
+        return api_key, provider, default_model
     except UserSettings.DoesNotExist:
         raise ValueError("用户设置不存在，请先配置API密钥")
     except Exception as e:
@@ -232,8 +233,8 @@ class ChapterViewSet(viewsets.ModelViewSet):
 
         try:
             from apps.ai_services.services import AIService, run_async_ai_task
-            api_key, provider = get_user_api_key(request.user)
-            ai_service = AIService(api_key=api_key, provider_name=provider)
+            api_key, provider, default_model = get_user_api_key(request.user)
+            ai_service = AIService(api_key=api_key, provider_name=provider, default_model=default_model)
             summary = run_async_ai_task(
                 ai_service.generate_summary(chapter)
             )
@@ -497,8 +498,8 @@ class WritingStyleViewSet(viewsets.ModelViewSet):
             )
 
         try:
-            api_key, provider = get_user_api_key(request.user)
-            ai_service = AIService(api_key=api_key, provider_name=provider)
+            api_key, provider, default_model = get_user_api_key(request.user)
+            ai_service = AIService(api_key=api_key, provider_name=provider, default_model=default_model)
             analysis_result = run_async_ai_task(
                 ai_service.analyze_writing_style(text_sample)
             )
@@ -546,8 +547,8 @@ class WritingStyleViewSet(viewsets.ModelViewSet):
             )
 
         try:
-            api_key, provider = get_user_api_key(request.user)
-            ai_service = AIService(api_key=api_key, provider_name=provider)
+            api_key, provider, default_model = get_user_api_key(request.user)
+            ai_service = AIService(api_key=api_key, provider_name=provider, default_model=default_model)
             analysis_result = run_async_ai_task(
                 ai_service.analyze_nsfw_writing_style(text_sample)
             )

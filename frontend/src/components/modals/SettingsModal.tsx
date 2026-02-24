@@ -34,14 +34,20 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   // API Key management - per provider
   const [deepseekApiKey, setDeepseekApiKey] = useState('');
   const [qwenApiKey, setQwenApiKey] = useState('');
+  const [openrouterApiKey, setOpenrouterApiKey] = useState('');
   const [showApiKey, setShowApiKey] = useState(false);
   const [maskedDeepseekApiKey, setMaskedDeepseekApiKey] = useState('');
   const [maskedQwenApiKey, setMaskedQwenApiKey] = useState('');
+  const [maskedOpenrouterApiKey, setMaskedOpenrouterApiKey] = useState('');
   const [hasDeepseekApiKey, setHasDeepseekApiKey] = useState(false);
   const [hasQwenApiKey, setHasQwenApiKey] = useState(false);
-  const [apiProvider, setApiProvider] = useState<'deepseek' | 'qwen'>('deepseek');
+  const [hasOpenrouterApiKey, setHasOpenrouterApiKey] = useState(false);
+  const [apiProvider, setApiProvider] = useState<'deepseek' | 'qwen' | 'openrouter'>('deepseek');
+  const [openrouterModel, setOpenrouterModel] = useState('x-ai/grok-4-fast');
+  const [openrouterModels, setOpenrouterModels] = useState<Array<{ id: string; name: string }>>([]);
   const [isChangingDeepseekKey, setIsChangingDeepseekKey] = useState(false);
   const [isChangingQwenKey, setIsChangingQwenKey] = useState(false);
+  const [isChangingOpenrouterKey, setIsChangingOpenrouterKey] = useState(false);
 
   // AI Settings
   const [temperature, setTemperature] = useState(0.7);
@@ -64,16 +70,22 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     setSaveMessage(null);
     setDeepseekApiKey('');
     setQwenApiKey('');
+    setOpenrouterApiKey('');
     setIsChangingDeepseekKey(false);
     setIsChangingQwenKey(false);
+    setIsChangingOpenrouterKey(false);
     try {
       const settings = await authApi.getSettings();
       // Per-provider API key info
       setMaskedDeepseekApiKey(settings.masked_deepseek_api_key || '');
       setMaskedQwenApiKey(settings.masked_qwen_api_key || '');
+      setMaskedOpenrouterApiKey(settings.masked_openrouter_api_key || '');
       setHasDeepseekApiKey(settings.has_deepseek_api_key || false);
       setHasQwenApiKey(settings.has_qwen_api_key || false);
-      setApiProvider((settings.api_provider as 'deepseek' | 'qwen') || 'deepseek');
+      setHasOpenrouterApiKey(settings.has_openrouter_api_key || false);
+      setApiProvider((settings.api_provider as 'deepseek' | 'qwen' | 'openrouter') || 'deepseek');
+      setOpenrouterModel(settings.openrouter_model || 'x-ai/grok-4-fast');
+      setOpenrouterModels(settings.openrouter_models || []);
       setTemperature(settings.temperature);
       setTopP(settings.top_p);
       setMaxTokens(settings.max_tokens);
@@ -88,6 +100,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       // Store original settings
       setOriginalSettings({
         api_provider: settings.api_provider,
+        openrouter_model: settings.openrouter_model,
         temperature: settings.temperature,
         top_p: settings.top_p,
         max_tokens: settings.max_tokens,
@@ -143,6 +156,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       if (qwenApiKey.trim() && !isChangingQwenKey) {
         updateData.qwen_api_key = qwenApiKey;
       }
+      if (openrouterApiKey.trim() && !isChangingOpenrouterKey) {
+        updateData.openrouter_api_key = openrouterApiKey;
+      }
+      if (openrouterModel && openrouterModel !== originalSettings.openrouter_model) {
+        updateData.openrouter_model = openrouterModel;
+      }
 
       // Only include changed values
       if (temperature !== originalSettings.temperature) {
@@ -175,17 +194,22 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       // Update local state with new values
       setMaskedDeepseekApiKey(response.data.masked_deepseek_api_key || '');
       setMaskedQwenApiKey(response.data.masked_qwen_api_key || '');
+      setMaskedOpenrouterApiKey(response.data.masked_openrouter_api_key || '');
       setHasDeepseekApiKey(response.data.has_deepseek_api_key || false);
       setHasQwenApiKey(response.data.has_qwen_api_key || false);
+      setHasOpenrouterApiKey(response.data.has_openrouter_api_key || false);
       setDeepseekApiKey('');
       setQwenApiKey('');
+      setOpenrouterApiKey('');
       setShowApiKey(false);
       setIsChangingDeepseekKey(false);
       setIsChangingQwenKey(false);
+      setIsChangingOpenrouterKey(false);
 
       // Update original settings
       setOriginalSettings({
         api_provider: response.data.api_provider,
+        openrouter_model: response.data.openrouter_model,
         temperature: response.data.temperature,
         top_p: response.data.top_p,
         max_tokens: response.data.max_tokens,
@@ -214,8 +238,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     // Reset any unsaved changes
     setDeepseekApiKey('');
     setQwenApiKey('');
+    setOpenrouterApiKey('');
     setIsChangingDeepseekKey(false);
     setIsChangingQwenKey(false);
+    setIsChangingOpenrouterKey(false);
     onClose();
   };
 
@@ -288,14 +314,33 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       <label className="text-sm text-dark-text-muted">API 提供商</label>
                       <select
                         value={apiProvider}
-                        onChange={(e) => setApiProvider(e.target.value as 'deepseek' | 'qwen')}
+                        onChange={(e) => setApiProvider(e.target.value as 'deepseek' | 'qwen' | 'openrouter')}
                         className="w-full px-3 py-2 bg-dark-bg border border-dark-border rounded-lg text-dark-text text-sm focus:outline-none focus:border-dark-primary"
                       >
                         <option value="deepseek">DeepSeek</option>
                         <option value="qwen">Qwen (通义千问)</option>
+                        <option value="openrouter">OpenRouter</option>
                       </select>
                       <p className="text-xs text-dark-text-muted">选择您要使用的AI服务提供商</p>
                     </div>
+
+                    {apiProvider === 'openrouter' && (
+                      <div className="space-y-2">
+                        <label className="text-sm text-dark-text-muted">OpenRouter 模型</label>
+                        <select
+                          value={openrouterModel}
+                          onChange={(e) => setOpenrouterModel(e.target.value)}
+                          className="w-full px-3 py-2 bg-dark-bg border border-dark-border rounded-lg text-dark-text text-sm focus:outline-none focus:border-dark-primary"
+                        >
+                          {openrouterModels.map((model) => (
+                            <option key={model.id} value={model.id}>
+                              {model.name} : {model.id}
+                            </option>
+                          ))}
+                        </select>
+                        <p className="text-xs text-dark-text-muted">模型列表由后端配置统一下发，便于后续增删更新。</p>
+                      </div>
+                    )}
 
                     {/* API Key Section - shows based on selected provider */}
                     {apiProvider === 'deepseek' ? (
@@ -413,7 +458,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                           </div>
                         )}
                       </div>
-                    ) : (
+                    ) : apiProvider === 'qwen' ? (
                       <div className="space-y-3 p-3 rounded-lg border border-dark-primary bg-dark-primary/5">
                         <div className="flex items-center justify-between">
                           <span className="text-sm font-medium text-dark-text">Qwen (通义千问) API 密钥</span>
@@ -521,6 +566,121 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         </p>
 
                         {!hasQwenApiKey && !qwenApiKey.trim() && (
+                          <div className="bg-yellow-900/20 border border-yellow-700/30 rounded-lg p-3 mt-2">
+                            <p className="text-sm text-yellow-300">
+                              未配置API密钥。使用AI功能前需要配置API密钥。
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="space-y-3 p-3 rounded-lg border border-dark-primary bg-dark-primary/5">
+                        <div className="flex items-center justify-between">
+                          <span className="text-sm font-medium text-dark-text">OpenRouter API 密钥</span>
+                          {hasOpenrouterApiKey && (
+                            <div className="flex items-center gap-1">
+                              <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                              <span className="text-xs text-green-500">已配置</span>
+                            </div>
+                          )}
+                        </div>
+
+                        {hasOpenrouterApiKey && !isChangingOpenrouterKey && (
+                          <p className="text-sm text-dark-text font-mono">{maskedOpenrouterApiKey}</p>
+                        )}
+
+                        {!hasOpenrouterApiKey || isChangingOpenrouterKey ? (
+                          <>
+                            <div className="relative">
+                              <Input
+                                type={showApiKey ? 'text' : 'password'}
+                                value={openrouterApiKey}
+                                onChange={(e) => setOpenrouterApiKey(e.target.value)}
+                                placeholder="sk-or-..."
+                                className="bg-dark-bg border-dark-border font-mono text-sm pr-10"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => setShowApiKey(!showApiKey)}
+                                className="absolute right-2 top-1/2 -translate-y-1/2 text-dark-text-muted hover:text-dark-text"
+                              >
+                                {showApiKey ? <EyeOff size={16} /> : <Eye size={16} />}
+                              </button>
+                            </div>
+                            {isChangingOpenrouterKey && (
+                              <div className="flex gap-2">
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={async () => {
+                                    if (openrouterApiKey.trim()) {
+                                      setIsSaving(true);
+                                      try {
+                                        const response = await authApi.updateSettings({
+                                          openrouter_api_key: openrouterApiKey.trim()
+                                        });
+                                        setMaskedOpenrouterApiKey(response.data.masked_openrouter_api_key || '');
+                                        setHasOpenrouterApiKey(response.data.has_openrouter_api_key || false);
+                                        setOpenrouterApiKey('');
+                                        setIsChangingOpenrouterKey(false);
+                                        setShowApiKey(false);
+                                        setSaveMessage({ type: 'success', text: 'API密钥已更新' });
+                                        setTimeout(() => setSaveMessage(null), 3000);
+                                      } catch (error: unknown) {
+                                        const axiosError = error as { response?: { data?: { error?: string } } };
+                                        setSaveMessage({
+                                          type: 'error',
+                                          text: axiosError.response?.data?.error || '更新失败'
+                                        });
+                                      } finally {
+                                        setIsSaving(false);
+                                      }
+                                    }
+                                  }}
+                                  disabled={isSaving || !openrouterApiKey.trim()}
+                                  className="text-xs"
+                                >
+                                  确定
+                                </Button>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => {
+                                    setOpenrouterApiKey('');
+                                    setIsChangingOpenrouterKey(false);
+                                    setShowApiKey(false);
+                                  }}
+                                  disabled={isSaving}
+                                  className="text-xs"
+                                >
+                                  取消
+                                </Button>
+                              </div>
+                            )}
+                          </>
+                        ) : (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setIsChangingOpenrouterKey(true)}
+                            className="text-xs"
+                          >
+                            更改密钥
+                          </Button>
+                        )}
+                        <p className="text-xs text-dark-text-muted">
+                          获取密钥：
+                          <a
+                            href="https://openrouter.ai/keys"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-dark-primary hover:underline ml-1"
+                          >
+                            OpenRouter
+                          </a>
+                        </p>
+
+                        {!hasOpenrouterApiKey && !openrouterApiKey.trim() && (
                           <div className="bg-yellow-900/20 border border-yellow-700/30 rounded-lg p-3 mt-2">
                             <p className="text-sm text-yellow-300">
                               未配置API密钥。使用AI功能前需要配置API密钥。
