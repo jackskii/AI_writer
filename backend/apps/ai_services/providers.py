@@ -402,7 +402,7 @@ class OpenRouterProvider(LLMProvider):
     def _build_reasoning_payload(self) -> Dict:
         # Keep this simple for now per requirement.
         return {
-            "effort": "medium",
+            "effort": "high",
             "exclude": False,
             "enabled": True,
         }

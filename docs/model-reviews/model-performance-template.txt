@@ -1,0 +1,204 @@
+MODEL PERFORMANCE REVIEW TEMPLATE
+
+Purpose:
+- This file is for quick model review notes.
+- One section per model.
+- Fill in your own results.
+- Snippet references point to sections in: snippets-template.txt
+
+How to score:
+- 推荐指数: 1-10 (10 = strongest recommendation)
+
+==================================================
+MODEL: cluade sonnet 4.6
+==================================================
+价格:$3/M input tokens
+$15/M output tokens
+
+优点:
+逻辑清晰，唯一一个对缺失的逻辑进行补充
+    （原文去厕所准备洗漱，看镜子然后决定更衣。claude是唯一一个写出洗漱完后走去更衣间的，别的都在看镜子后省略了洗漱。）
+正确让故事节奏变得合理
+有思考
+
+缺点:
+太jb贵了
+不够色
+
+推荐指数:3/3 得看价格
+
+Snippet:
+- snippets-template.txt -> [cluade sonnet 4.6]
+
+
+==================================================
+MODEL: kimi k2 0905
+==================================================
+价格:$0.40/M input tokens
+$2/M output tokens
+
+优点:
+非常接地气
+很风格化
+会有合理的创作
+
+缺点:
+过于风格化
+动作逻辑欠缺（躺在床上半睡半醒摇屁股？怎么做这么大动作？）
+不会优化故事节奏
+没有思考
+
+推荐指数:1/3
+
+Snippet:
+- snippets-template.txt -> [kimi k2 0905]
+
+
+==================================================
+MODEL: glm 5
+==================================================
+价格:$0.95/M input tokens
+$2.55/M output tokens
+
+优点:
+有思考
+合理创作
+会优化故事节奏
+
+缺点:
+动作逻辑欠缺（刚起床看到恶心的东西，描述是差点把早饭吐出来）
+过度创作没出现的内容
+
+
+推荐指数:2/3 通过多次修改解决缺点？
+
+Snippet:
+- snippets-template.txt -> [glm 5]
+
+
+==================================================
+MODEL: deepseek r1
+==================================================
+价格:$0.70/M input tokens
+$2.50/M output tokens
+
+优点:
+逻辑正确
+有点涩
+
+缺点:
+没有优化节奏
+
+
+推荐指数:2/3 非常中规中矩，但是可用
+
+Snippet:
+- snippets-template.txt -> [deepseek r1]
+
+
+==================================================
+MODEL: deepseek r1 0528
+==================================================
+价格:$0.40/M input tokens
+$1.75/M output tokens
+
+优点:
+- 
+
+缺点:
+瞎扯
+
+推荐指数:1/3 逻辑性上不如r1
+
+Snippet:
+- snippets-template.txt -> [deepseek r1 0528]
+
+
+==================================================
+MODEL: kimi k2 thinking
+==================================================
+价格:$0.47/M input tokens
+$2/M output tokens
+
+优点:
+
+
+缺点:
+逻辑性欠缺
+瞎写
+
+推荐指数:1/3 不如deepseek系的
+
+Snippet:
+- snippets-template.txt -> [kimi k2 thinking]
+
+
+==================================================
+MODEL: grok 4 fast
+==================================================
+价格:Starting at $0.20/M input tokens
+Starting at $0.50/M output tokens
+
+优点:
+便宜
+有思考
+
+缺点:
+- 
+
+推荐指数:
+
+Snippet:
+- snippets-template.txt -> [groke 4 fast]
+
+
+==================================================
+MODEL: gemini 3 flash
+==================================================
+价格:
+
+优点:
+- 
+
+缺点:
+- 
+
+推荐指数:
+
+Snippet:
+- snippets-template.txt -> [gemini 3 flash]
+
+
+==================================================
+MODEL: deepseek chat
+==================================================
+价格:
+
+优点:
+- 
+
+缺点:
+- 
+
+推荐指数:
+
+Snippet:
+- snippets-template.txt -> [deepseek chat]
+
+
+==================================================
+MODEL: deepseek reasoner
+==================================================
+价格:
+
+优点:
+- 
+
+缺点:
+- 
+
+推荐指数:
+
+Snippet:
+- snippets-template.txt -> [deepseek reasoner]
+
