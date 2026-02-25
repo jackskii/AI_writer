@@ -6,7 +6,7 @@ All providers use OpenAI-compatible API format.
 """
 
 from abc import ABC, abstractmethod
-from typing import List, Dict, AsyncGenerator, Optional
+from typing import List, Dict, AsyncGenerator, Optional, Tuple
 from openai import AsyncOpenAI
 from django.conf import settings
 import logging
@@ -90,6 +90,86 @@ class LLMProvider(ABC):
         """Return the reasoning model name if supported"""
         return None
 
+    def _extract_text(self, value) -> str:
+        """Extract plain text from provider-specific response fields."""
+        if value is None:
+            return ""
+        if isinstance(value, str):
+            return value
+        if isinstance(value, list):
+            parts = []
+            for item in value:
+                if isinstance(item, str):
+                    parts.append(item)
+                elif isinstance(item, dict):
+                    text_val = (
+                        item.get('text')
+                        or item.get('content')
+                        or item.get('value')
+                        or ''
+                    )
+                    if isinstance(text_val, str):
+                        parts.append(text_val)
+            return "".join(parts)
+        if isinstance(value, dict):
+            text_val = value.get('text') or value.get('content') or value.get('value') or ''
+            return text_val if isinstance(text_val, str) else ""
+        return ""
+
+    def _extract_reasoning_info(self, obj) -> Tuple[str, bool]:
+        """Return (reasoning_text, encrypted_reasoning_detected)."""
+        reasoning_value = None
+        details_value = None
+
+        if hasattr(obj, 'reasoning_content') and getattr(obj, 'reasoning_content'):
+            reasoning_value = getattr(obj, 'reasoning_content')
+        elif hasattr(obj, 'reasoning') and getattr(obj, 'reasoning'):
+            reasoning_value = getattr(obj, 'reasoning')
+
+        if hasattr(obj, 'reasoning_details') and getattr(obj, 'reasoning_details'):
+            details_value = getattr(obj, 'reasoning_details')
+
+        if hasattr(obj, 'model_extra') and isinstance(getattr(obj, 'model_extra'), dict):
+            extra = getattr(obj, 'model_extra') or {}
+            if not reasoning_value:
+                reasoning_value = (
+                    extra.get('reasoning_content')
+                    or extra.get('reasoning')
+                    or extra.get('thinking')
+                )
+            if not details_value:
+                details_value = extra.get('reasoning_details')
+
+        reasoning_text = self._extract_text(reasoning_value)
+        encrypted_detected = False
+
+        if not reasoning_text and isinstance(details_value, list):
+            extracted_parts = []
+            for item in details_value:
+                if not isinstance(item, dict):
+                    continue
+                detail_type = str(item.get('type', '')).lower()
+                if 'encrypted' in detail_type:
+                    encrypted_detected = True
+                    continue
+                detail_text = self._extract_text(
+                    item.get('text') or item.get('content') or item.get('summary') or item.get('reasoning')
+                )
+                if detail_text:
+                    extracted_parts.append(detail_text)
+            if extracted_parts:
+                reasoning_text = "\n".join(extracted_parts)
+
+        return reasoning_text, encrypted_detected
+
+    def _extract_content_text(self, obj) -> str:
+        """Extract assistant content from delta/message in a provider-agnostic way."""
+        content_value = getattr(obj, 'content', None) if hasattr(obj, 'content') else None
+        if not content_value and hasattr(obj, 'model_extra') and isinstance(getattr(obj, 'model_extra'), dict):
+            extra = getattr(obj, 'model_extra') or {}
+            content_value = extra.get('content')
+        return self._extract_text(content_value)
+
     async def chat_completion_stream(
         self,
         messages: List[Dict],
@@ -98,7 +178,8 @@ class LLMProvider(ABC):
         temperature: float = None,
         top_p: float = None,
         frequency_penalty: float = None,
-        presence_penalty: float = None
+        presence_penalty: float = None,
+        reasoning_mode: bool = False
     ) -> AsyncGenerator[str, None]:
         """
         Stream chat completion responses.
@@ -148,18 +229,23 @@ class LLMProvider(ABC):
                     delta = chunk.choices[0].delta
 
                     # Handle reasoning content (for providers that support it)
-                    if hasattr(delta, 'reasoning_content') and delta.reasoning_content:
+                    reasoning_text, encrypted_reasoning = self._extract_reasoning_info(delta)
+                    if reasoning_text:
                         if not reasoning_started:
                             yield "【思考过程】\n"
                             reasoning_started = True
-                        yield delta.reasoning_content
+                        yield reasoning_text
+                    elif encrypted_reasoning and not reasoning_started:
+                        yield "【思考过程】\n（当前模型返回加密推理，无法显示明文）"
+                        reasoning_started = True
 
                     # Handle regular content
-                    if delta.content:
+                    content_text = self._extract_content_text(delta)
+                    if content_text:
                         if reasoning_started and not answer_started:
                             yield "\n\n【回答】\n"
                             answer_started = True
-                        yield delta.content
+                        yield content_text
 
         except Exception as e:
             logger.error(f"[{self.provider_name}] Streaming error: {str(e)}")
@@ -173,7 +259,8 @@ class LLMProvider(ABC):
         temperature: float = None,
         top_p: float = None,
         frequency_penalty: float = None,
-        presence_penalty: float = None
+        presence_penalty: float = None,
+        reasoning_mode: bool = False
     ) -> str:
         """
         Non-streaming chat completion.
@@ -212,11 +299,15 @@ class LLMProvider(ABC):
                 message = response.choices[0].message
 
                 # Handle reasoning content
-                if hasattr(message, 'reasoning_content') and message.reasoning_content:
-                    result = f"【思考过程】\n{message.reasoning_content}\n【回答】\n"
+                reasoning_text, encrypted_reasoning = self._extract_reasoning_info(message)
+                if reasoning_text:
+                    result = f"【思考过程】\n{reasoning_text}\n【回答】\n"
+                elif encrypted_reasoning:
+                    result = "【思考过程】\n（当前模型返回加密推理，无法显示明文）\n【回答】\n"
 
-                if message.content:
-                    result += message.content
+                content_text = self._extract_content_text(message)
+                if content_text:
+                    result += content_text
 
             return result
 
@@ -329,7 +420,8 @@ class OpenRouterProvider(LLMProvider):
         temperature: float = None,
         top_p: float = None,
         frequency_penalty: float = None,
-        presence_penalty: float = None
+        presence_penalty: float = None,
+        reasoning_mode: bool = False
     ) -> AsyncGenerator[str, None]:
         model = model or self.default_model
         params = {
@@ -352,34 +444,41 @@ class OpenRouterProvider(LLMProvider):
         logger.debug(f"[{self.provider_name}] Streaming request with model: {model}")
 
         try:
-            try:
-                response = await self.client.chat.completions.create(
-                    **params,
-                    reasoning=self._build_reasoning_payload()
-                )
-            except Exception as e:
-                if not self._should_retry_without_reasoning(e):
-                    raise
-                logger.warning(
-                    f"[{self.provider_name}] Reasoning payload rejected for model {model}, retrying without reasoning: {e}"
-                )
+            if reasoning_mode:
+                try:
+                    response = await self.client.chat.completions.create(
+                        **params,
+                        extra_body={"reasoning": self._build_reasoning_payload()}
+                    )
+                except Exception as e:
+                    if not self._should_retry_without_reasoning(e):
+                        raise
+                    logger.warning(
+                        f"[{self.provider_name}] Reasoning payload rejected for model {model}, retrying without reasoning: {e}"
+                    )
+                    response = await self.client.chat.completions.create(**params)
+            else:
                 response = await self.client.chat.completions.create(**params)
             reasoning_started = False
             answer_started = False
-
             async for chunk in response:
                 if chunk.choices and len(chunk.choices) > 0:
                     delta = chunk.choices[0].delta
-                    if hasattr(delta, 'reasoning_content') and delta.reasoning_content:
+                    reasoning_text, encrypted_reasoning = self._extract_reasoning_info(delta)
+                    if reasoning_text:
                         if not reasoning_started:
                             yield "【思考过程】\n"
                             reasoning_started = True
-                        yield delta.reasoning_content
-                    if delta.content:
+                        yield reasoning_text
+                    elif encrypted_reasoning and not reasoning_started:
+                        yield "【思考过程】\n（当前模型返回加密推理，无法显示明文）"
+                        reasoning_started = True
+                    content_text = self._extract_content_text(delta)
+                    if content_text:
                         if reasoning_started and not answer_started:
                             yield "\n\n【回答】\n"
                             answer_started = True
-                        yield delta.content
+                        yield content_text
         except Exception as e:
             logger.error(f"[{self.provider_name}] Streaming error: {str(e)}")
             raise
@@ -392,7 +491,8 @@ class OpenRouterProvider(LLMProvider):
         temperature: float = None,
         top_p: float = None,
         frequency_penalty: float = None,
-        presence_penalty: float = None
+        presence_penalty: float = None,
+        reasoning_mode: bool = False
     ) -> str:
         model = model or self.default_model
         params = {
@@ -415,25 +515,32 @@ class OpenRouterProvider(LLMProvider):
         logger.debug(f"[{self.provider_name}] Non-streaming request with model: {model}")
 
         try:
-            try:
-                response = await self.client.chat.completions.create(
-                    **params,
-                    reasoning=self._build_reasoning_payload()
-                )
-            except Exception as e:
-                if not self._should_retry_without_reasoning(e):
-                    raise
-                logger.warning(
-                    f"[{self.provider_name}] Reasoning payload rejected for model {model}, retrying without reasoning: {e}"
-                )
+            if reasoning_mode:
+                try:
+                    response = await self.client.chat.completions.create(
+                        **params,
+                        extra_body={"reasoning": self._build_reasoning_payload()}
+                    )
+                except Exception as e:
+                    if not self._should_retry_without_reasoning(e):
+                        raise
+                    logger.warning(
+                        f"[{self.provider_name}] Reasoning payload rejected for model {model}, retrying without reasoning: {e}"
+                    )
+                    response = await self.client.chat.completions.create(**params)
+            else:
                 response = await self.client.chat.completions.create(**params)
             result = ""
             if response.choices and len(response.choices) > 0:
                 message = response.choices[0].message
-                if hasattr(message, 'reasoning_content') and message.reasoning_content:
-                    result = f"【思考过程】\n{message.reasoning_content}\n【回答】\n"
-                if message.content:
-                    result += message.content
+                reasoning_text, encrypted_reasoning = self._extract_reasoning_info(message)
+                if reasoning_text:
+                    result = f"【思考过程】\n{reasoning_text}\n【回答】\n"
+                elif encrypted_reasoning:
+                    result = "【思考过程】\n（当前模型返回加密推理，无法显示明文）\n【回答】\n"
+                content_text = self._extract_content_text(message)
+                if content_text:
+                    result += content_text
             return result
         except Exception as e:
             logger.error(f"[{self.provider_name}] Chat completion error: {str(e)}")

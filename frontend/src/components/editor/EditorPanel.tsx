@@ -1011,7 +1011,7 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
         {
           chapterSelection: 'none',  // Default: only synopses
           selectedLoreEntries: [],      // Could retrieve saved lore IDs from autoEdit if stored
-          model: 'deepseek-chat'
+          reasoningMode: false
         },
         (chunk) => {
           streamedText += chunk;

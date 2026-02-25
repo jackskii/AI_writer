@@ -644,6 +644,27 @@ class AIService:
 
         return "\n\n".join(historic_parts)
 
+    def _resolve_model_for_request(self, model: str = None, reasoning_mode: bool = False) -> str:
+        """Resolve effective model with provider-aware reasoning fallback."""
+        requested_model = model
+
+        # Backward compatibility: old clients may still send DeepSeek model aliases.
+        if requested_model == 'deepseek-chat':
+            requested_model = None
+        elif requested_model == 'deepseek-reasoner':
+            if self.provider_name == 'deepseek':
+                requested_model = 'deepseek-reasoner'
+            else:
+                logger.warning(
+                    f"Received deepseek-reasoner for provider {self.provider_name}; switching to reasoning_mode on provider default model."
+                )
+                requested_model = None
+                reasoning_mode = True
+
+        if reasoning_mode and self.provider.reasoning_model:
+            return self.provider.reasoning_model
+        return requested_model
+
     async def generate_suggestions(self, chapter: Chapter, target_text: Optional[str] = None) -> List[Dict]:
         """Generate writing suggestions - returns single JSON formatted suggestion"""
         # Build context in sync environment to avoid async issues
@@ -760,6 +781,7 @@ class AIService:
         chat_history: List[Dict] = None,
         chapter_id: int = None,
         model: str = None,
+        reasoning_mode: bool = False,
         temperature: float = None,
         top_p: float = None,
         max_tokens: int = None,
@@ -798,14 +820,16 @@ class AIService:
 
             logger.debug(f"Sending {len(messages)} messages to {self.provider.provider_name} API for streaming with model {model or 'provider default'}")
 
+            effective_model = self._resolve_model_for_request(model, reasoning_mode)
             async for chunk in self.provider.chat_completion_stream(
                 messages,
-                model=model,
+                model=effective_model,
                 max_tokens=max_tokens,
                 temperature=temperature,
                 top_p=top_p,
                 frequency_penalty=frequency_penalty,
-                presence_penalty=presence_penalty
+                presence_penalty=presence_penalty,
+                reasoning_mode=reasoning_mode
             ):
                 yield chunk
 
@@ -818,6 +842,7 @@ class AIService:
         selected_text: str,
         context: str = "",
         model: str = None,  # Let provider determine default model
+        reasoning_mode: bool = False,
         edit_requirement: str = None,
         temperature: float = None,
         top_p: float = None,
@@ -842,14 +867,16 @@ class AIService:
 
             # Use provider's streaming method
             # Note: stop sequences may not be supported by all providers
+            effective_model = self._resolve_model_for_request(model, reasoning_mode)
             async for chunk in self.provider.chat_completion_stream(
                 messages,
-                model=model,
+                model=effective_model,
                 max_tokens=max_tokens,
                 temperature=temperature,
                 top_p=top_p,
                 frequency_penalty=frequency_penalty,
-                presence_penalty=presence_penalty
+                presence_penalty=presence_penalty,
+                reasoning_mode=reasoning_mode
             ):
                 yield chunk
 

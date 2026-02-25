@@ -19,6 +19,14 @@ import uuid
 logger = logging.getLogger(__name__)
 
 
+def parse_reasoning_mode(value):
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    return str(value).strip().lower() in {'1', 'true', 'yes', 'on'}
+
+
 # Async helper functions for database operations
 @sync_to_async
 def get_user_api_key_async(user):
@@ -419,6 +427,7 @@ async def ai_chat_stream(request):
     chapter_id = request.GET.get('chapter_id')
     message = request.GET.get('message')
     model = request.GET.get('model')  # Let provider determine default model
+    reasoning_mode = parse_reasoning_mode(request.GET.get('reasoning_mode'))
 
     if not all([work_id, chapter_id, message]):
         return HttpResponse(
@@ -459,6 +468,7 @@ async def ai_chat_stream(request):
             try:
                 async for chunk in ai_service.chat_with_ai_stream(
                     context, message, chat_history, chapter.id, model,
+                    reasoning_mode=reasoning_mode,
                     temperature=ai_settings['temperature'],
                     top_p=ai_settings['top_p'],
                     max_tokens=ai_settings['max_tokens'],
@@ -519,6 +529,7 @@ async def ai_work_chat_stream(request):
     work_id = request.GET.get('work_id')
     message = request.GET.get('message')
     model = request.GET.get('model')  # Let provider determine default model
+    reasoning_mode = parse_reasoning_mode(request.GET.get('reasoning_mode'))
 
     if not all([work_id, message]):
         return HttpResponse(
@@ -553,6 +564,7 @@ async def ai_work_chat_stream(request):
             try:
                 async for chunk in ai_service.chat_with_ai_stream(
                     context, message, chat_history, None, model,
+                    reasoning_mode=reasoning_mode,
                     temperature=ai_settings['temperature'],
                     top_p=ai_settings['top_p'],
                     max_tokens=ai_settings['max_tokens'],
@@ -897,6 +909,7 @@ async def ai_auto_edit_stream(request):
     selected_lore_ids = body.get('selected_lore_ids', '')
     selected_faction_ids = body.get('selected_faction_ids', '')
     model = body.get('model')  # Let provider determine default model
+    reasoning_mode = parse_reasoning_mode(body.get('reasoning_mode'))
     edit_requirement = body.get('edit_requirement', '')
     style_id = body.get('style_id', '')
 
@@ -934,7 +947,7 @@ async def ai_auto_edit_stream(request):
             accumulated_text = ''
             try:
                 async for chunk in ai_service.auto_edit_stream(
-                    selected_text, formatted_context, model, edit_requirement,
+                    selected_text, formatted_context, model, reasoning_mode, edit_requirement,
                     temperature=ai_settings['temperature'],
                     top_p=ai_settings['top_p'],
                     max_tokens=ai_settings['max_tokens'],

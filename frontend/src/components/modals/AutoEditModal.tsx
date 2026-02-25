@@ -31,7 +31,7 @@ export interface AutoEditContext {
   customChapterCount?: number;
   selectedLoreEntries: number[]; // IDs of selected lore entries
   selectedFactions?: number[]; // IDs of selected factions
-  model: 'deepseek-chat' | 'deepseek-reasoner';
+  reasoningMode?: boolean;
   editRequirement?: string; // Editing requirement/instruction
   styleId?: number; // Optional writing style ID
 }
@@ -133,7 +133,7 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
   const [selectedFactionIds, setSelectedFactionIds] = useState<number[]>([]);
   const [selectedLoreIds, setSelectedLoreIds] = useState<number[]>([]);
   const [loreCurrentPage, setLoreCurrentPage] = useState(1);
-  const [selectedModel, setSelectedModel] = useState<'deepseek-chat' | 'deepseek-reasoner'>('deepseek-chat');
+  const [isReasoningMode, setIsReasoningMode] = useState(false);
   const LORE_PAGE_SIZE = 8; // 4x2 grid
 
   // State for editing requirement
@@ -443,7 +443,7 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
       customChapterCount: chapterSelection === 'custom' ? customChapterCount : undefined,
       selectedLoreEntries: selectedLoreIds,
       selectedFactions: selectedFactionIds,
-      model: selectedModel,
+      reasoningMode: isReasoningMode,
       editRequirement: editRequirement.trim() || '修改',
       styleId: selectedStyleId || undefined,
     };
@@ -941,29 +941,18 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
                 </button>
               </div>
               <div className="flex-1 overflow-y-auto p-4">
-              {/* Model Selection */}
+              {/* Reasoning Mode */}
               <div className="mb-6">
-                <h4 className="text-sm font-medium text-dark-text mb-2">AI 模型</h4>
-                <div className="space-y-2">
-                  <label className="flex items-center gap-2">
-                    <input
-                      type="radio"
-                      checked={selectedModel === 'deepseek-chat'}
-                      onChange={() => setSelectedModel('deepseek-chat')}
-                      className="text-dark-primary"
-                    />
-                    <span className="text-sm text-dark-text">DeepSeek Chat（默认）</span>
-                  </label>
-                  <label className="flex items-center gap-2">
-                    <input
-                      type="radio"
-                      checked={selectedModel === 'deepseek-reasoner'}
-                      onChange={() => setSelectedModel('deepseek-reasoner')}
-                      className="text-dark-primary"
-                    />
-                    <span className="text-sm text-dark-text">DeepSeek Reasoner</span>
-                  </label>
-                </div>
+                <h4 className="text-sm font-medium text-dark-text mb-2">推理模式</h4>
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={isReasoningMode}
+                    onChange={(e) => setIsReasoningMode(e.target.checked)}
+                    className="text-dark-primary"
+                  />
+                  <span className="text-sm text-dark-text">启用推理模式（自动使用当前 provider 的推理能力）</span>
+                </label>
               </div>
 
               {/* Chapter Selection */}
@@ -1222,29 +1211,18 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
             <div className="w-80 border-r border-dark-border p-4 overflow-y-auto">
               <h3 className="text-lg font-medium text-dark-text mb-4">自定义上下文</h3>
 
-              {/* Model Selection */}
+              {/* Reasoning Mode */}
               <div className="mb-6">
-                <h4 className="text-sm font-medium text-dark-text mb-2">AI 模型</h4>
-                <div className="space-y-2">
-                  <label className="flex items-center gap-2">
-                    <input
-                      type="radio"
-                      checked={selectedModel === 'deepseek-chat'}
-                      onChange={() => setSelectedModel('deepseek-chat')}
-                      className="text-dark-primary"
-                    />
-                    <span className="text-sm text-dark-text">DeepSeek Chat（默认）</span>
-                  </label>
-                  <label className="flex items-center gap-2">
-                    <input
-                      type="radio"
-                      checked={selectedModel === 'deepseek-reasoner'}
-                      onChange={() => setSelectedModel('deepseek-reasoner')}
-                      className="text-dark-primary"
-                    />
-                    <span className="text-sm text-dark-text">DeepSeek Reasoner（推理模型）</span>
-                  </label>
-                </div>
+                <h4 className="text-sm font-medium text-dark-text mb-2">推理模式</h4>
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={isReasoningMode}
+                    onChange={(e) => setIsReasoningMode(e.target.checked)}
+                    className="text-dark-primary"
+                  />
+                  <span className="text-sm text-dark-text">启用推理模式（自动使用当前 provider 的推理能力）</span>
+                </label>
               </div>
 
               {/* Chapter Selection */}

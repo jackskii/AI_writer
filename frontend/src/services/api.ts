@@ -435,7 +435,7 @@ export const aiApi = {
       customChapterCount?: number;
       selectedLoreEntries: number[];
       selectedFactions?: number[];
-      model: 'deepseek-chat' | 'deepseek-reasoner';
+      reasoningMode?: boolean;
       editRequirement?: string;
       styleId?: number;
     },
@@ -453,9 +453,8 @@ export const aiApi = {
       chapter_selection: context.chapterSelection,
     };
 
-    // Only pass model if explicitly set to non-default (like reasoning mode)
-    if (context.model && context.model !== 'deepseek-chat') {
-      requestBody.model = context.model;
+    if (context.reasoningMode) {
+      requestBody.reasoning_mode = true;
     }
 
     if (context.customChapterCount) {
@@ -585,7 +584,7 @@ export const aiApi = {
     onStart?: () => void,
     onEnd?: (fullResponse: string) => void,
     onError?: (error: string) => void,
-    model: string = 'deepseek-chat'
+    reasoningMode: boolean = false
   ) => {
     const params = new URLSearchParams({
       work_id: workId.toString(),
@@ -593,9 +592,8 @@ export const aiApi = {
       message: message,
     });
 
-    // Only pass model if explicitly set to non-default (like reasoning mode)
-    if (model && model !== 'deepseek-chat') {
-      params.append('model', model);
+    if (reasoningMode) {
+      params.append('reasoning_mode', '1');
     }
 
     // Add token for authentication since EventSource can't send headers
@@ -665,16 +663,15 @@ export const aiApi = {
     onStart?: () => void,
     onEnd?: (fullResponse: string) => void,
     onError?: (error: string) => void,
-    model: string = 'deepseek-chat'
+    reasoningMode: boolean = false
   ) => {
     const params = new URLSearchParams({
       work_id: workId.toString(),
       message: message,
     });
 
-    // Only pass model if explicitly set to non-default (like reasoning mode)
-    if (model && model !== 'deepseek-chat') {
-      params.append('model', model);
+    if (reasoningMode) {
+      params.append('reasoning_mode', '1');
     }
 
     const authStorage = localStorage.getItem('auth-storage');

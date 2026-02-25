@@ -23,6 +23,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   isOpen,
   onClose
 }) => {
+  const OPENROUTER_CUSTOM_OPTION = '__custom__';
   const { theme, setTheme } = useUIStore();
 
   const [expandedSections, setExpandedSections] = useState<ExpandedSections>({
@@ -44,6 +45,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [hasOpenrouterApiKey, setHasOpenrouterApiKey] = useState(false);
   const [apiProvider, setApiProvider] = useState<'deepseek' | 'qwen' | 'openrouter'>('deepseek');
   const [openrouterModel, setOpenrouterModel] = useState('x-ai/grok-4-fast');
+  const [openrouterCustomModel, setOpenrouterCustomModel] = useState('');
   const [openrouterModels, setOpenrouterModels] = useState<Array<{ id: string; name: string }>>([]);
   const [isChangingDeepseekKey, setIsChangingDeepseekKey] = useState(false);
   const [isChangingQwenKey, setIsChangingQwenKey] = useState(false);
@@ -84,8 +86,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       setHasQwenApiKey(settings.has_qwen_api_key || false);
       setHasOpenrouterApiKey(settings.has_openrouter_api_key || false);
       setApiProvider((settings.api_provider as 'deepseek' | 'qwen' | 'openrouter') || 'deepseek');
-      setOpenrouterModel(settings.openrouter_model || 'x-ai/grok-4-fast');
-      setOpenrouterModels(settings.openrouter_models || []);
+      const serverModels = settings.openrouter_models || [];
+      const savedModel = settings.openrouter_model || 'x-ai/grok-4-fast';
+      setOpenrouterModels(serverModels);
+      const matchedModel = serverModels.find((m) => m.id === savedModel);
+      if (matchedModel) {
+        setOpenrouterModel(savedModel);
+        setOpenrouterCustomModel('');
+      } else {
+        setOpenrouterModel(OPENROUTER_CUSTOM_OPTION);
+        setOpenrouterCustomModel(savedModel);
+      }
       setTemperature(settings.temperature);
       setTopP(settings.top_p);
       setMaxTokens(settings.max_tokens);
@@ -159,8 +170,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       if (openrouterApiKey.trim() && !isChangingOpenrouterKey) {
         updateData.openrouter_api_key = openrouterApiKey;
       }
-      if (openrouterModel && openrouterModel !== originalSettings.openrouter_model) {
-        updateData.openrouter_model = openrouterModel;
+      const effectiveOpenrouterModel =
+        openrouterModel === OPENROUTER_CUSTOM_OPTION ? openrouterCustomModel.trim() : openrouterModel;
+      if (effectiveOpenrouterModel && effectiveOpenrouterModel !== originalSettings.openrouter_model) {
+        updateData.openrouter_model = effectiveOpenrouterModel;
       }
 
       // Only include changed values
@@ -337,7 +350,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                               {model.name} : {model.id}
                             </option>
                           ))}
+                          <option value={OPENROUTER_CUSTOM_OPTION}>自定义模型</option>
                         </select>
+                        {openrouterModel === OPENROUTER_CUSTOM_OPTION && (
+                          <Input
+                            value={openrouterCustomModel}
+                            onChange={(e) => setOpenrouterCustomModel(e.target.value)}
+                            placeholder="输入 OpenRouter 模型 ID，例如 openai/gpt-4o"
+                            className="bg-dark-bg border-dark-border text-sm"
+                          />
+                        )}
                         <p className="text-xs text-dark-text-muted">模型列表由后端配置统一下发，便于后续增删更新。</p>
                       </div>
                     )}
@@ -689,6 +711,24 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         )}
                       </div>
                     )}
+
+                    <div className="pt-2 border-t border-dark-border">
+                      <Button
+                        variant="outline"
+                        onClick={handleApplyChanges}
+                        disabled={isSaving}
+                        className="w-full"
+                      >
+                        {isSaving ? (
+                          <div className="flex items-center gap-2">
+                            <LoadingSpinner size="sm" />
+                            保存 API / 模型设置中
+                          </div>
+                        ) : (
+                          '保存 API / 模型设置'
+                        )}
+                      </Button>
+                    </div>
                   </div>
                 )}
               </div>

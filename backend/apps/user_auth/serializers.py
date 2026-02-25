@@ -176,10 +176,14 @@ class UserSettingsSerializer(serializers.ModelSerializer):
         return obj.has_valid_api_key()
 
     def validate_openrouter_model(self, value):
-        valid_ids = {m.get('id') for m in OPENROUTER_MODELS}
-        if value and value not in valid_ids:
-            raise serializers.ValidationError("不支持的OpenRouter模型")
-        return value
+        if value is None:
+            return value
+        model = value.strip()
+        if not model:
+            raise serializers.ValidationError("OpenRouter模型不能为空")
+        if len(model) > 100:
+            raise serializers.ValidationError("OpenRouter模型过长")
+        return model
 
     def update(self, instance, validated_data):
         """更新设置"""
