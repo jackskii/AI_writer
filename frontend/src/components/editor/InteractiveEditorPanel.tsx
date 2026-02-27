@@ -26,12 +26,9 @@ interface Segment {
 
 const DEFAULT_OPENING_AGENT_TEXT = '编辑这段文字以创造开场白';
 
-const CYOA_DEFAULT_GUIDE =
-  '你是互动小说的叙事引擎。基于玩家输入推进剧情，给出沉浸式、可继续互动的文本。保持角色行为与世界设定一致，动作因果清楚，节奏紧凑。输出只写故事正文，不要解释规则。';
-
 const parseTaggedContent = (rawContent: string): Segment[] => {
-  const content = (rawContent || '').trim();
-  if (!content) {
+  const content = rawContent || '';
+  if (!content.trim()) {
     return [{ role: 'agent', content: DEFAULT_OPENING_AGENT_TEXT }];
   }
 
@@ -42,9 +39,10 @@ const parseTaggedContent = (rawContent: string): Segment[] => {
 
   const pushCurrent = () => {
     if (!currentRole) return;
+    // Preserve content as-is, don't trim (preserves spaces and newlines)
     segments.push({
       role: currentRole,
-      content: currentLines.join('\n').trim(),
+      content: currentLines.join('\n'),
     });
   };
 
@@ -110,11 +108,40 @@ export const InteractiveEditorPanel: React.FC<InteractiveEditorPanelProps> = ({
   const [targetSegmentIndex, setTargetSegmentIndex] = useState(0);
   const lastHandledAutoEditTriggerRef = useRef<number | null>(null);
   const latestCyoaPromptRef = useRef('');
+  const isInternalUpdateRef = useRef(false); // Track if update is from local editing
+  const textareaRefs = useRef<{ [key: number]: HTMLTextAreaElement | null }>({});
 
   const { addNotification } = useUIStore();
 
+  // Auto-resize textarea based on content
+  const adjustTextareaHeight = (textarea: HTMLTextAreaElement | null, preserveScroll = false) => {
+    if (!textarea) return;
+    
+    // Save scroll position if needed
+    const scrollContainer = textarea.closest('.overflow-y-auto');
+    let scrollTop = 0;
+    if (preserveScroll && scrollContainer) {
+      scrollTop = scrollContainer.scrollTop;
+    }
+    
+    textarea.style.height = 'auto';
+    const scrollHeight = textarea.scrollHeight;
+    const maxHeight = 500;
+    textarea.style.height = `${Math.min(scrollHeight, maxHeight)}px`;
+    
+    // Restore scroll position
+    if (preserveScroll && scrollContainer) {
+      scrollContainer.scrollTop = scrollTop;
+    }
+  };
+
   useEffect(() => {
-    setSegments(parseTaggedContent(content));
+    // Only re-parse if the change came from external source (not from local editing)
+    if (!isInternalUpdateRef.current) {
+      setSegments(parseTaggedContent(content));
+    }
+    // Reset the flag after processing
+    isInternalUpdateRef.current = false;
   }, [content]);
 
   useEffect(() => {
@@ -122,6 +149,17 @@ export const InteractiveEditorPanel: React.FC<InteractiveEditorPanelProps> = ({
       setActiveSegmentIndex(Math.max(segments.length - 1, 0));
     }
   }, [segments, activeSegmentIndex]);
+
+  // Adjust all textarea heights when segments change
+  useEffect(() => {
+    requestAnimationFrame(() => {
+      Object.values(textareaRefs.current).forEach((textarea) => {
+        if (textarea) {
+          adjustTextareaHeight(textarea, true);
+        }
+      });
+    });
+  }, [segments.length]); // Only when number of segments changes (new segments added/removed)
 
   const hasSelection = selectedText.length > 0;
 
@@ -131,6 +169,8 @@ export const InteractiveEditorPanel: React.FC<InteractiveEditorPanelProps> = ({
 
   const syncSegments = (updated: Segment[]) => {
     setSegments(updated);
+    // Mark as internal update to prevent re-parsing
+    isInternalUpdateRef.current = true;
     onChange(serializeSegments(updated));
   };
 
@@ -138,6 +178,10 @@ export const InteractiveEditorPanel: React.FC<InteractiveEditorPanelProps> = ({
     const updated = [...segments];
     updated[index] = { ...updated[index], content: newValue };
     syncSegments(updated);
+    // Adjust height after content changes
+    requestAnimationFrame(() => {
+      adjustTextareaHeight(textareaRefs.current[index], true);
+    });
   };
 
   const handleDeleteSegment = (index: number) => {
@@ -148,6 +192,7 @@ export const InteractiveEditorPanel: React.FC<InteractiveEditorPanelProps> = ({
     if (updated.length === 0) {
       const fallback = [{ role: 'agent' as const, content: DEFAULT_OPENING_AGENT_TEXT }];
       syncSegments(fallback);
+      onSave?.(serializeSegments(fallback));
       setActiveSegmentIndex(0);
       setSelectedText('');
       setSelectionStart(0);
@@ -155,6 +200,7 @@ export const InteractiveEditorPanel: React.FC<InteractiveEditorPanelProps> = ({
       return;
     }
     syncSegments(updated);
+    onSave?.(serializeSegments(updated));
     setActiveSegmentIndex(Math.max(0, Math.min(activeSegmentIndex, updated.length - 1)));
     setSelectedText('');
     setSelectionStart(0);
@@ -262,6 +308,10 @@ export const InteractiveEditorPanel: React.FC<InteractiveEditorPanelProps> = ({
     setSelectionStart(0);
     setSelectionEnd(0);
     onSave?.(serializeSegments(updated));
+    // Adjust height after content replacement
+    requestAnimationFrame(() => {
+      adjustTextareaHeight(textareaRefs.current[targetSegmentIndex], true);
+    });
   };
 
   const handleRevert = () => undefined;
@@ -275,7 +325,7 @@ export const InteractiveEditorPanel: React.FC<InteractiveEditorPanelProps> = ({
 
   return (
     <div className={`h-full flex flex-col bg-dark-bg ${isMobile ? 'pb-[60px]' : ''}`}>
-      <div className="flex-1 overflow-y-auto p-4 space-y-3">
+      <div className="flex-1 overflow-y-auto p-4 space-y-3" style={{ scrollbarGutter: 'stable' }}>
         {segments.map((segment, idx) => (
           <div
             key={`${segment.role}-${idx}`}
@@ -298,8 +348,13 @@ export const InteractiveEditorPanel: React.FC<InteractiveEditorPanelProps> = ({
               </button>
             </div>
             <textarea
+              ref={(el) => {
+                textareaRefs.current[idx] = el;
+              }}
               value={segment.content}
-              onFocus={() => setActiveSegmentIndex(idx)}
+              onFocus={() => {
+                setActiveSegmentIndex(idx);
+              }}
               onClick={(e) => {
                 const target = e.target as HTMLTextAreaElement;
                 setActiveSegmentIndex(idx);
@@ -327,7 +382,9 @@ export const InteractiveEditorPanel: React.FC<InteractiveEditorPanelProps> = ({
                   onSave?.();
                 }
               }}
-              className="w-full min-h-[140px] p-3 bg-transparent text-dark-text outline-none resize-y"
+              className="w-full p-3 bg-transparent text-dark-text outline-none resize-none overflow-y-auto"
+              style={{ minHeight: '40px', maxHeight: '500px' }}
+              rows={1}
               placeholder={segment.role === 'user' ? '输入玩家输入...' : 'Agent 输出...'}
             />
           </div>
@@ -370,7 +427,6 @@ export const InteractiveEditorPanel: React.FC<InteractiveEditorPanelProps> = ({
           isMobile={isMobile}
           mode={modalMode}
           modeLabel={modalMode === 'cyoa' ? '剧情推进模式（CYOA）' : '局部编辑模式（Auto Edit）'}
-          defaultEditRequirement={modalMode === 'cyoa' ? CYOA_DEFAULT_GUIDE : undefined}
         />
       )}
     </div>

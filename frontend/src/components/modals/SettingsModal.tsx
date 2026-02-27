@@ -44,7 +44,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [hasQwenApiKey, setHasQwenApiKey] = useState(false);
   const [hasOpenrouterApiKey, setHasOpenrouterApiKey] = useState(false);
   const [apiProvider, setApiProvider] = useState<'deepseek' | 'qwen' | 'openrouter'>('deepseek');
-  const [openrouterModel, setOpenrouterModel] = useState('x-ai/grok-4-fast');
+  const [openrouterModel, setOpenrouterModel] = useState('x-ai/grok-4.1-fast');
   const [openrouterCustomModel, setOpenrouterCustomModel] = useState('');
   const [openrouterModels, setOpenrouterModels] = useState<Array<{ id: string; name: string }>>([]);
   const [isChangingDeepseekKey, setIsChangingDeepseekKey] = useState(false);
@@ -87,7 +87,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       setHasOpenrouterApiKey(settings.has_openrouter_api_key || false);
       setApiProvider((settings.api_provider as 'deepseek' | 'qwen' | 'openrouter') || 'deepseek');
       const serverModels = settings.openrouter_models || [];
-      const savedModel = settings.openrouter_model || 'x-ai/grok-4-fast';
+      const savedModel = settings.openrouter_model || 'x-ai/grok-4.1-fast';
       setOpenrouterModels(serverModels);
       const matchedModel = serverModels.find((m) => m.id === savedModel);
       if (matchedModel) {

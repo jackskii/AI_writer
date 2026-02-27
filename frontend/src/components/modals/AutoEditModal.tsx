@@ -290,16 +290,15 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
         abortControllerRef.current.abort();
         abortControllerRef.current = null;
       }
-      if (isCyoaMode) {
-        setEditRequirement(defaultEditRequirement || '请根据玩家输入推进剧情，输出可继续互动的正文。');
-      } else {
-        const selectedPrefill = prefills.find(p => p.id === selectedPrefillId) ||
-                                prefills.find(p => p.is_default) ||
-                                prefills.find(p => p.name === '修改') ||
-                                prefills[0];
-        if (selectedPrefill) {
-          setEditRequirement(selectedPrefill.prompt_text);
-        }
+      // For both CYOA and auto_edit, use selected prefill or fallback
+      const selectedPrefill = prefills.find(p => p.id === selectedPrefillId) ||
+                              prefills.find(p => p.is_default) ||
+                              prefills[0];
+      if (selectedPrefill) {
+        setEditRequirement(selectedPrefill.prompt_text);
+      } else if (defaultEditRequirement) {
+        // Only use defaultEditRequirement as fallback if no prefill is available
+        setEditRequirement(defaultEditRequirement);
       }
       // Default customize context to previous 1 chapter.
       setChapterSelection('custom');
@@ -339,13 +338,13 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
 
   // Update edit requirement when prefill selection changes (without resetting modal)
   useEffect(() => {
-    if (!isCyoaMode && isOpen && !isLoadingPrefills && prefills.length > 0 && selectedPrefillId) {
+    if (isOpen && !isLoadingPrefills && prefills.length > 0 && selectedPrefillId) {
       const selectedPrefill = prefills.find(p => p.id === selectedPrefillId);
       if (selectedPrefill) {
         setEditRequirement(selectedPrefill.prompt_text);
       }
     }
-  }, [selectedPrefillId, isOpen, isLoadingPrefills, prefills, isCyoaMode]);
+  }, [selectedPrefillId, isOpen, isLoadingPrefills, prefills]);
 
   // Load lore entries and factions for the work
   const loadLoreEntries = async () => {
@@ -477,7 +476,7 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
       selectedLoreEntries: selectedLoreIds,
       selectedFactions: selectedFactionIds,
       reasoningMode: isReasoningMode,
-      editRequirement: editRequirement.trim() || (isCyoaMode ? (defaultEditRequirement || '请根据玩家输入推进剧情，输出可继续互动的正文。') : '修改'),
+      editRequirement: editRequirement.trim() || (defaultEditRequirement || '修改'),
       styleId: selectedStyleId || undefined,
     };
 
@@ -877,27 +876,25 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
                     设置
                   </Button>
                 </div>
-                {!isCyoaMode && (
-                  <div className="flex flex-wrap gap-2 mb-2">
-                    {prefills.map(prefill => (
-                      <button
-                        key={prefill.id}
-                        onClick={() => {
-                          setEditRequirement(prefill.prompt_text);
-                          setSelectedPrefillId(prefill.id);
-                          localStorage.setItem(selectedPrefillStorageKey, prefill.id.toString());
-                        }}
-                        className={`px-3 py-1.5 text-sm rounded transition-colors ${
-                          selectedPrefillId === prefill.id
-                            ? 'bg-dark-primary text-white'
-                            : 'bg-dark-bg text-dark-text border border-dark-border'
-                        }`}
-                      >
-                        {prefill.name}
-                      </button>
-                    ))}
-                  </div>
-                )}
+                <div className="flex flex-wrap gap-2 mb-2">
+                  {prefills.map(prefill => (
+                    <button
+                      key={prefill.id}
+                      onClick={() => {
+                        setEditRequirement(prefill.prompt_text);
+                        setSelectedPrefillId(prefill.id);
+                        localStorage.setItem(selectedPrefillStorageKey, prefill.id.toString());
+                      }}
+                      className={`px-3 py-1.5 text-sm rounded transition-colors ${
+                        selectedPrefillId === prefill.id
+                          ? 'bg-dark-primary text-white'
+                          : 'bg-dark-bg text-dark-text border border-dark-border'
+                      }`}
+                    >
+                      {prefill.name}
+                    </button>
+                  ))}
+                </div>
                 <Textarea
                   value={editRequirement}
                   onChange={(e) => setEditRequirement(e.target.value)}
@@ -1431,27 +1428,25 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
                       设置
                     </Button>
                   </div>
-                  {!isCyoaMode && (
-                    <div className="flex gap-2 mb-2 flex-shrink-0 flex-wrap">
-                      {prefills.map(prefill => (
-                        <button
-                          key={prefill.id}
-                          onClick={() => {
-                            setEditRequirement(prefill.prompt_text);
-                            setSelectedPrefillId(prefill.id);
-                            localStorage.setItem('autoEdit_selectedPrefillId', prefill.id.toString());
-                          }}
-                          className={`px-3 py-1 text-sm rounded transition-colors ${
-                            selectedPrefillId === prefill.id
-                              ? 'bg-dark-primary text-white'
-                              : 'bg-dark-bg text-dark-text border border-dark-border hover:border-dark-primary'
-                          }`}
-                        >
-                          {prefill.name}
-                        </button>
-                      ))}
-                    </div>
-                  )}
+                  <div className="flex gap-2 mb-2 flex-shrink-0 flex-wrap">
+                    {prefills.map(prefill => (
+                      <button
+                        key={prefill.id}
+                        onClick={() => {
+                          setEditRequirement(prefill.prompt_text);
+                          setSelectedPrefillId(prefill.id);
+                          localStorage.setItem(selectedPrefillStorageKey, prefill.id.toString());
+                        }}
+                        className={`px-3 py-1 text-sm rounded transition-colors ${
+                          selectedPrefillId === prefill.id
+                            ? 'bg-dark-primary text-white'
+                            : 'bg-dark-bg text-dark-text border border-dark-border hover:border-dark-primary'
+                        }`}
+                      >
+                        {prefill.name}
+                      </button>
+                    ))}
+                  </div>
                   <Textarea
                     value={editRequirement}
                     onChange={(e) => setEditRequirement(e.target.value)}
