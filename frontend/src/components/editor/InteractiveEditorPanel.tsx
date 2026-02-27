@@ -325,7 +325,7 @@ export const InteractiveEditorPanel: React.FC<InteractiveEditorPanelProps> = ({
 
   return (
     <div className={`h-full flex flex-col bg-dark-bg ${isMobile ? 'pb-[60px]' : ''}`}>
-      <div className="flex-1 overflow-y-auto p-4 space-y-3" style={{ scrollbarGutter: 'stable' }}>
+      <div className={`flex-1 overflow-y-auto p-4 space-y-3 ${isMobile ? 'pt-4 pb-20' : ''}`} style={{ scrollbarGutter: 'stable' }}>
         {segments.map((segment, idx) => (
           <div
             key={`${segment.role}-${idx}`}

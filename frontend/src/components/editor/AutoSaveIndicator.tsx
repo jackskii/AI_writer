@@ -27,17 +27,17 @@ export const AutoSaveIndicator: React.FC = () => {
       {isAutoSaving ? (
         <>
           <Save size={14} className="animate-pulse" />
-          <span>自动保存中...</span>
+          <span className="hidden md:inline">自动保存中...</span>
         </>
       ) : lastSaveTime ? (
         <>
           <Check size={14} className="text-green-400" />
-          <span>{formatSaveTime(lastSaveTime)}</span>
+          <span className="hidden md:inline">{formatSaveTime(lastSaveTime)}</span>
         </>
       ) : (
         <>
           <Clock size={14} />
-          <span>未保存</span>
+          <span className="hidden md:inline">未保存</span>
         </>
       )}
     </div>

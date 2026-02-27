@@ -1202,7 +1202,7 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
 
       <div className={`h-full flex flex-col bg-dark-bg ${isMobile ? 'pb-[60px]' : ''}`}>
       {/* Editor Area with Inline Notes */}
-      <div className="flex-1 flex overflow-y-auto">
+      <div className={`flex-1 flex overflow-y-auto ${isMobile ? 'pt-4 pb-20' : ''}`}>
         {/* Notes Margin - Hidden on mobile */}
         <div className={`w-80 border-r border-gray-300 bg-gray-50 dark:bg-dark-surface dark:border-dark-border ${isMobile ? 'hidden' : 'hidden md:block'}`}>
           {/* Notes Header */}
