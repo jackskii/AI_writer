@@ -24,6 +24,9 @@ interface AutoEditModalProps {
     signal?: AbortSignal
   ) => Promise<void>;
   isMobile?: boolean;
+  mode?: 'auto_edit' | 'cyoa';
+  modeLabel?: string;
+  defaultEditRequirement?: string;
 }
 
 export interface AutoEditContext {
@@ -50,13 +53,28 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
   onAccept,
   onRevert,
   onGenerateEdit,
-  isMobile: isMobileProp
+  isMobile: isMobileProp,
+  mode = 'auto_edit',
+  modeLabel,
+  defaultEditRequirement
 }) => {
   const FACTION_FILTER_GROUP = '__factions__' as const;
 
   // Mobile detection - use prop if provided, otherwise detect
   const isMobileHook = useMobile();
   const isMobile = isMobileProp !== undefined ? isMobileProp : isMobileHook;
+  const isCyoaMode = mode === 'cyoa';
+  const prefillScope: 'auto_edit' | 'cyoa' = isCyoaMode ? 'cyoa' : 'auto_edit';
+  const selectedPrefillStorageKey = isCyoaMode ? 'cyoa_selectedPrefillId' : 'autoEdit_selectedPrefillId';
+  const titleText = modeLabel || (isCyoaMode ? '剧情推进模式（CYOA）' : (initialOriginalText ? '自动编辑' : 'AI 生成文本'));
+  const originalTextLabel = isCyoaMode ? '玩家输入（User）' : (initialOriginalText ? '原始文本' : '提示词（可选）');
+  const originalTextPlaceholder = isCyoaMode
+    ? '输入玩家动作、选择或要求...'
+    : (initialOriginalText ? '原始文本...' : '输入提示词来引导 AI 生成（可留空）...');
+  const guideLabel = isCyoaMode ? 'CYOA 指引' : '编辑指引';
+  const guidePlaceholder = isCyoaMode ? '输入 CYOA 生成规则...' : '输入编辑要求...';
+  const outputLabel = isCyoaMode ? 'Agent 输出' : '编辑文本';
+  const generateButtonText = isCyoaMode ? '生成剧情推进' : (initialOriginalText ? '自动编辑' : 'AI 生成');
 
   // State for text boxes
   const [originalText, setOriginalText] = useState(initialOriginalText);
@@ -156,19 +174,19 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
   // All acts for accurate prompt length calculation
   const [allActs, setAllActs] = useState<Act[]>([]);
 
-  // Track selected prefill ID for persistence
+  // Track selected prefill ID for persistence (different keys for cyoa vs auto_edit)
   const [selectedPrefillId, setSelectedPrefillId] = useState<number | null>(() => {
-    const saved = localStorage.getItem('autoEdit_selectedPrefillId');
+    const saved = localStorage.getItem(selectedPrefillStorageKey);
     return saved ? parseInt(saved, 10) : null;
   });
 
-  // Load prefills from backend on mount
+  // Load prefills from backend on mount (filtered by scope)
   const loadPrefills = async () => {
     try {
-      const response = await editPrefillsApi.list();
+      const response = await editPrefillsApi.list(prefillScope);
       setPrefills(response.data);
-      // Use saved prefill ID or find default "增加细节" or "修改"
-      const savedId = localStorage.getItem('autoEdit_selectedPrefillId');
+      // Use saved prefill ID or find default
+      const savedId = localStorage.getItem(selectedPrefillStorageKey);
       let selectedPrefill: EditPrefill | undefined;
       
       if (savedId) {
@@ -177,19 +195,30 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
       }
       
       if (!selectedPrefill) {
-        selectedPrefill = response.data.find(p => p.is_default) || 
-                         response.data.find(p => p.name === '修改') ||
-                         response.data[0];
+        // For CYOA, find default "剧情推进"; for auto_edit, find "增加细节" or "修改"
+        if (isCyoaMode) {
+          selectedPrefill = response.data.find(p => p.is_default) || response.data[0];
+        } else {
+          selectedPrefill = response.data.find(p => p.is_default) || 
+                           response.data.find(p => p.name === '修改') ||
+                           response.data[0];
+        }
       }
       
       if (selectedPrefill) {
         setSelectedPrefillId(selectedPrefill.id);
         setEditRequirement(selectedPrefill.prompt_text);
-        localStorage.setItem('autoEdit_selectedPrefillId', selectedPrefill.id.toString());
+        localStorage.setItem(selectedPrefillStorageKey, selectedPrefill.id.toString());
+      } else if (defaultEditRequirement) {
+        // Fallback to provided default if no prefill found
+        setEditRequirement(defaultEditRequirement);
       }
     } catch (error) {
       console.error('Failed to load prefills:', error);
       setPrefills([]);
+      if (defaultEditRequirement) {
+        setEditRequirement(defaultEditRequirement);
+      }
     } finally {
       setIsLoadingPrefills(false);
     }
@@ -197,7 +226,7 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
 
   useEffect(() => {
     loadPrefills();
-  }, []);
+  }, [prefillScope, selectedPrefillStorageKey]);
 
   // Load writing styles when modal opens
   useEffect(() => {
@@ -261,12 +290,16 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
         abortControllerRef.current.abort();
         abortControllerRef.current = null;
       }
-      const selectedPrefill = prefills.find(p => p.id === selectedPrefillId) || 
-                              prefills.find(p => p.is_default) ||
-                              prefills.find(p => p.name === '修改') ||
-                              prefills[0];
-      if (selectedPrefill) {
-        setEditRequirement(selectedPrefill.prompt_text);
+      if (isCyoaMode) {
+        setEditRequirement(defaultEditRequirement || '请根据玩家输入推进剧情，输出可继续互动的正文。');
+      } else {
+        const selectedPrefill = prefills.find(p => p.id === selectedPrefillId) ||
+                                prefills.find(p => p.is_default) ||
+                                prefills.find(p => p.name === '修改') ||
+                                prefills[0];
+        if (selectedPrefill) {
+          setEditRequirement(selectedPrefill.prompt_text);
+        }
       }
       // Default customize context to previous 1 chapter.
       setChapterSelection('custom');
@@ -276,7 +309,7 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
       loadLoreEntries();
       preselectTriggeredContextEntries(initialOriginalText);
     }
-  }, [isOpen, initialOriginalText, isLoadingPrefills, prefills]);
+  }, [isOpen, initialOriginalText, isLoadingPrefills, prefills, isCyoaMode, defaultEditRequirement, selectedPrefillId]);
 
   // Lock background editor scroll when mobile auto-edit is open.
   useEffect(() => {
@@ -306,13 +339,13 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
 
   // Update edit requirement when prefill selection changes (without resetting modal)
   useEffect(() => {
-    if (isOpen && !isLoadingPrefills && prefills.length > 0 && selectedPrefillId) {
+    if (!isCyoaMode && isOpen && !isLoadingPrefills && prefills.length > 0 && selectedPrefillId) {
       const selectedPrefill = prefills.find(p => p.id === selectedPrefillId);
       if (selectedPrefill) {
         setEditRequirement(selectedPrefill.prompt_text);
       }
     }
-  }, [selectedPrefillId, isOpen, isLoadingPrefills, prefills]);
+  }, [selectedPrefillId, isOpen, isLoadingPrefills, prefills, isCyoaMode]);
 
   // Load lore entries and factions for the work
   const loadLoreEntries = async () => {
@@ -444,7 +477,7 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
       selectedLoreEntries: selectedLoreIds,
       selectedFactions: selectedFactionIds,
       reasoningMode: isReasoningMode,
-      editRequirement: editRequirement.trim() || '修改',
+      editRequirement: editRequirement.trim() || (isCyoaMode ? (defaultEditRequirement || '请根据玩家输入推进剧情，输出可继续互动的正文。') : '修改'),
       styleId: selectedStyleId || undefined,
     };
 
@@ -769,7 +802,7 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
         {/* Mobile Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-dark-border flex-shrink-0">
           <h2 className="text-lg font-semibold text-dark-text">
-            {initialOriginalText ? '自动编辑' : 'AI 生成'}
+            {titleText}
           </h2>
           <button
             onClick={handleClose}
@@ -810,7 +843,7 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
               {/* Prompt Page Header */}
               <div className="flex items-center justify-between mb-2">
                 <label className="text-sm font-medium text-dark-text">
-                  {initialOriginalText ? '原始文本' : '提示词（可选）'}
+                  {originalTextLabel}
                 </label>
                 <button
                   onClick={() => setMobileView('output')}
@@ -825,14 +858,14 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
                 onChange={(e) => setOriginalText(e.target.value)}
                 className="font-mono text-sm resize-none w-full"
                 style={{ minHeight: '260px' }}
-                placeholder={initialOriginalText ? "原始文本..." : "输入提示词来引导 AI 生成（可留空）..."}
+                placeholder={originalTextPlaceholder}
               />
 
               {/* 编辑指引 */}
               <div>
                 <div className="flex items-center justify-between mb-2">
                   <label className="text-sm font-medium text-dark-text">
-                    编辑指引
+                    {guideLabel}
                   </label>
                   <Button
                     variant="ghost"
@@ -844,31 +877,33 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
                     设置
                   </Button>
                 </div>
-                <div className="flex flex-wrap gap-2 mb-2">
-                  {prefills.map(prefill => (
-                    <button
-                      key={prefill.id}
-                      onClick={() => {
-                        setEditRequirement(prefill.prompt_text);
-                        setSelectedPrefillId(prefill.id);
-                        localStorage.setItem('autoEdit_selectedPrefillId', prefill.id.toString());
-                      }}
-                      className={`px-3 py-1.5 text-sm rounded transition-colors ${
-                        selectedPrefillId === prefill.id
-                          ? 'bg-dark-primary text-white'
-                          : 'bg-dark-bg text-dark-text border border-dark-border'
-                      }`}
-                    >
-                      {prefill.name}
-                    </button>
-                  ))}
-                </div>
+                {!isCyoaMode && (
+                  <div className="flex flex-wrap gap-2 mb-2">
+                    {prefills.map(prefill => (
+                      <button
+                        key={prefill.id}
+                        onClick={() => {
+                          setEditRequirement(prefill.prompt_text);
+                          setSelectedPrefillId(prefill.id);
+                          localStorage.setItem(selectedPrefillStorageKey, prefill.id.toString());
+                        }}
+                        className={`px-3 py-1.5 text-sm rounded transition-colors ${
+                          selectedPrefillId === prefill.id
+                            ? 'bg-dark-primary text-white'
+                            : 'bg-dark-bg text-dark-text border border-dark-border'
+                        }`}
+                      >
+                        {prefill.name}
+                      </button>
+                    ))}
+                  </div>
+                )}
                 <Textarea
                   value={editRequirement}
                   onChange={(e) => setEditRequirement(e.target.value)}
                   className="font-mono text-sm resize-none w-full"
                   style={{ minHeight: '260px' }}
-                  placeholder="输入编辑要求..."
+                  placeholder={guidePlaceholder}
                   maxLength={50000}
                 />
               </div>
@@ -884,7 +919,7 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
                   >
                     <ChevronLeft size={18} />
                   </button>
-                  <label className="text-sm font-medium text-dark-text">编辑文本</label>
+                  <label className="text-sm font-medium text-dark-text">{outputLabel}</label>
                 </div>
                 {/* Version Navigation */}
                 {editedVersions.length > 0 && (
@@ -1121,7 +1156,7 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
                 <button
                   onClick={handleGenerateEdit}
                   className="p-2 rounded bg-dark-primary text-white hover:bg-dark-primary/80 transition-colors"
-                  title={initialOriginalText ? '自动编辑' : 'AI 生成'}
+                  title={generateButtonText}
                 >
                   <Wand2 size={20} />
                 </button>
@@ -1167,7 +1202,7 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-dark-border flex-shrink-0">
           <h2 className="text-xl font-semibold text-dark-text">
-            {initialOriginalText ? '自动编辑' : 'AI 生成文本'}
+            {titleText}
           </h2>
           <button
             onClick={handleClose}
@@ -1370,21 +1405,21 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
               {/* Original Text (Left) */}
               <div className="flex-1 flex flex-col min-w-0">
                 <label className="text-sm font-medium text-dark-text mb-2 flex-shrink-0">
-                  {initialOriginalText ? '原始文本' : '提示词（可选）'}
+                  {originalTextLabel}
                 </label>
                 <Textarea
                   value={originalText}
                   onChange={(e) => setOriginalText(e.target.value)}
                   className="font-mono text-sm resize-none"
                   style={{ minHeight: '150px', flex: '0 0 auto' }}
-                  placeholder={initialOriginalText ? "原始文本..." : "输入提示词来引导 AI 生成（可留空）..."}
+                  placeholder={originalTextPlaceholder}
                 />
 
                 {/* Editing Guide Section */}
                 <div className="mt-3 flex flex-col">
                   <div className="flex items-center justify-between mb-2 flex-shrink-0">
                     <label className="text-sm font-medium text-dark-text">
-                      编辑指引
+                      {guideLabel}
                     </label>
                     <Button
                       variant="ghost"
@@ -1396,31 +1431,33 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
                       设置
                     </Button>
                   </div>
-                  <div className="flex gap-2 mb-2 flex-shrink-0 flex-wrap">
-                    {prefills.map(prefill => (
-                      <button
-                        key={prefill.id}
-                        onClick={() => {
-                          setEditRequirement(prefill.prompt_text);
-                          setSelectedPrefillId(prefill.id);
-                          localStorage.setItem('autoEdit_selectedPrefillId', prefill.id.toString());
-                        }}
-                        className={`px-3 py-1 text-sm rounded transition-colors ${
-                          selectedPrefillId === prefill.id
-                            ? 'bg-dark-primary text-white'
-                            : 'bg-dark-bg text-dark-text border border-dark-border hover:border-dark-primary'
-                        }`}
-                      >
-                        {prefill.name}
-                      </button>
-                    ))}
-                  </div>
+                  {!isCyoaMode && (
+                    <div className="flex gap-2 mb-2 flex-shrink-0 flex-wrap">
+                      {prefills.map(prefill => (
+                        <button
+                          key={prefill.id}
+                          onClick={() => {
+                            setEditRequirement(prefill.prompt_text);
+                            setSelectedPrefillId(prefill.id);
+                            localStorage.setItem('autoEdit_selectedPrefillId', prefill.id.toString());
+                          }}
+                          className={`px-3 py-1 text-sm rounded transition-colors ${
+                            selectedPrefillId === prefill.id
+                              ? 'bg-dark-primary text-white'
+                              : 'bg-dark-bg text-dark-text border border-dark-border hover:border-dark-primary'
+                          }`}
+                        >
+                          {prefill.name}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                   <Textarea
                     value={editRequirement}
                     onChange={(e) => setEditRequirement(e.target.value)}
                     className="font-mono text-sm resize-none"
                     style={{ height: '225px', minHeight: '225px', maxHeight: '225px' }}
-                    placeholder="输入编辑要求..."
+                    placeholder={guidePlaceholder}
                     maxLength={50000}
                   />
                 </div>
@@ -1429,7 +1466,7 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
               {/* Edited Text (Right) */}
               <div className="flex-1 flex flex-col min-w-0">
                 <div className="flex items-center justify-between mb-2 flex-shrink-0">
-                  <label className="text-sm font-medium text-dark-text">编辑文本</label>
+                  <label className="text-sm font-medium text-dark-text">{outputLabel}</label>
                   {/* Version Navigation */}
                   {editedVersions.length > 0 && (
                     <div className="flex items-center gap-2">
@@ -1493,7 +1530,7 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
                     className="flex items-center gap-2"
                   >
                     <Wand2 size={16} />
-                    {initialOriginalText ? '自动编辑' : 'AI 生成'}
+                    {generateButtonText}
                   </Button>
                 ) : (
                   <>
@@ -1546,6 +1583,7 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
         onPrefillsUpdated={() => {
           loadPrefills();
         }}
+        scope={prefillScope}
       />
     </div>
   );

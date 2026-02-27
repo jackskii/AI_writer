@@ -86,7 +86,7 @@ class WorkSerializer(serializers.ModelSerializer):
     class Meta:
         model = Work
         fields = [
-            'id', 'title', 'synopsis', 'lore_entry_template', 'author',
+            'id', 'title', 'synopsis', 'work_type', 'lore_entry_template', 'author',
             'word_count', 'chapter_count', 
             'created_at', 'updated_at'
         ]

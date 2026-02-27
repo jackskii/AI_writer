@@ -20,14 +20,16 @@ export const CreateWorkModal: React.FC<CreateWorkModalProps> = ({
 }) => {
   const [title, setTitle] = useState('');
   const [synopsis, setSynopsis] = useState('');
+  const [workType, setWorkType] = useState<'novel' | 'interactive_novel'>('novel');
 
   const createMutation = useMutation({
-    mutationFn: (workData: { title: string; synopsis: string }) => 
+    mutationFn: (workData: { title: string; synopsis: string; work_type: 'novel' | 'interactive_novel' }) =>
       worksApi.create(workData),
     onSuccess: (response) => {
       onWorkCreated(response.data);
       setTitle('');
       setSynopsis('');
+      setWorkType('novel');
     }
   });
 
@@ -37,7 +39,8 @@ export const CreateWorkModal: React.FC<CreateWorkModalProps> = ({
     
     createMutation.mutate({
       title: title.trim(),
-      synopsis: synopsis.trim()
+      synopsis: synopsis.trim(),
+      work_type: workType
     });
   };
 
@@ -74,6 +77,17 @@ export const CreateWorkModal: React.FC<CreateWorkModalProps> = ({
               placeholder="简要描述您的作品内容、背景或创作想法..."
               rows={4}
             />
+            <div>
+              <label className="block text-sm font-medium text-dark-text mb-2">作品类型</label>
+              <select
+                value={workType}
+                onChange={(e) => setWorkType(e.target.value as 'novel' | 'interactive_novel')}
+                className="w-full px-3 py-2 border border-dark-border rounded-lg bg-dark-surface text-dark-text focus:outline-none focus:ring-2 focus:ring-dark-primary"
+              >
+                <option value="novel">普通小说</option>
+                <option value="interactive_novel">互动小说</option>
+              </select>
+            </div>
             <div className="flex justify-end gap-3 pt-4">
               <Button
                 type="button"

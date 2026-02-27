@@ -323,19 +323,23 @@ def get_user_api_key(user):
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def ai_prefills(request):
-    """Get auto-edit prefill options"""
+    """Get prefill options (auto_edit or cyoa)"""
     from apps.user_auth.models import UserEditPrefill
     from apps.user_auth.views import create_default_edit_prefills_for_user
+    
+    scope = request.GET.get('scope', 'auto_edit')
+    if scope not in ('auto_edit', 'cyoa'):
+        scope = 'auto_edit'
     
     # Get user's custom prefills, or fall back to defaults if none exist
     if request.user.is_authenticated:
         try:
-            user_prefills = UserEditPrefill.objects.filter(user=request.user)
+            user_prefills = UserEditPrefill.objects.filter(user=request.user, scope=scope)
 
-            # Lazy initialization: if user has no prefills, create defaults
+            # Lazy initialization: if user has no prefills for this scope, create defaults
             if not user_prefills.exists():
-                create_default_edit_prefills_for_user(request.user)
-                user_prefills = UserEditPrefill.objects.filter(user=request.user)
+                create_default_edit_prefills_for_user(request.user, scope=scope)
+                user_prefills = UserEditPrefill.objects.filter(user=request.user, scope=scope)
 
             if user_prefills.exists():
                 # Convert to dict format for backward compatibility
@@ -346,12 +350,12 @@ def ai_prefills(request):
         except (ProgrammingError, OperationalError):
             # Migration not applied yet; fall back to static defaults
             return Response({
-                'prefills': prompts.AUTO_EDIT_PREFILLS
+                'prefills': {'剧情推进': prompts.CYOA_DEFAULT_REQUIREMENT} if scope == 'cyoa' else prompts.AUTO_EDIT_PREFILLS
             })
     
     # Fall back to default prefills for unauthenticated users or users without custom prefills
     return Response({
-        'prefills': prompts.AUTO_EDIT_PREFILLS
+        'prefills': {'剧情推进': prompts.CYOA_DEFAULT_REQUIREMENT} if scope == 'cyoa' else prompts.AUTO_EDIT_PREFILLS
     })
 
 

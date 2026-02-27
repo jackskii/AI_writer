@@ -12,6 +12,7 @@ import { Button } from '../components/ui/Button';
 import { LoadingScreen } from '../components/ui/Loading';
 import { UserMenu } from '../components/ui/UserMenu';
 import { EditorPanel } from '../components/editor/EditorPanel';
+import { InteractiveEditorPanel } from '../components/editor/InteractiveEditorPanel';
 import { ChatPanel } from '../components/editor/ChatPanel';
 import { AutoSaveIndicator } from '../components/editor/AutoSaveIndicator';
 import { SettingsModal } from '../components/modals/SettingsModal';
@@ -56,6 +57,7 @@ export const EditorPage: React.FC = () => {
   const [mobileTab, setMobileTab] = useState<MobileTab>('editor');
   const [mobileAutoEditTriggerKey, setMobileAutoEditTriggerKey] = useState(0);
   const [mobileHeaderViewportTop, setMobileHeaderViewportTop] = useState(0);
+  const [interactiveActionMode, setInteractiveActionMode] = useState<'auto_edit' | 'cyoa'>('cyoa');
   
   const lastSaveContentRef = useRef('');
   const autoSaveTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -277,6 +279,10 @@ export const EditorPage: React.FC = () => {
   // Use fetched data directly instead of store state
   const currentWorkData = work || currentWork;
   const currentChapterData = chapter || currentChapter;
+  const isInteractiveWork = currentWorkData?.work_type === 'interactive_novel';
+  const mobileActionText = isInteractiveWork
+    ? (interactiveActionMode === 'auto_edit' ? '局部自动编辑' : '剧情推进 CYOA')
+    : '自动编辑';
 
   console.log('EditorPage render - editorContent value:', { 
     editorContentLength: editorContent.length, 
@@ -391,10 +397,10 @@ export const EditorPage: React.FC = () => {
               size="sm"
               onClick={handleMobileTopAutoEdit}
               className="h-8 px-3 bg-blue-600 text-white hover:bg-blue-500"
-              title="自动编辑"
+              title={mobileActionText}
             >
               <Wand2 size={14} className="mr-1" />
-              自动编辑
+              {mobileActionText}
             </Button>
           </div>
 
@@ -424,13 +430,24 @@ export const EditorPage: React.FC = () => {
       <div className="flex-1 hidden md:flex min-h-0">
         {/* Left Panel - Editor */}
         <div className="flex-1 flex flex-col">
-          <EditorPanel
-            content={editorContent}
-            onChange={handleContentChange}
-            work={currentWorkData}
-            chapter={currentChapterData}
-            onSave={handleManualSave}
-          />
+          {isInteractiveWork ? (
+            <InteractiveEditorPanel
+              content={editorContent}
+              onChange={handleContentChange}
+              work={currentWorkData}
+              chapter={currentChapterData}
+              onSave={handleManualSave}
+              onActionModeChange={setInteractiveActionMode}
+            />
+          ) : (
+            <EditorPanel
+              content={editorContent}
+              onChange={handleContentChange}
+              work={currentWorkData}
+              chapter={currentChapterData}
+              onSave={handleManualSave}
+            />
+          )}
         </div>
 
         {/* Right Panel - Full Height Chat */}
@@ -457,15 +474,28 @@ export const EditorPage: React.FC = () => {
         {/* Editor Tab Content */}
         {mobileTab === 'editor' && (
           <div className="flex-1 flex flex-col min-h-0">
-            <EditorPanel
-              content={editorContent}
-              onChange={handleContentChange}
-              work={currentWorkData}
-              chapter={currentChapterData}
-              onSave={handleManualSave}
-              isMobile={true}
-              autoEditTriggerKey={mobileAutoEditTriggerKey}
-            />
+            {isInteractiveWork ? (
+              <InteractiveEditorPanel
+                content={editorContent}
+                onChange={handleContentChange}
+                work={currentWorkData}
+                chapter={currentChapterData}
+                onSave={handleManualSave}
+                isMobile={true}
+                autoEditTriggerKey={mobileAutoEditTriggerKey}
+                onActionModeChange={setInteractiveActionMode}
+              />
+            ) : (
+              <EditorPanel
+                content={editorContent}
+                onChange={handleContentChange}
+                work={currentWorkData}
+                chapter={currentChapterData}
+                onSave={handleManualSave}
+                isMobile={true}
+                autoEditTriggerKey={mobileAutoEditTriggerKey}
+              />
+            )}
           </div>
         )}
 

@@ -10,10 +10,15 @@ def generate_large_id():
 
 class Work(models.Model):
     """小说作品模型"""
+    WORK_TYPES = [
+        ('novel', '普通小说'),
+        ('interactive_novel', '互动小说'),
+    ]
     
     id = models.BigIntegerField(primary_key=True, default=generate_large_id)
     title = models.CharField('作品标题', max_length=200)
     synopsis = models.TextField('作品大纲', blank=True)
+    work_type = models.CharField('作品类型', max_length=32, choices=WORK_TYPES, default='novel')
     lore_entry_template = models.TextField('条目生成模板', blank=True, null=True, help_text='自定义AI生成条目描述的模板，为空则使用默认模板')
     author = models.ForeignKey(
         User,

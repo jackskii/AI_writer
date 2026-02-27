@@ -213,7 +213,7 @@ class UserSettingsSerializer(serializers.ModelSerializer):
 class UserEditPrefillSerializer(serializers.ModelSerializer):
     class Meta:
         model = UserEditPrefill
-        fields = ('id', 'name', 'prompt_text', 'is_default', 'order', 'created_at', 'updated_at')
+        fields = ('id', 'scope', 'name', 'prompt_text', 'is_default', 'order', 'created_at', 'updated_at')
         read_only_fields = ('id', 'is_default', 'created_at', 'updated_at')
 
     def validate_name(self, value):
@@ -239,12 +239,13 @@ class UserEditPrefillSerializer(serializers.ModelSerializer):
         return value.strip()
 
     def validate(self, attrs):
-        """Check for duplicate names within the same user"""
+        """Check for duplicate names within the same user and scope"""
         user = self.context['request'].user
         name = attrs.get('name', self.instance.name if self.instance else None)
+        scope = attrs.get('scope', self.instance.scope if self.instance else 'auto_edit')
         
         if name:
-            existing = UserEditPrefill.objects.filter(user=user, name=name)
+            existing = UserEditPrefill.objects.filter(user=user, scope=scope, name=name)
             if self.instance:
                 existing = existing.exclude(id=self.instance.id)
             if existing.exists():

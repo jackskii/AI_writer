@@ -24,8 +24,9 @@ def register_view(request):
         # 为新用户创建设置
         UserSettings.objects.create(user=user)
 
-        # 为新用户创建默认编辑指引预设
-        create_default_edit_prefills_for_user(user)
+        # 为新用户创建默认编辑指引预设（auto_edit 和 cyoa）
+        create_default_edit_prefills_for_user(user, scope='auto_edit')
+        create_default_edit_prefills_for_user(user, scope='cyoa')
 
         # 为新用户创建模板作品
         create_template_work_for_user(user)
@@ -148,52 +149,79 @@ def update_user_settings_view(request):
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
-def create_default_edit_prefills_for_user(user):
-    """为新用户创建默认编辑指引预设"""
+def create_default_edit_prefills_for_user(user, scope='auto_edit'):
+    """为用户创建默认编辑指引预设（按scope）"""
     from apps.ai_services import prompts
     
-    default_prefills = [
-        {
-            'name': '增加细节',
-            'prompt_text': prompts.AUTO_EDIT_PREFILLS['增加细节'],
-            'is_default': True,
-            'order': 0
-        },
-        {
-            'name': '润色',
-            'prompt_text': prompts.AUTO_EDIT_PREFILLS['润色'],
-            'is_default': False,
-            'order': 1
-        },
-        {
-            'name': '修改',
-            'prompt_text': prompts.AUTO_EDIT_PREFILLS['修改'],
-            'is_default': False,
-            'order': 2
-        },
-        {
-            'name': '续写',
-            'prompt_text': prompts.AUTO_EDIT_PREFILLS['续写'],
-            'is_default': False,
-            'order': 3
-        },
-    ]
+    if scope == 'cyoa':
+        default_prefills = [
+            {
+                'scope': 'cyoa',
+                'name': '剧情推进',
+                'prompt_text': prompts.CYOA_DEFAULT_REQUIREMENT,
+                'is_default': True,
+                'order': 0,
+            },
+        ]
+    else:
+        default_prefills = [
+            {
+                'scope': 'auto_edit',
+                'name': '增加细节',
+                'prompt_text': prompts.AUTO_EDIT_PREFILLS['增加细节'],
+                'is_default': True,
+                'order': 0
+            },
+            {
+                'scope': 'auto_edit',
+                'name': '润色',
+                'prompt_text': prompts.AUTO_EDIT_PREFILLS['润色'],
+                'is_default': False,
+                'order': 1
+            },
+            {
+                'scope': 'auto_edit',
+                'name': '修改',
+                'prompt_text': prompts.AUTO_EDIT_PREFILLS['修改'],
+                'is_default': False,
+                'order': 2
+            },
+            {
+                'scope': 'auto_edit',
+                'name': '续写',
+                'prompt_text': prompts.AUTO_EDIT_PREFILLS['续写'],
+                'is_default': False,
+                'order': 3
+            },
+        ]
     
     for prefill_data in default_prefills:
-        UserEditPrefill.objects.create(user=user, **prefill_data)
+        UserEditPrefill.objects.get_or_create(
+            user=user,
+            scope=prefill_data['scope'],
+            name=prefill_data['name'],
+            defaults={
+                'prompt_text': prefill_data['prompt_text'],
+                'is_default': prefill_data['is_default'],
+                'order': prefill_data['order'],
+            },
+        )
 
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def list_edit_prefills_view(request):
-    """获取用户的所有编辑指引预设"""
+    """获取用户的编辑指引预设（按scope）"""
     try:
-        prefills = UserEditPrefill.objects.filter(user=request.user)
+        scope = request.GET.get('scope', 'auto_edit')
+        if scope not in ('auto_edit', 'cyoa'):
+            scope = 'auto_edit'
+        prefills = UserEditPrefill.objects.filter(user=request.user, scope=scope)
     
-        # Lazy initialization: if user has no prefills, create defaults
+        # Lazy initialization: if user has no prefills for this scope, create defaults
         if not prefills.exists():
-            create_default_edit_prefills_for_user(request.user)
-            prefills = UserEditPrefill.objects.filter(user=request.user)
+            create_default_edit_prefills_for_user(request.user, scope=scope)
+            prefills = UserEditPrefill.objects.filter(user=request.user, scope=scope)
     
         serializer = UserEditPrefillSerializer(prefills, many=True)
         return Response(serializer.data)
@@ -208,8 +236,12 @@ def list_edit_prefills_view(request):
 @permission_classes([IsAuthenticated])
 def create_edit_prefill_view(request):
     """创建新的编辑指引预设"""
-    # Check max limit (10 including the default one)
-    existing_count = UserEditPrefill.objects.filter(user=request.user).count()
+    scope = request.data.get('scope', 'auto_edit')
+    if scope not in ('auto_edit', 'cyoa'):
+        scope = 'auto_edit'
+    
+    # Check max limit (10 including the default one) per scope
+    existing_count = UserEditPrefill.objects.filter(user=request.user, scope=scope).count()
     if existing_count >= 10:
         return Response(
             {'error': '最多只能创建10个编辑指引预设'},
@@ -218,11 +250,11 @@ def create_edit_prefill_view(request):
     
     serializer = UserEditPrefillSerializer(data=request.data, context={'request': request})
     if serializer.is_valid():
-        # Set order to be after all existing prefills
-        max_order = UserEditPrefill.objects.filter(user=request.user).aggregate(
+        # Set order to be after all existing prefills in this scope
+        max_order = UserEditPrefill.objects.filter(user=request.user, scope=scope).aggregate(
             max_order=Max('order')
         )['max_order'] or -1
-        prefill = serializer.save(user=request.user, order=max_order + 1)
+        prefill = serializer.save(user=request.user, scope=scope, order=max_order + 1)
         return Response(UserEditPrefillSerializer(prefill).data, status=status.HTTP_201_CREATED)
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
@@ -258,10 +290,10 @@ def delete_edit_prefill_view(request, prefill_id):
             status=status.HTTP_404_NOT_FOUND
         )
     
-    # Cannot delete the default "增加细节" prefill
+    # Cannot delete default prefill
     if prefill.is_default:
         return Response(
-            {'error': '不能删除默认的"增加细节"预设'},
+            {'error': '不能删除默认预设'},
             status=status.HTTP_400_BAD_REQUEST
         )
     

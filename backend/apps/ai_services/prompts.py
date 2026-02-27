@@ -100,6 +100,17 @@ AUTO_EDIT_PREFILLS = {
 # Default editing requirement
 AUTO_EDIT_DEFAULT_REQUIREMENT = AUTO_EDIT_PREFILLS['修改']
 
+# Default CYOA requirement for interactive fiction mode.
+# Frontend can override this text at runtime.
+CYOA_DEFAULT_REQUIREMENT = """你是互动小说的叙事引擎。根据玩家输入推进剧情，输出可继续互动的正文。
+
+要求：
+1. 保持人物行为、世界设定与上下文一致。
+2. 因果清晰，动作逻辑自洽，不跳步。
+3. 文字有画面感，但避免空泛抒情和模板化总结。
+4. 结尾留有可继续选择或行动的空间。
+5. 只输出故事正文，不要解释规则或分析过程。"""
+
 
 # =============================================================================
 # AI Request Templates

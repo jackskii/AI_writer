@@ -815,8 +815,15 @@ class AIService:
                             "content": msg['content']
                         })
 
-            # Add current user message
-            messages.append({"role": "user", "content": user_message})
+            # Frontend may persist the latest user message before invoking stream chat.
+            # If so, chat_history already ends with this exact user turn; avoid duplicating it.
+            history_already_has_current_user_message = (
+                bool(chat_history)
+                and chat_history[-1].get('role') == 'user'
+                and chat_history[-1].get('content') == user_message
+            )
+            if not history_already_has_current_user_message:
+                messages.append({"role": "user", "content": user_message})
 
             logger.debug(f"Sending {len(messages)} messages to {self.provider.provider_name} API for streaming with model {model or 'provider default'}")
 

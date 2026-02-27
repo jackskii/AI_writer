@@ -3,11 +3,16 @@
 from django.db import migrations
 
 
+def _table_columns(schema_editor, table_name):
+    with schema_editor.connection.cursor() as cursor:
+        return {col.name for col in schema_editor.connection.introspection.get_table_description(cursor, table_name)}
+
+
 def populate_acts_from_chapters(apps, schema_editor):
     """Create Act objects based on existing chapter data"""
     Work = apps.get_model('works', 'Work')
-    Chapter = apps.get_model('works', 'Chapter')
     Act = apps.get_model('works', 'Act')
+    has_act_name = 'act_name' in _table_columns(schema_editor, 'works_chapter')
     
     for work in Work.objects.all():
         # Get all unique act numbers for this work
@@ -15,9 +20,17 @@ def populate_acts_from_chapters(apps, schema_editor):
         
         for act_number in act_numbers:
             if act_number and act_number > 0:  # Skip invalid act numbers
-                # Get act name from the first chapter with this act number
-                chapter_with_name = work.chapters.filter(act=act_number, act_name__isnull=False).exclude(act_name='').first()
-                act_name = chapter_with_name.act_name if chapter_with_name else f'第{act_number}卷'
+                act_name = f'第{act_number}卷'
+                if has_act_name:
+                    # Get act name from the first chapter with this act number
+                    chapter_with_name = (
+                        work.chapters
+                        .filter(act=act_number, act_name__isnull=False)
+                        .exclude(act_name='')
+                        .first()
+                    )
+                    if chapter_with_name:
+                        act_name = chapter_with_name.act_name
                 
                 # Create the Act object
                 Act.objects.get_or_create(

@@ -142,11 +142,14 @@ Starting at $0.50/M output tokens
 优点:
 便宜
 有思考
+逻辑比deepseek稍微好点
+够色
 
 缺点:
-- 
+文风太粗暴了，改不过来
 
-推荐指数:
+
+推荐指数:2/3 这文风能改掉就完美了
 
 Snippet:
 - snippets-template.txt -> [groke 4 fast]
@@ -155,15 +158,18 @@ Snippet:
 ==================================================
 MODEL: gemini 3 flash
 ==================================================
-价格:
+价格:$0.50/M input tokens
+$3/M output tokens
+
 
 优点:
-- 
+节奏可以
+还算色
 
 缺点:
-- 
+瞎扯
 
-推荐指数:
+推荐指数:2/3 感觉不如grok
 
 Snippet:
 - snippets-template.txt -> [gemini 3 flash]
@@ -175,12 +181,15 @@ MODEL: deepseek chat
 价格:
 
 优点:
-- 
+便宜，稳定
+节奏好
 
 缺点:
-- 
+太无趣了
+用太多了看腻了
+色色写的太朴素了
 
-推荐指数:
+推荐指数:2/3 目前在用的
 
 Snippet:
 - snippets-template.txt -> [deepseek chat]

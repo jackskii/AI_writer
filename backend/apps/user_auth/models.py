@@ -160,7 +160,13 @@ class UserSettings(models.Model):
 
 class UserEditPrefill(models.Model):
     """用户自定义的编辑指引预设"""
+    SCOPE_CHOICES = [
+        ('auto_edit', '自动编辑'),
+        ('cyoa', 'CYOA'),
+    ]
+
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='edit_prefills')
+    scope = models.CharField('预设类型', max_length=20, choices=SCOPE_CHOICES, default='auto_edit')
     name = models.CharField('名称', max_length=50)  # Max 10 words, ~50 chars
     prompt_text = models.TextField('提示文本', max_length=1000)  # Max 200 words, ~1000 chars
     is_default = models.BooleanField('是否默认（增加细节）', default=False)  # Marks the special "增加细节" that can't be deleted
@@ -172,7 +178,7 @@ class UserEditPrefill(models.Model):
         verbose_name = '编辑指引预设'
         verbose_name_plural = '编辑指引预设'
         ordering = ['order', 'created_at']
-        unique_together = [['user', 'name']]  # Each user can't have duplicate names
+        unique_together = [['user', 'scope', 'name']]  # Each user can't have duplicate names in same scope
 
     def __str__(self):
         return f"{self.user.username}'s {self.name}"

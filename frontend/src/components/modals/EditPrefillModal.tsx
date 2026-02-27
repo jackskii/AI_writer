@@ -10,12 +10,14 @@ interface EditPrefillModalProps {
   isOpen: boolean;
   onClose: () => void;
   onPrefillsUpdated: () => void;
+  scope: 'auto_edit' | 'cyoa';
 }
 
 export const EditPrefillModal: React.FC<EditPrefillModalProps> = ({
   isOpen,
   onClose,
-  onPrefillsUpdated
+  onPrefillsUpdated,
+  scope
 }) => {
   const [prefills, setPrefills] = useState<EditPrefill[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -28,18 +30,18 @@ export const EditPrefillModal: React.FC<EditPrefillModalProps> = ({
   const [newName, setNewName] = useState('');
   const [newPromptText, setNewPromptText] = useState('');
 
-  // Load prefills when modal opens
+  // Load prefills when modal opens or scope changes
   useEffect(() => {
     if (isOpen) {
       loadPrefills();
     }
-  }, [isOpen]);
+  }, [isOpen, scope]);
 
   const loadPrefills = async () => {
     setIsLoading(true);
     setError(null);
     try {
-      const response = await editPrefillsApi.list();
+      const response = await editPrefillsApi.list(scope);
       setPrefills(response.data);
     } catch (err: any) {
       setError(err.response?.data?.error || '加载失败');
@@ -153,7 +155,8 @@ export const EditPrefillModal: React.FC<EditPrefillModalProps> = ({
     try {
       await editPrefillsApi.create({
         name: newName.trim(),
-        prompt_text: newPromptText.trim()
+        prompt_text: newPromptText.trim(),
+        scope: scope
       });
       await loadPrefills();
       onPrefillsUpdated();
@@ -169,7 +172,7 @@ export const EditPrefillModal: React.FC<EditPrefillModalProps> = ({
 
   const handleDelete = async (id: number, isDefault: boolean) => {
     if (isDefault) {
-      setError('不能删除默认的"增加细节"预设');
+      setError('不能删除默认预设');
       return;
     }
 

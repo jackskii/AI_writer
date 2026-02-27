@@ -4,53 +4,79 @@ from django.db import migrations, models
 import django.db.models.deletion
 
 
+def _table_columns(schema_editor, table_name):
+    with schema_editor.connection.cursor() as cursor:
+        return {col.name for col in schema_editor.connection.introspection.get_table_description(cursor, table_name)}
+
+
 def convert_chapter_acts_to_foreign_keys(apps, schema_editor):
     """Convert chapter.act from integer to foreign key reference"""
     Chapter = apps.get_model('works', 'Chapter')
     Act = apps.get_model('works', 'Act')
+    columns = _table_columns(schema_editor, 'works_chapter')
     
     # Add a temporary field to store the Act foreign key
-    schema_editor.execute(
-        'ALTER TABLE works_chapter ADD COLUMN act_fk_id BIGINT REFERENCES works_act(id)'
-    )
+    if 'act_fk_id' not in columns and 'act_id' not in columns:
+        schema_editor.execute(
+            'ALTER TABLE works_chapter ADD COLUMN act_fk_id BIGINT REFERENCES works_act(id)'
+        )
     
     # Update each chapter to point to the correct Act
-    for chapter in Chapter.objects.all():
-        act_obj = Act.objects.filter(work=chapter.work, order=chapter.act).first()
-        if act_obj:
-            schema_editor.execute(
-                'UPDATE works_chapter SET act_fk_id = %s WHERE id = %s',
-                [act_obj.id, chapter.id]
-            )
+    target_fk_column = 'act_fk_id' if 'act_fk_id' in _table_columns(schema_editor, 'works_chapter') else 'act_id'
+    if target_fk_column in _table_columns(schema_editor, 'works_chapter'):
+        for chapter in Chapter.objects.all():
+            source_act = getattr(chapter, 'act', None)
+            act_obj = Act.objects.filter(work=chapter.work, order=source_act).first()
+            if not act_obj and source_act:
+                act_obj = Act.objects.filter(id=source_act).first()
+            if act_obj:
+                schema_editor.execute(
+                    f'UPDATE works_chapter SET {target_fk_column} = %s WHERE id = %s',
+                    [act_obj.id, chapter.id]
+                )
     
     # Remove the old act field and rename the new one
-    schema_editor.execute('ALTER TABLE works_chapter DROP COLUMN act')
-    schema_editor.execute('ALTER TABLE works_chapter DROP COLUMN act_name')
-    schema_editor.execute('ALTER TABLE works_chapter RENAME COLUMN act_fk_id TO act_id')
+    columns = _table_columns(schema_editor, 'works_chapter')
+    if 'act' in columns:
+        schema_editor.execute('ALTER TABLE works_chapter DROP COLUMN act')
+    if 'act_name' in columns:
+        schema_editor.execute('ALTER TABLE works_chapter DROP COLUMN act_name')
+    columns = _table_columns(schema_editor, 'works_chapter')
+    if 'act_fk_id' in columns and 'act_id' not in columns:
+        schema_editor.execute('ALTER TABLE works_chapter RENAME COLUMN act_fk_id TO act_id')
 
 
 def reverse_convert_chapter_acts(apps, schema_editor):
     """Reverse the conversion (restore integer act field)"""
     Chapter = apps.get_model('works', 'Chapter')
     Act = apps.get_model('works', 'Act')
+    columns = _table_columns(schema_editor, 'works_chapter')
     
     # Add back the integer act field
-    schema_editor.execute('ALTER TABLE works_chapter ADD COLUMN act_int INTEGER')
-    schema_editor.execute('ALTER TABLE works_chapter ADD COLUMN act_name VARCHAR(100)')
+    if 'act_int' not in columns and 'act' not in columns:
+        schema_editor.execute('ALTER TABLE works_chapter ADD COLUMN act_int INTEGER')
+    columns = _table_columns(schema_editor, 'works_chapter')
+    if 'act_name' not in columns:
+        schema_editor.execute('ALTER TABLE works_chapter ADD COLUMN act_name VARCHAR(100)')
     
     # Convert foreign keys back to integers
-    for chapter in Chapter.objects.all():
-        if hasattr(chapter, 'act_id') and chapter.act_id:
-            act_obj = Act.objects.filter(id=chapter.act_id).first()
-            if act_obj:
-                schema_editor.execute(
-                    'UPDATE works_chapter SET act_int = %s, act_name = %s WHERE id = %s',
-                    [act_obj.order, act_obj.name, chapter.id]
-                )
+    if 'act_id' in _table_columns(schema_editor, 'works_chapter'):
+        for chapter in Chapter.objects.all():
+            if hasattr(chapter, 'act_id') and chapter.act_id:
+                act_obj = Act.objects.filter(id=chapter.act_id).first()
+                if act_obj:
+                    schema_editor.execute(
+                        'UPDATE works_chapter SET act_int = %s, act_name = %s WHERE id = %s',
+                        [act_obj.order, act_obj.name, chapter.id]
+                    )
     
     # Drop foreign key field and rename integer field
-    schema_editor.execute('ALTER TABLE works_chapter DROP COLUMN act_id')
-    schema_editor.execute('ALTER TABLE works_chapter RENAME COLUMN act_int TO act')
+    columns = _table_columns(schema_editor, 'works_chapter')
+    if 'act_id' in columns:
+        schema_editor.execute('ALTER TABLE works_chapter DROP COLUMN act_id')
+    columns = _table_columns(schema_editor, 'works_chapter')
+    if 'act_int' in columns and 'act' not in columns:
+        schema_editor.execute('ALTER TABLE works_chapter RENAME COLUMN act_int TO act')
 
 
 class Migration(migrations.Migration):
