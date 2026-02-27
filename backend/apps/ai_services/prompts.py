@@ -209,10 +209,12 @@ def format_auto_edit_request(
     if selected_text and selected_text.strip():
         return f"""{context_info}
 
-用户输入内容：
-{selected_text}
+指引：{requirement_text}
 
-指引：{requirement_text}"""
+---
+
+用户输入内容：
+{selected_text}"""
     else:
         return f"""{context_info}
 
