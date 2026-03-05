@@ -27,6 +27,8 @@ interface AutoEditModalProps {
   mode?: 'auto_edit' | 'cyoa';
   modeLabel?: string;
   defaultEditRequirement?: string;
+  /** When in CYOA mode, predetermined scene/character context to prepend to the guide */
+  cyoaSceneContext?: string;
 }
 
 export interface AutoEditContext {
@@ -56,7 +58,8 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
   isMobile: isMobileProp,
   mode = 'auto_edit',
   modeLabel,
-  defaultEditRequirement
+  defaultEditRequirement,
+  cyoaSceneContext
 }) => {
   const FACTION_FILTER_GROUP = '__factions__' as const;
 
@@ -470,13 +473,18 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
     setEditedVersions(prev => [...prev, { text: '', timestamp: new Date() }]);
     setCurrentVersionIndex(newIndex);
 
+    const baseRequirement = editRequirement.trim() || (defaultEditRequirement || '修改');
+    const effectiveRequirement =
+      isCyoaMode && cyoaSceneContext?.trim()
+        ? `${cyoaSceneContext.trim()}\n\n---\n\n${baseRequirement}`
+        : baseRequirement;
     const context: AutoEditContext = {
       chapterSelection,
       customChapterCount: chapterSelection === 'custom' ? customChapterCount : undefined,
       selectedLoreEntries: selectedLoreIds,
       selectedFactions: selectedFactionIds,
       reasoningMode: isReasoningMode,
-      editRequirement: editRequirement.trim() || (defaultEditRequirement || '修改'),
+      editRequirement: effectiveRequirement,
       styleId: selectedStyleId || undefined,
     };
 
@@ -508,13 +516,16 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
       (chunk: string) => {
         resetInactivityTimer();
         accumulatedTextRef.current += chunk;
-        setCurrentEditedText(prev => prev + chunk);
+        // Only show the answer during stream so the conversation loop is coherent (no reasoning output)
+        setCurrentEditedText(answerOnlyForDisplay(accumulatedTextRef.current));
       },
       () => {
         // On end - clean up text, version already exists
         clearStreamTimers();
         const cleanedText = cleanAutoEditOutput(accumulatedTextRef.current);
-        setCurrentEditedText(cleanedText);
+        // Display only the answer (same as during stream) so conversation stays coherent
+        const forDisplay = stripThoughtProcess(cleanedText) || answerOnlyForDisplay(accumulatedTextRef.current);
+        setCurrentEditedText(forDisplay);
         setEditedVersions(prev => {
           const updated = [...prev];
           if (updated.length > 0) {
@@ -524,6 +535,12 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
         });
         setIsGenerating(false);
         abortControllerRef.current = null;
+        // Match CyoaChatPanel behavior: auto-save on completion so this flow has same UX
+        const toAccept = stripThoughtProcess(cleanedText);
+        if (toAccept.trim()) {
+          onAccept(toAccept);
+          onClose();
+        }
       },
       (error: string) => {
         // On error - clean up version with whatever text we have
@@ -573,6 +590,14 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
     cleanedText = cleanedText.replace(/【回答】\s*/g, '');
 
     return cleanedText.trim();
+  };
+
+  // For display during stream: show only the answer when reasoning+answer format is used, so the conversation loop is coherent
+  const answerOnlyForDisplay = (text: string): string => {
+    if (!text) return '';
+    if (!text.includes('【回答】')) return text; // no reasoning format → show full response
+    const after = text.split('【回答】').pop() ?? '';
+    return after.replace(/^\s+/g, '').trimStart();
   };
 
   // Handle accept

@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Work, Act, Chapter, Faction, LoreEntry, WritingStyle
+from .models import Work, Act, Chapter, Faction, LoreEntry, WritingStyle, GameEvent, GameCharacter, CyoaCharacterVersion
 
 
 class ActSerializer(serializers.ModelSerializer):
@@ -39,7 +39,7 @@ class ChapterSerializer(serializers.ModelSerializer):
         model = Chapter
         fields = [
             'id', 'work', 'title', 'content', 'order', 'act', 'act_name', 'act_order', 'chapter_number',
-            'summary', 'word_count', 'created_at', 
+            'summary', 'cyoa_session', 'word_count', 'created_at',
             'updated_at', 'last_autosave'
         ]
         read_only_fields = ['work', 'order', 'chapter_number', 'act_name', 'act_order', 'created_at', 'updated_at', 'last_autosave']
@@ -53,7 +53,7 @@ class ChapterOverviewSerializer(serializers.ModelSerializer):
         model = Chapter
         fields = [
             'id', 'work', 'title', 'order', 'act', 'act_name', 'act_order', 'chapter_number',
-            'created_at', 'updated_at', 'last_autosave'
+            'cyoa_session', 'created_at', 'updated_at', 'last_autosave'
         ]
         read_only_fields = [
             'work', 'order', 'chapter_number', 'act_name', 'act_order',
@@ -70,12 +70,40 @@ class ChapterListSerializer(serializers.ModelSerializer):
         model = Chapter
         fields = [
             'id', 'work', 'title', 'order', 'act', 'act_name', 'act_order', 'chapter_number',
-            'word_count', 'created_at', 'updated_at', 'last_autosave'
+            'word_count', 'cyoa_session', 'created_at', 'updated_at', 'last_autosave'
         ]
         read_only_fields = [
             'work', 'order', 'chapter_number', 'act_name', 'act_order',
             'word_count', 'created_at', 'updated_at', 'last_autosave'
         ]
+
+
+class GameEventSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = GameEvent
+        fields = ['id', 'work', 'name', 'setting_description', 'goal', 'created_at', 'updated_at']
+        read_only_fields = ['work', 'created_at', 'updated_at']
+
+
+class GameCharacterSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = GameCharacter
+        fields = [
+            'id', 'work', 'name', 'age', 'appearance', 'backstory', 'characteristics',
+            'state_definitions', 'order', 'created_at', 'updated_at'
+        ]
+        read_only_fields = ['work', 'created_at', 'updated_at']
+
+
+class CyoaCharacterVersionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CyoaCharacterVersion
+        fields = [
+            'id', 'character', 'display_name', 'source_chapter',
+            'characteristics', 'state_definitions', 'order',
+            'created_at', 'updated_at'
+        ]
+        read_only_fields = ['character', 'created_at', 'updated_at']
 
 
 class WorkSerializer(serializers.ModelSerializer):

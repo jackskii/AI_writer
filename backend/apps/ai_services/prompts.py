@@ -120,6 +120,67 @@ CYOA_DEFAULT_REQUIREMENT = """你是互动叙述者。以第二人称（"你"）
 
 
 # =============================================================================
+# CYOA: Introduction generation (second person) and chat system prompt
+# =============================================================================
+# Editable in this file. Used when event + character are selected: generate an
+# introduction, then run the conversation with the chat system prompt below.
+
+CYOA_INTRODUCTION_SYSTEM = """你是一名互动小说开场写手。请根据给出的场景、目标和角色与状态，用第二人称（"你"）写一段简短的开场白，把读者带入情境。
+
+要求：
+- 严格使用第二人称（"你"），不要出现"我"或角色名代替玩家。
+- 长度约 2–5 句，自然过渡到玩家可以开始行动或对话的瞬间。
+- 不要列出选项或问"你要怎么做"，只做叙述性开场。
+- 语气与场景、角色状态一致。"""
+
+
+def format_cyoa_introduction_request(setting_description: str, goal: str, characters_text: str) -> str:
+    """Build the user message for CYOA introduction generation."""
+    parts = []
+    if setting_description and setting_description.strip():
+        parts.append("【场景】\n" + setting_description.strip())
+    if goal and goal.strip():
+        parts.append("【本场目标/主题】\n" + goal.strip())
+    if characters_text and characters_text.strip():
+        parts.append("【出场角色与当前状态】\n" + characters_text.strip())
+    if not parts:
+        return "请写一段第二人称开场白，描述玩家刚进入一个场景。"
+    return "\n\n".join(parts)
+
+
+# System prompt for the CYOA chatbot: event + character + introduction are injected below.
+CYOA_CHAT_SYSTEM_BASE = """你是互动叙述者。以第二人称（"你"）视角与玩家推进故事，营造沉浸式氛围。
+
+规则：
+- 仅以叙述者身份输出，不要代玩家做决定或替玩家说话。
+- 不要提供选项列表或问"你要怎么做"；根据玩家输入自然推进。
+- 每次回复保持适量篇幅，可分段；以开放方式结束，等待玩家输入。
+- 保持与场景、角色状态和已发生剧情一致。"""
+
+
+def format_cyoa_chat_system(
+    event_name: str,
+    setting_description: str,
+    goal: str,
+    characters_text: str,
+    introduction: str,
+) -> str:
+    """Build the full system message for CYOA chat: base prompt + event + characters + intro."""
+    parts = [CYOA_CHAT_SYSTEM_BASE.strip(), ""]
+    parts.append("【本场事件】 " + (event_name or "（无名称）"))
+    if setting_description and setting_description.strip():
+        parts.append("【场景】\n" + setting_description.strip())
+    if goal and goal.strip():
+        parts.append("【目标/主题】\n" + goal.strip())
+    if characters_text and characters_text.strip():
+        parts.append("【角色与当前状态】\n" + characters_text.strip())
+    if introduction and introduction.strip():
+        parts.append("【开场白（已发生）】\n" + introduction.strip())
+    parts.append("\n请基于以上设定与开场，接着玩家的输入继续叙述。")
+    return "\n\n".join(parts)
+
+
+# =============================================================================
 # AI Request Templates
 # =============================================================================
 

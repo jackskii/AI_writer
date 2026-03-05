@@ -3,11 +3,11 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
 from django.shortcuts import get_object_or_404
-from django.http import StreamingHttpResponse, JsonResponse
+from django.http import StreamingHttpResponse, JsonResponse, HttpResponse
 from django.db import models
 from django.db.utils import ProgrammingError, OperationalError
 from asgiref.sync import sync_to_async
-from apps.works.models import Work, Act, Chapter, LoreEntry, Faction
+from apps.works.models import Work, Act, Chapter, LoreEntry, Faction, GameEvent, GameCharacter, CyoaCharacterVersion
 from .services import AIService, run_async_ai_task
 from .models import Suggestion
 from . import prompts
@@ -85,6 +85,62 @@ def get_work_and_chapter(work_id, chapter_id=None):
         chapter = Chapter.objects.get(id=chapter_id, work=work)
         return work, chapter
     return work, None
+
+
+def _character_description(char):
+    """Build description from GameCharacter: prefer characteristics blob, else appearance + backstory."""
+    if char.characteristics and char.characteristics.strip():
+        return char.characteristics.strip()
+    parts = []
+    if char.appearance and char.appearance.strip():
+        parts.append(char.appearance.strip())
+    if char.backstory and char.backstory.strip():
+        parts.append(char.backstory.strip())
+    return " ".join(parts) if parts else ""
+
+
+@sync_to_async
+def get_cyoa_event_and_characters(work_id, event_id, character_states_list):
+    """Load GameEvent and GameCharacters for CYOA; return (event, characters_list, characters_text).
+    Each row may have character_id and optional character_version_id. When version_id is set,
+    use that version's display_name and characteristics; else use the main character.
+    """
+    work = Work.objects.get(id=work_id)
+    event = GameEvent.objects.filter(work=work, id=event_id).first()
+    if not event:
+        return None, [], ""
+    char_ids = [row.get("character_id") for row in (character_states_list or []) if row.get("character_id")]
+    characters = list(GameCharacter.objects.filter(work=work, id__in=char_ids)) if char_ids else []
+    char_map = {c.id: c for c in characters}
+    version_ids = [row.get("character_version_id") for row in (character_states_list or []) if row.get("character_version_id")]
+    versions = list(CyoaCharacterVersion.objects.filter(id__in=version_ids)) if version_ids else []
+    version_map = {v.id: v for v in versions}
+    lines = []
+    for row in character_states_list or []:
+        cid = row.get("character_id")
+        version_id = row.get("character_version_id")
+        states = row.get("states") or {}
+        char = char_map.get(cid) if cid else None
+        if not char:
+            continue
+        version = version_map.get(version_id) if version_id else None
+        if version and version.character_id == cid:
+            name = version.display_name
+            desc = (version.characteristics or "").strip()
+        else:
+            name = char.name
+            desc = _character_description(char)
+        parts = [name]
+        if not version and char.age:
+            parts.append(f"年龄：{char.age}")
+        if desc:
+            parts.append(desc)
+        for k, v in (states or {}).items():
+            if k and v:
+                parts.append(f"{k}：{v}")
+        lines.append(" - " + "；".join(parts))
+    characters_text = "\n".join(lines) if lines else ""
+    return event, characters, characters_text
 
 
 @sync_to_async
@@ -1199,9 +1255,319 @@ async def ai_auto_describe_entry(request):
     return response
 
 
+@csrf_exempt
+async def ai_auto_describe_character_chapters(request):
+    """获取包含角色名称的章节列表（与 lore 逻辑一致，用于 CYOA 角色 AI 描述）"""
+    if request.method != 'POST':
+        return JsonResponse({'error': '仅支持POST请求'}, status=405)
+    try:
+        body = json.loads(request.body.decode('utf-8'))
+    except Exception:
+        return JsonResponse({'error': '无效的请求数据'}, status=400)
+    user = None
+    token = request.GET.get('token') or body.get('token')
+    if token:
+        try:
+            user = await get_token_user(token)
+        except Exception:
+            return JsonResponse({'error': '认证令牌无效'}, status=401)
+    elif hasattr(request, 'user') and request.user.is_authenticated:
+        user = request.user
+    else:
+        return JsonResponse({'error': '需要登录'}, status=401)
+    character_name = body.get('character_name')
+    work_id = body.get('work_id')
+    if not all([character_name, work_id]):
+        return JsonResponse({'error': '缺少必要参数'}, status=400)
+    try:
+        work = await get_work_for_user(work_id, user)
+    except Exception:
+        return JsonResponse({'error': '作品不存在'}, status=404)
+    chapters = await get_chapters_with_entry_name(work, character_name)
+    return JsonResponse({'chapters': chapters})
+
+
+@csrf_exempt
+async def ai_auto_describe_character(request):
+    """AI 自动生成/更新角色设定 - 与 lore 条目逻辑一致，SSE 流式响应"""
+    if request.method != 'POST':
+        return HttpResponse(
+            'data: {"type": "error", "message": "仅支持POST请求"}\n\n',
+            content_type='text/event-stream'
+        )
+    try:
+        body = json.loads(request.body.decode('utf-8'))
+    except Exception:
+        return HttpResponse(
+            'data: {"type": "error", "message": "无效的请求数据"}\n\n',
+            content_type='text/event-stream'
+        )
+    user = None
+    token = request.GET.get('token') or body.get('token')
+    if token:
+        try:
+            user = await get_token_user(token)
+        except Exception:
+            return HttpResponse(
+                'data: {"type": "error", "message": "认证令牌无效"}\n\n',
+                content_type='text/event-stream',
+                status=401
+            )
+    elif hasattr(request, 'user') and request.user.is_authenticated:
+        user = request.user
+    else:
+        return HttpResponse(
+            'data: {"type": "error", "message": "需要登录"}\n\n',
+            content_type='text/event-stream',
+            status=401
+        )
+    character_name = body.get('character_name')
+    work_id = body.get('work_id')
+    chapter_ids = body.get('chapter_ids')
+    additional_context = body.get('additional_context', '')
+    is_update = body.get('is_update', False)
+    original_characteristics = body.get('original_characteristics', '')
+    if not all([character_name, work_id]):
+        return HttpResponse(
+            'data: {"type": "error", "message": "缺少必要参数"}\n\n',
+            content_type='text/event-stream'
+        )
+    try:
+        work = await get_work_for_user(work_id, user)
+    except Exception:
+        return HttpResponse(
+            'data: {"type": "error", "message": "作品不存在"}\n\n',
+            content_type='text/event-stream',
+            status=404
+        )
+
+    async def generate_stream():
+        try:
+            context_text, used_chapters_info = await search_chapters_with_entry(
+                work, character_name, chapter_ids
+            )
+            if not context_text:
+                not_found_msg = f'"{character_name}" 尚未在故事中出现。'
+                yield f'data: {json.dumps({"type": "end", "message": "生成完成", "description": not_found_msg, "used_chapters": []})}\n\n'
+                return
+            api_key, provider, default_model = await get_user_api_key_async(user)
+            ai_service = AIService(api_key=api_key, provider_name=provider, default_model=default_model)
+            custom_template = await get_work_lore_template(work)
+            yield f'data: {json.dumps({"type": "start", "message": "AI描述生成开始", "used_chapters": used_chapters_info})}\n\n'
+            accumulated = ''
+            try:
+                async for chunk in ai_service.auto_describe_entry_stream(
+                    character_name,
+                    context_text,
+                    additional_context=additional_context,
+                    is_update=is_update,
+                    original_description=original_characteristics,
+                    custom_template=custom_template
+                ):
+                    accumulated += chunk
+                    yield f'data: {json.dumps({"type": "chunk", "content": chunk})}\n\n'
+                yield f'data: {json.dumps({"type": "end", "message": "AI描述生成完成", "description": accumulated, "used_chapters": used_chapters_info})}\n\n'
+            except Exception as e:
+                logger.error(f"Stream auto-describe character error: {str(e)}")
+                yield f'data: {json.dumps({"type": "error", "message": f"AI描述生成失败: {str(e)}"})}\n\n'
+        except Exception as e:
+            logger.error(f"Auto-describe character error: {str(e)}")
+            yield f'data: {json.dumps({"type": "error", "message": f"AI描述生成失败: {str(e)}"})}\n\n'
+
+    response = StreamingHttpResponse(generate_stream(), content_type='text/event-stream')
+    response['Cache-Control'] = 'no-cache'
+    response['X-Accel-Buffering'] = 'no'
+    response['Access-Control-Allow-Origin'] = '*'
+    return response
+
+
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def get_default_lore_template(request):
     """获取默认的条目生成模板"""
     default_template = prompts.get_default_lore_entry_template()
     return Response({'template': default_template})
+
+
+def _cyoa_intro_from_content(content):
+    """Extract introduction from chapter.content (text before first 'User:' or 'Agent:')."""
+    if not content or not content.strip():
+        return ""
+    import re
+    m = re.search(r"\n\n(?:User|Agent)\s*:\s*", content, re.IGNORECASE)
+    if m:
+        return content[: m.start()].strip()
+    return content.strip()
+
+
+@csrf_exempt
+async def ai_cyoa_introduction(request):
+    """Generate CYOA introduction (second person) from chapter's event + character state. POST with work_id, chapter_id."""
+    if request.method != 'POST':
+        return JsonResponse({"error": "仅支持 POST"}, status=405)
+    try:
+        body = json.loads(request.body.decode('utf-8'))
+    except Exception:
+        return JsonResponse({"error": "无效的请求数据"}, status=400)
+    user = None
+    token = request.GET.get('token') or body.get('token')
+    if token:
+        try:
+            user = await get_token_user(token)
+        except Exception:
+            return JsonResponse({"error": "认证令牌无效"}, status=401)
+    elif hasattr(request, 'user') and request.user.is_authenticated:
+        user = request.user
+    else:
+        return JsonResponse({"error": "需要登录"}, status=401)
+    work_id = body.get('work_id')
+    chapter_id = body.get('chapter_id')
+    if not work_id or not chapter_id:
+        return JsonResponse({"error": "缺少 work_id 或 chapter_id"}, status=400)
+    try:
+        work, chapter = await get_work_and_chapter(work_id, chapter_id)
+    except Exception:
+        return JsonResponse({"error": "作品或章节不存在"}, status=404)
+    if work.author_id != user.id:
+        return JsonResponse({"error": "无权限"}, status=403)
+    session = getattr(chapter, 'cyoa_session', None) or {}
+    event_id = session.get('event_id')
+    character_states = session.get('character_states') or []
+    if not event_id:
+        return JsonResponse({"error": "该章节未配置 CYOA 事件"}, status=400)
+    event, characters, characters_text = await get_cyoa_event_and_characters(
+        work.id, event_id, character_states
+    )
+    if not event:
+        return JsonResponse({"error": "事件不存在"}, status=404)
+    api_key, provider, default_model = await get_user_api_key_async(user)
+    ai_service = AIService(api_key=api_key, provider_name=provider, default_model=default_model)
+    try:
+        introduction = await ai_service.generate_cyoa_introduction(
+            event.setting_description or "",
+            event.goal or "",
+            characters_text,
+        )
+        return JsonResponse({"introduction": introduction})
+    except Exception as e:
+        logger.error(f"CYOA introduction error: {str(e)}", exc_info=True)
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+@csrf_exempt
+async def ai_cyoa_chat_stream(request):
+    """CYOA chat: standard chat API. POST with work_id, chapter_id, messages (list of {role, content}). Streams response."""
+    if request.method != 'POST':
+        return HttpResponse(
+            'data: {"type": "error", "message": "仅支持 POST"}\n\n',
+            content_type='text/event-stream',
+        )
+    try:
+        body = json.loads(request.body.decode('utf-8'))
+    except Exception:
+        return HttpResponse(
+            'data: {"type": "error", "message": "无效的请求数据"}\n\n',
+            content_type='text/event-stream',
+        )
+    user = None
+    token = request.GET.get('token') or body.get('token')
+    if token:
+        try:
+            user = await get_token_user(token)
+        except Exception:
+            return HttpResponse(
+                'data: {"type": "error", "message": "认证令牌无效"}\n\n',
+                content_type='text/event-stream',
+                status=401,
+            )
+    elif hasattr(request, 'user') and request.user.is_authenticated:
+        user = request.user
+    else:
+        return HttpResponse(
+            'data: {"type": "error", "message": "需要登录"}\n\n',
+            content_type='text/event-stream',
+            status=401,
+        )
+    work_id = body.get('work_id')
+    chapter_id = body.get('chapter_id')
+    messages = body.get('messages') or []
+    if not work_id or not chapter_id:
+        return HttpResponse(
+            'data: {"type": "error", "message": "缺少 work_id 或 chapter_id"}\n\n',
+            content_type='text/event-stream',
+        )
+    try:
+        work, chapter = await get_work_and_chapter(work_id, chapter_id)
+    except Exception:
+        return HttpResponse(
+            'data: {"type": "error", "message": "作品或章节不存在"}\n\n',
+            content_type='text/event-stream',
+            status=404,
+        )
+    if work.author_id != user.id:
+        return HttpResponse(
+            'data: {"type": "error", "message": "无权限"}\n\n',
+            content_type='text/event-stream',
+            status=403,
+        )
+    session = getattr(chapter, 'cyoa_session', None) or {}
+    event_id = session.get('event_id')
+    character_states = session.get('character_states') or []
+    if not event_id:
+        return HttpResponse(
+            'data: {"type": "error", "message": "该章节未配置 CYOA"}\n\n',
+            content_type='text/event-stream',
+        )
+    event, characters, characters_text = await get_cyoa_event_and_characters(
+        work.id, event_id, character_states
+    )
+    if not event:
+        return HttpResponse(
+            'data: {"type": "error", "message": "事件不存在"}\n\n',
+            content_type='text/event-stream',
+            status=404,
+        )
+    introduction = _cyoa_intro_from_content(chapter.content or "")
+    system_content = prompts.format_cyoa_chat_system(
+        event.name or "",
+        event.setting_description or "",
+        event.goal or "",
+        characters_text,
+        introduction,
+    )
+
+    async def generate_stream():
+        try:
+            api_key, provider, default_model = await get_user_api_key_async(user)
+            ai_settings = await get_user_ai_settings(user)
+            ai_service = AIService(api_key=api_key, provider_name=provider, default_model=default_model)
+            yield f'data: {json.dumps({"type": "start", "message": "CYOA 对话开始"})}\n\n'
+            accumulated = ""
+            try:
+                async for chunk in ai_service.cyoa_chat_stream(
+                    system_content,
+                    messages,
+                    temperature=ai_settings.get('temperature'),
+                    top_p=ai_settings.get('top_p'),
+                    max_tokens=ai_settings.get('max_tokens'),
+                    frequency_penalty=ai_settings.get('frequency_penalty'),
+                    presence_penalty=ai_settings.get('presence_penalty'),
+                ):
+                    accumulated += chunk
+                    yield f'data: {json.dumps({"type": "chunk", "content": chunk})}\n\n'
+                yield f'data: {json.dumps({"type": "end", "message": "完成", "full_response": accumulated})}\n\n'
+            except Exception as e:
+                logger.error(f"CYOA chat stream error: {str(e)}")
+                yield f'data: {json.dumps({"type": "error", "message": str(e)})}\n\n'
+        except Exception as e:
+            logger.error(f"CYOA chat stream error: {str(e)}")
+            yield f'data: {json.dumps({"type": "error", "message": str(e)})}\n\n'
+
+    response = StreamingHttpResponse(
+        generate_stream(),
+        content_type='text/event-stream',
+    )
+    response['Cache-Control'] = 'no-cache'
+    response['X-Accel-Buffering'] = 'no'
+    response['Access-Control-Allow-Origin'] = '*'
+    return response

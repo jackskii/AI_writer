@@ -124,7 +124,9 @@ class Chapter(models.Model):
     order = models.PositiveIntegerField('排序', default=0)
     chapter_number = models.PositiveIntegerField('章节号', default=1)
     summary = models.TextField('章节摘要', blank=True)
-    
+    # CYOA: { "event_id": <id>, "character_states": [ { "character_id": <id>, "states": { "<state_name>": "<stage_label>" } } ] }
+    cyoa_session = models.JSONField('CYOA 会话配置', null=True, blank=True)
+
     created_at = models.DateTimeField('创建时间', auto_now_add=True)
     updated_at = models.DateTimeField('更新时间', auto_now=True)
     last_autosave = models.DateTimeField('最后自动保存时间', auto_now=True)
@@ -247,6 +249,103 @@ class LoreEntry(models.Model):
         all_triggers.extend(self.triggers or [])
         all_triggers.extend(self.extra_triggers or [])
         return list(set(all_triggers))  # 去重
+
+
+class GameEvent(models.Model):
+    """CYOA 事件 - 仅用于互动小说，与 LoreEntry 分离"""
+
+    id = models.BigIntegerField(primary_key=True, default=generate_large_id)
+    work = models.ForeignKey(
+        Work,
+        on_delete=models.CASCADE,
+        related_name='game_events',
+        verbose_name='所属作品',
+    )
+    name = models.CharField('事件名称', max_length=200)
+    setting_description = models.TextField('场景描述', blank=True, help_text='给 LLM 的场景/背景描述')
+    goal = models.TextField('事件目标', blank=True, help_text='事件要达成的目标或主题')
+
+    created_at = models.DateTimeField('创建时间', auto_now_add=True)
+    updated_at = models.DateTimeField('更新时间', auto_now=True)
+
+    class Meta:
+        verbose_name = 'CYOA 事件'
+        verbose_name_plural = 'CYOA 事件'
+        ordering = ['work', 'name']
+
+    def __str__(self):
+        return f'{self.work.title} - {self.name}'
+
+
+class GameCharacter(models.Model):
+    """CYOA 角色 - 仅用于互动小说，与 LoreEntry 分离；含状态定义（名称 + 阶段列表）"""
+
+    id = models.BigIntegerField(primary_key=True, default=generate_large_id)
+    work = models.ForeignKey(
+        Work,
+        on_delete=models.CASCADE,
+        related_name='game_characters',
+        verbose_name='所属作品',
+    )
+    name = models.CharField('角色名称', max_length=200)
+    age = models.CharField('年龄', max_length=100, blank=True)
+    appearance = models.TextField('外貌描述', blank=True)
+    backstory = models.TextField('背景/经历', blank=True)
+    # Single blob for CYOA form (like lore entry); used when non-empty for intro/chat context
+    characteristics = models.TextField('角色设定（综合描述）', blank=True)
+    # state_definitions: [ { "name": "Affection level", "stages": [ { "label": "0/5 she just knows the user" }, ... ] }, ... ]
+    state_definitions = models.JSONField(
+        '状态定义',
+        default=list,
+        help_text='列表，每项含 name 与 stages（每阶段含 label）',
+    )
+    order = models.PositiveIntegerField('排序', default=0)
+
+    created_at = models.DateTimeField('创建时间', auto_now_add=True)
+    updated_at = models.DateTimeField('更新时间', auto_now=True)
+
+    class Meta:
+        verbose_name = 'CYOA 角色'
+        verbose_name_plural = 'CYOA 角色'
+        ordering = ['work', 'order', 'name']
+
+    def __str__(self):
+        return f'{self.work.title} - {self.name}'
+
+
+class CyoaCharacterVersion(models.Model):
+    """CYOA 角色版本 - 同一角色的不同设定（如从某章节衍生），仅用于互动小说。"""
+
+    id = models.BigIntegerField(primary_key=True, default=generate_large_id)
+    character = models.ForeignKey(
+        GameCharacter,
+        on_delete=models.CASCADE,
+        related_name='versions',
+        verbose_name='所属角色',
+    )
+    display_name = models.CharField('版本名称', max_length=200, help_text='如：Tia 1、第1章后')
+    source_chapter = models.ForeignKey(
+        Chapter,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='+',
+        verbose_name='来源章节',
+    )
+    characteristics = models.TextField('角色设定', blank=True)
+    state_definitions = models.JSONField('状态定义', default=list)
+    order = models.PositiveIntegerField('排序', default=0)
+
+    created_at = models.DateTimeField('创建时间', auto_now_add=True)
+    updated_at = models.DateTimeField('更新时间', auto_now=True)
+
+    class Meta:
+        verbose_name = 'CYOA 角色版本'
+        verbose_name_plural = 'CYOA 角色版本'
+        ordering = ['character', 'order', 'display_name']
+
+    def __str__(self):
+        return f'{self.character.name} - {self.display_name}'
 
 
 class WritingStyle(models.Model):

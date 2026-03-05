@@ -1,8 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { Trash2, Wand2 } from 'lucide-react';
 import { LoadingButton } from '../ui/Loading';
 import { AutoEditModal, type AutoEditContext } from '../modals/AutoEditModal';
-import { aiApi } from '../../services/api';
+import { aiApi, gameEventsApi, gameCharactersApi } from '../../services/api';
 import { useUIStore } from '../../stores/useUIStore';
 import type { Work, Chapter } from '../../types';
 
@@ -112,6 +113,42 @@ export const InteractiveEditorPanel: React.FC<InteractiveEditorPanelProps> = ({
   const textareaRefs = useRef<{ [key: number]: HTMLTextAreaElement | null }>({});
 
   const { addNotification } = useUIStore();
+
+  const cyoaSession = chapter?.cyoa_session;
+  const { data: cyoaEvent } = useQuery({
+    queryKey: ['game-event', work.id, cyoaSession?.event_id],
+    queryFn: () => gameEventsApi.get(work.id, cyoaSession!.event_id).then((r) => r.data),
+    enabled: !!cyoaSession?.event_id && !!work.id,
+  });
+  const { data: cyoaCharactersList = [] } = useQuery({
+    queryKey: ['game-characters', work.id],
+    queryFn: async () => {
+      const res = await gameCharactersApi.list(work.id);
+      return Array.isArray(res.data) ? res.data : [];
+    },
+    enabled: !!cyoaSession && !!work.id,
+  });
+  const cyoaSceneContext = useMemo(() => {
+    if (!cyoaSession || !cyoaEvent) return '';
+    const lines: string[] = ['【本场景】', cyoaEvent.setting_description?.trim() || '（无场景描述）', ''];
+    if (cyoaEvent.goal?.trim()) {
+      lines.push('【目标】', cyoaEvent.goal.trim(), '');
+    }
+    lines.push('【角色与当前状态】');
+    for (const row of cyoaSession.character_states || []) {
+      const char = cyoaCharactersList.find((c) => c.id === row.character_id);
+      if (!char) continue;
+      const stateParts: string[] = [];
+      if (char.age) stateParts.push(`年龄：${char.age}`);
+      if (char.appearance?.trim()) stateParts.push(`外貌：${char.appearance.trim()}`);
+      if (char.backstory?.trim()) stateParts.push(`背景：${char.backstory.trim()}`);
+      for (const [stateName, stageLabel] of Object.entries(row.states || {})) {
+        if (stateName && stageLabel) stateParts.push(`${stateName}：${stageLabel}`);
+      }
+      lines.push(`- ${char.name}：${stateParts.join('；') || '（无）'}`);
+    }
+    return lines.join('\n');
+  }, [cyoaSession, cyoaEvent, cyoaCharactersList]);
 
   // Auto-resize textarea based on content
   const adjustTextareaHeight = (textarea: HTMLTextAreaElement | null, preserveScroll = false) => {
@@ -427,6 +464,7 @@ export const InteractiveEditorPanel: React.FC<InteractiveEditorPanelProps> = ({
           isMobile={isMobile}
           mode={modalMode}
           modeLabel={modalMode === 'cyoa' ? '剧情推进模式（CYOA）' : '局部编辑模式（Auto Edit）'}
+          cyoaSceneContext={modalMode === 'cyoa' ? cyoaSceneContext : undefined}
         />
       )}
     </div>

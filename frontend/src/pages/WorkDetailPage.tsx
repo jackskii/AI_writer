@@ -5,6 +5,8 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, Plus, Edit3, Settings, Palette, BookOpen, Layers, FileText, MessageCircle, ChevronDown, ChevronRight, Pencil, Trash2 } from 'lucide-react';
 import { worksApi, actsApi, chaptersApi, loreApi, factionsApi } from '../services/api';
+import { GameSection } from '../components/cyoa/GameSection';
+import { CreateCyoaChapterModal } from '../components/cyoa/CreateCyoaChapterModal';
 import { useWorkStore } from '../stores/useWorkStore';
 import { useMobile } from '../hooks/useMobile';
 import { Button } from '../components/ui/Button';
@@ -34,7 +36,7 @@ export const WorkDetailPage: React.FC = () => {
   const navigate = useNavigate();
   const { setCurrentWork, setChapters, loreEntries, setLoreEntries } = useWorkStore();
   
-  const [activeTab, setActiveTab] = useState<'synopsis' | 'chapters' | 'lore'>('chapters');
+  const [activeTab, setActiveTab] = useState<'synopsis' | 'chapters' | 'lore' | 'game'>('chapters');
   const [mobileSynopsisTab, setMobileSynopsisTab] = useState<'synopsis' | 'chat'>('synopsis');
   const [loreViewMode, setLoreViewMode] = useState<'faction' | 'compact'>(() => {
     if (typeof window !== 'undefined' && window.innerWidth < 768) {
@@ -63,6 +65,7 @@ export const WorkDetailPage: React.FC = () => {
   const [titleContent, setTitleContent] = useState('');
   const [collapsedFactions, setCollapsedFactions] = useState<Set<number>>(new Set());
   const [collapsedCompactFactions, setCollapsedCompactFactions] = useState<Set<number>>(new Set());
+  const [createCyoaChapterActId, setCreateCyoaChapterActId] = useState<number | null>(null);
 
   const workIdNum = parseInt(workId!);
   const queryClient = useQueryClient();
@@ -292,7 +295,6 @@ export const WorkDetailPage: React.FC = () => {
   
   const handleCreateChapter = () => {
     if (actsData && Array.isArray(actsData) && actsData.length > 0) {
-      // Sort: normal acts first, then side chapters
       const sortedActs = [...actsData].sort((a, b) => {
         const aType = a.act_type === 'side_chapters' ? 1 : 0;
         const bType = b.act_type === 'side_chapters' ? 1 : 0;
@@ -306,7 +308,17 @@ export const WorkDetailPage: React.FC = () => {
     }
   };
 
+  const handleCyoaChapterCreated = () => {
+    queryClient.invalidateQueries({ queryKey: ['chapters', workIdNum] });
+    queryClient.invalidateQueries({ queryKey: ['work', workIdNum] });
+    setCreateCyoaChapterActId(null);
+  };
+
   const handleCreateChapterInAct = async (actId: number) => {
+    if (work?.work_type === 'interactive_novel') {
+      setCreateCyoaChapterActId(actId);
+      return;
+    }
     const actChapters = workChapters.filter(ch => ch.act === actId);
     const nextChapterNumber = actChapters.length + 1;
     try {
@@ -401,11 +413,13 @@ export const WorkDetailPage: React.FC = () => {
   const handleReorderChapters = (actId: number, chapterIds: number[]) => reorderChaptersMutation.mutate({ actId, chapterIds });
   const effectiveLoreViewMode: 'faction' | 'compact' = isMobile ? 'compact' : loreViewMode;
 
+  const isInteractiveNovel = work?.work_type === 'interactive_novel';
   const tabs = [
     { id: 'chapters', label: '章节', icon: BookOpen },
     { id: 'synopsis', label: '大纲', icon: Edit3 },
     { id: 'lore', label: '世界观', icon: Layers },
-  ] as const;
+    ...(isInteractiveNovel ? [{ id: 'game' as const, label: 'CYOA', icon: MessageCircle }] : []),
+  ];
 
   return (
     <div className="min-h-screen bg-dark-bg">
@@ -704,6 +718,12 @@ export const WorkDetailPage: React.FC = () => {
             )}
           </div>
         )}
+
+        {activeTab === 'game' && isInteractiveNovel && (
+          <div className="space-y-4">
+            <GameSection workId={workIdNum} />
+          </div>
+        )}
       </main>
 
       <CreateLoreModal workId={workIdNum} isOpen={isCreateLoreModalOpen || !!editingLoreEntry} onClose={() => { setIsCreateLoreModalOpen(false); setEditingLoreEntry(null); setCreateLoreDefaultFaction(null); }} onLoreCreated={() => { setIsCreateLoreModalOpen(false); setEditingLoreEntry(null); setCreateLoreDefaultFaction(null); queryClient.invalidateQueries({ queryKey: ['lore', workIdNum] }); }} editEntry={editingLoreEntry} factions={factionsData || []} defaultFactionId={createLoreDefaultFaction} />
@@ -718,6 +738,16 @@ export const WorkDetailPage: React.FC = () => {
       <DeleteActConfirmDialog act={deleteActModal?.act || null} actName={deleteActModal?.actName} isOpen={!!deleteActModal} onClose={() => setDeleteActModal(null)} onConfirm={handleConfirmDeleteAct} isDeleting={deleteActMutation.isPending} />
       <LoreTemplateModal work={work} isOpen={isLoreTemplateModalOpen} onClose={() => setIsLoreTemplateModalOpen(false)} />
       <ActSynopsisModal act={actSynopsisModalAct} workId={workIdNum} isOpen={!!actSynopsisModalAct} onClose={() => setActSynopsisModalAct(null)} onSynopsisUpdated={handleActSynopsisUpdated} />
+      {isInteractiveNovel && (
+        <CreateCyoaChapterModal
+          workId={workIdNum}
+          acts={Array.isArray(actsData) ? actsData : []}
+          defaultActId={createCyoaChapterActId ?? (Array.isArray(actsData) && actsData.length > 0 ? actsData.sort((a, b) => a.order - b.order)[0].id : 0)}
+          isOpen={createCyoaChapterActId !== null}
+          onClose={() => setCreateCyoaChapterActId(null)}
+          onSuccess={handleCyoaChapterCreated}
+        />
+      )}
 
       {/* Mobile Bottom Tab Bar for Synopsis Page */}
       {activeTab === 'synopsis' && (

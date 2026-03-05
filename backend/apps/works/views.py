@@ -6,7 +6,7 @@ from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.db import models
 from django.db.models import Prefetch
-from .models import Work, Act, Chapter, Faction, LoreEntry, WritingStyle
+from .models import Work, Act, Chapter, Faction, LoreEntry, WritingStyle, GameEvent, GameCharacter, CyoaCharacterVersion
 from .serializers import (
     WorkSerializer,
     WorkDetailSerializer,
@@ -17,6 +17,9 @@ from .serializers import (
     FactionSerializer,
     LoreEntrySerializer,
     WritingStyleSerializer,
+    GameEventSerializer,
+    GameCharacterSerializer,
+    CyoaCharacterVersionSerializer,
 )
 
 
@@ -138,7 +141,7 @@ class ChapterViewSet(viewsets.ModelViewSet):
         if self.action == 'list':
             return queryset.select_related('act').only(
                 'id', 'work_id', 'title', 'order', 'act_id',
-                'chapter_number', 'created_at', 'updated_at',
+                'chapter_number', 'cyoa_session', 'created_at', 'updated_at',
                 'last_autosave', 'act__name', 'act__order'
             )
         return queryset
@@ -455,6 +458,67 @@ class LoreEntryViewSet(viewsets.ModelViewSet):
                     work=work
                 )
                 instance.factions.set(factions)
+
+
+class GameEventViewSet(viewsets.ModelViewSet):
+    """CYOA 事件 - 仅用于互动小说"""
+    serializer_class = GameEventSerializer
+    permission_classes = [IsAuthenticated]
+    pagination_class = None
+
+    def get_queryset(self):
+        work_id = self.kwargs.get('work_pk')
+        work = get_object_or_404(Work, id=work_id, author=self.request.user)
+        return GameEvent.objects.filter(work=work).order_by('name')
+
+    def perform_create(self, serializer):
+        work_id = self.kwargs.get('work_pk')
+        work = get_object_or_404(Work, id=work_id, author=self.request.user)
+        serializer.save(work=work)
+
+
+class GameCharacterViewSet(viewsets.ModelViewSet):
+    """CYOA 角色 - 仅用于互动小说"""
+    serializer_class = GameCharacterSerializer
+    permission_classes = [IsAuthenticated]
+    pagination_class = None
+
+    def get_queryset(self):
+        work_id = self.kwargs.get('work_pk')
+        work = get_object_or_404(Work, id=work_id, author=self.request.user)
+        return GameCharacter.objects.filter(work=work).order_by('order', 'name')
+
+    def perform_create(self, serializer):
+        work_id = self.kwargs.get('work_pk')
+        work = get_object_or_404(Work, id=work_id, author=self.request.user)
+        max_order = GameCharacter.objects.filter(work=work).aggregate(
+            models.Max('order')
+        )['order__max'] or 0
+        serializer.save(work=work, order=max_order + 1)
+
+
+class CyoaCharacterVersionViewSet(viewsets.ModelViewSet):
+    """CYOA 角色版本 - 仅用于互动小说，嵌套在 game-characters 下"""
+    serializer_class = CyoaCharacterVersionSerializer
+    permission_classes = [IsAuthenticated]
+    pagination_class = None
+
+    def get_character(self):
+        work_id = self.kwargs.get('work_pk')
+        character_pk = self.kwargs.get('character_pk')
+        work = get_object_or_404(Work, id=work_id, author=self.request.user)
+        return get_object_or_404(GameCharacter, id=character_pk, work=work)
+
+    def get_queryset(self):
+        character = self.get_character()
+        return CyoaCharacterVersion.objects.filter(character=character).order_by('order', 'display_name')
+
+    def perform_create(self, serializer):
+        character = self.get_character()
+        max_order = CyoaCharacterVersion.objects.filter(character=character).aggregate(
+            models.Max('order')
+        )['order__max'] or 0
+        serializer.save(character=character, order=max_order + 1)
 
 
 class WritingStyleViewSet(viewsets.ModelViewSet):

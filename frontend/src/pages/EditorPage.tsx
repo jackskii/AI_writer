@@ -14,6 +14,7 @@ import { UserMenu } from '../components/ui/UserMenu';
 import { EditorPanel } from '../components/editor/EditorPanel';
 import { InteractiveEditorPanel } from '../components/editor/InteractiveEditorPanel';
 import { ChatPanel } from '../components/editor/ChatPanel';
+import { CyoaChatPanel } from '../components/cyoa/CyoaChatPanel';
 import { AutoSaveIndicator } from '../components/editor/AutoSaveIndicator';
 import { SettingsModal } from '../components/modals/SettingsModal';
 import { StyleManagerModal } from '../components/modals/StyleManagerModal';
@@ -276,10 +277,12 @@ export const EditorPage: React.FC = () => {
     );
   }
 
-  // Use fetched data directly instead of store state
+  // Use fetched data directly instead of store state; prefer store when same chapter so just-saved content shows (e.g. CYOA stream end)
   const currentWorkData = work || currentWork;
-  const currentChapterData = chapter || currentChapter;
+  const currentChapterData =
+    (currentChapter?.id === chapterIdNum ? currentChapter : null) || chapter || currentChapter;
   const isInteractiveWork = currentWorkData?.work_type === 'interactive_novel';
+  const isCyoaChapter = !!(currentChapterData?.cyoa_session);
   const mobileActionText = isInteractiveWork
     ? (interactiveActionMode === 'auto_edit' ? '局部自动编辑' : '剧情推进 CYOA')
     : '自动编辑';
@@ -428,9 +431,21 @@ export const EditorPage: React.FC = () => {
 
       {/* Main Editor Area - Desktop */}
       <div className="flex-1 hidden md:flex min-h-0">
-        {/* Left Panel - Editor */}
-        <div className="flex-1 flex flex-col">
-          {isInteractiveWork ? (
+        {/* Left Panel - Editor or CYOA Chat */}
+        <div className={`flex flex-col min-h-0 ${isCyoaChapter ? 'flex-1' : 'flex-1'}`}>
+          {isCyoaChapter ? (
+            <CyoaChatPanel
+              work={currentWorkData}
+              chapter={currentChapterData}
+              onContentSaved={(content) => {
+                setEditorContent(content);
+                const updated = { ...currentChapterData, content };
+                setCurrentChapter(updated);
+                updateChapter(updated);
+                queryClient.invalidateQueries({ queryKey: ['chapter', workIdNum, chapterIdNum] });
+              }}
+            />
+          ) : isInteractiveWork ? (
             <InteractiveEditorPanel
               content={editorContent}
               onChange={handleContentChange}
@@ -471,10 +486,22 @@ export const EditorPage: React.FC = () => {
 
       {/* Main Editor Area - Mobile (tabbed) */}
       <div className="flex-1 flex flex-col md:hidden min-h-0 pb-[60px] pt-[56px]">
-        {/* Editor Tab Content */}
+        {/* Editor Tab Content (or CYOA when editor tab) */}
         {mobileTab === 'editor' && (
           <div className="flex-1 flex flex-col min-h-0">
-            {isInteractiveWork ? (
+            {isCyoaChapter ? (
+              <CyoaChatPanel
+                work={currentWorkData}
+                chapter={currentChapterData}
+                onContentSaved={(content) => {
+                  setEditorContent(content);
+                  const updated = { ...currentChapterData, content };
+                  setCurrentChapter(updated);
+                  updateChapter(updated);
+                  queryClient.invalidateQueries({ queryKey: ['chapter', workIdNum, chapterIdNum] });
+                }}
+              />
+            ) : isInteractiveWork ? (
               <InteractiveEditorPanel
                 content={editorContent}
                 onChange={handleContentChange}

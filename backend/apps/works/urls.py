@@ -1,6 +1,16 @@
 from rest_framework.routers import DefaultRouter
 from django.urls import path, include
-from .views import WorkViewSet, ActViewSet, ChapterViewSet, FactionViewSet, LoreEntryViewSet, WritingStyleViewSet
+from .views import (
+    WorkViewSet,
+    ActViewSet,
+    ChapterViewSet,
+    FactionViewSet,
+    LoreEntryViewSet,
+    WritingStyleViewSet,
+    GameEventViewSet,
+    GameCharacterViewSet,
+    CyoaCharacterVersionViewSet,
+)
 
 # 主路由器
 router = DefaultRouter()
@@ -54,4 +64,36 @@ urlpatterns = [
         'patch': 'partial_update',
         'delete': 'destroy'
     }), name='work-lore-detail'),
+    # CYOA: game events and characters (for interactive_novel)
+    path('api/works/<int:work_pk>/game-events/', GameEventViewSet.as_view({
+        'get': 'list',
+        'post': 'create'
+    }), name='work-game-events-list'),
+    path('api/works/<int:work_pk>/game-events/<int:pk>/', GameEventViewSet.as_view({
+        'get': 'retrieve',
+        'put': 'update',
+        'patch': 'partial_update',
+        'delete': 'destroy'
+    }), name='work-game-events-detail'),
+    path('api/works/<int:work_pk>/game-characters/', GameCharacterViewSet.as_view({
+        'get': 'list',
+        'post': 'create'
+    }), name='work-game-characters-list'),
+    path('api/works/<int:work_pk>/game-characters/<int:pk>/', GameCharacterViewSet.as_view({
+        'get': 'retrieve',
+        'put': 'update',
+        'patch': 'partial_update',
+        'delete': 'destroy'
+    }), name='work-game-characters-detail'),
+    # CYOA character versions (nested under character)
+    path('api/works/<int:work_pk>/game-characters/<int:character_pk>/versions/', CyoaCharacterVersionViewSet.as_view({
+        'get': 'list',
+        'post': 'create'
+    }), name='work-game-character-versions-list'),
+    path('api/works/<int:work_pk>/game-characters/<int:character_pk>/versions/<int:pk>/', CyoaCharacterVersionViewSet.as_view({
+        'get': 'retrieve',
+        'put': 'update',
+        'patch': 'partial_update',
+        'delete': 'destroy'
+    }), name='work-game-character-versions-detail'),
 ]
