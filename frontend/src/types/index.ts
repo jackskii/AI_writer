@@ -4,7 +4,6 @@ export interface Work {
   id: number;
   title: string;
   synopsis: string;
-  work_type?: 'novel' | 'interactive_novel';
   lore_entry_template?: string;
   created_at: string;
   updated_at: string;
@@ -25,15 +24,6 @@ export interface Act {
   updated_at: string;
 }
 
-/** CYOA session config on a chapter: event + character states for this play session */
-export interface CyoaSession {
-  event_id: number;
-  character_states: Array<{
-    character_id: number;
-    states: Record<string, string>; // state name -> stage label
-  }>;
-}
-
 export interface Chapter {
   id: number;
   work: number;
@@ -48,58 +38,6 @@ export interface Chapter {
   created_at: string;
   updated_at: string;
   summary?: string;
-  cyoa_session?: CyoaSession | null;
-}
-
-/** CYOA event (interactive_novel only) */
-export interface GameEvent {
-  id: number;
-  work: number;
-  name: string;
-  setting_description: string;
-  goal: string;
-  created_at: string;
-  updated_at: string;
-}
-
-/** Single stage in a character state */
-export interface GameCharacterStateStage {
-  label: string;
-}
-
-/** One state definition: name + list of stages */
-export interface GameCharacterStateDefinition {
-  name: string;
-  stages: GameCharacterStateStage[];
-}
-
-/** CYOA character (interactive_novel only) */
-export interface GameCharacter {
-  id: number;
-  work: number;
-  name: string;
-  age: string;
-  appearance: string;
-  backstory: string;
-  /** Single blob for CYOA form (like lore entry) */
-  characteristics: string;
-  state_definitions: GameCharacterStateDefinition[];
-  order: number;
-  created_at: string;
-  updated_at: string;
-}
-
-/** CYOA character version (alt version of a character, e.g. from a chapter) */
-export interface CyoaCharacterVersion {
-  id: number;
-  character: number;
-  display_name: string;
-  source_chapter: number | null;
-  characteristics: string;
-  state_definitions: GameCharacterStateDefinition[];
-  order: number;
-  created_at: string;
-  updated_at: string;
 }
 
 export interface Faction {
@@ -173,7 +111,7 @@ export interface ChatMessage {
 
 export interface AIService {
   type: 'chat' | 'continue' | 'suggest' | 'summary';
-  model: 'deepseek-reasoner' | 'deepseek-chat';
+  model: 'deepseek-v4-pro' | 'deepseek-reasoner' | 'deepseek-chat';
 }
 
 export interface Suggestion {

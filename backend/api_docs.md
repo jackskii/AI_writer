@@ -249,7 +249,7 @@ Authorization: Token {token}
   {
     "id": 345678901234567,
     "title": "Chapter 1: The Beginning",
-    "content": "Full chapter content with markers...",
+    "content": "Full chapter content...",
     "order": 1,
     "summary": "AI-generated summary",
     "word_count": 1500,
@@ -304,7 +304,7 @@ Content-Type: application/json
 
 {
   "title": "Updated Chapter Title",
-  "content": "Updated content with markers...",
+  "content": "Updated chapter content...",
   "summary": "Updated summary"
 }
 ```
@@ -316,7 +316,7 @@ Authorization: Token {token}
 Content-Type: application/json
 
 {
-  "content": "Auto-saved content with markers..."
+  "content": "Auto-saved chapter content..."
 }
 ```
 

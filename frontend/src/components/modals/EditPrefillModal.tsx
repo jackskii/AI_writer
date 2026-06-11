@@ -10,7 +10,7 @@ interface EditPrefillModalProps {
   isOpen: boolean;
   onClose: () => void;
   onPrefillsUpdated: () => void;
-  scope: 'auto_edit' | 'cyoa';
+  scope: 'auto_edit';
 }
 
 export const EditPrefillModal: React.FC<EditPrefillModalProps> = ({

@@ -2,7 +2,7 @@ import json
 import asyncio
 from typing import Dict, List, Optional, AsyncGenerator
 from django.conf import settings
-from apps.works.models import Work, Chapter, LoreEntry, Act, GameEvent, GameCharacter
+from apps.works.models import Work, Chapter, LoreEntry, Act
 from apps.chat.models import AIRequest
 from .models import Suggestion
 from . import prompts
@@ -652,14 +652,11 @@ class AIService:
         if requested_model == 'deepseek-chat':
             requested_model = None
         elif requested_model == 'deepseek-reasoner':
-            if self.provider_name == 'deepseek':
-                requested_model = 'deepseek-reasoner'
-            else:
-                logger.warning(
-                    f"Received deepseek-reasoner for provider {self.provider_name}; switching to reasoning_mode on provider default model."
-                )
-                requested_model = None
-                reasoning_mode = True
+            logger.warning(
+                f"Received legacy deepseek-reasoner alias; using provider default with reasoning_mode."
+            )
+            requested_model = None
+            reasoning_mode = True
 
         if reasoning_mode and self.provider.reasoning_model:
             return self.provider.reasoning_model
@@ -929,7 +926,7 @@ class AIService:
 
             logger.debug(f"Sending streaming auto-describe request to {self.provider.provider_name} API")
 
-            # Strip reasoning: only yield content after 【回答】 so UI gets answer only (same as CYOA intro/chat)
+            # Strip reasoning: only yield content after 【回答】 so UI gets answer only
             buffer = ""
             answer_started = False
             async for chunk in self.provider.chat_completion_stream(messages):
@@ -951,74 +948,8 @@ class AIService:
             logger.error(f"Auto-describe stream error: {str(e)}", exc_info=True)
             raise Exception(f"{prompts.ERROR_AUTO_DESCRIBE_FAILED}: {str(e)}")
 
-    async def generate_cyoa_introduction(
-        self,
-        setting_description: str,
-        goal: str,
-        characters_text: str,
-        model: str = None,
-        max_tokens: int = None,
-    ) -> str:
-        """Generate second-person CYOA introduction from scene + goal + characters. Returns plain text (no reasoning)."""
-        logger.debug("Starting CYOA introduction generation")
-        try:
-            user_message = prompts.format_cyoa_introduction_request(
-                setting_description, goal, characters_text
-            )
-            messages = [
-                {"role": "system", "content": prompts.CYOA_INTRODUCTION_SYSTEM},
-                {"role": "user", "content": user_message},
-            ]
-            text = await self.provider.chat_completion(
-                messages,
-                model=model or self.provider.default_model,
-                max_tokens=max_tokens or 800,
-                reasoning_mode=False,
-            )
-            raw = (text or "").strip()
-            # Remove reasoning for introduction: only return the answer part if present
-            if "【回答】" in raw:
-                raw = raw.split("【回答】")[-1].strip()
-            return raw
-        except Exception as e:
-            logger.error(f"CYOA introduction generation error: {str(e)}", exc_info=True)
-            raise
-
-    async def cyoa_chat_stream(
-        self,
-        system_content: str,
-        messages: List[Dict],
-        model: str = None,
-        temperature: float = None,
-        top_p: float = None,
-        max_tokens: int = None,
-        frequency_penalty: float = None,
-        presence_penalty: float = None,
-    ) -> AsyncGenerator[str, None]:
-        """Stream CYOA chat: system + conversation messages, like a normal chat API."""
-        logger.debug(f"Starting CYOA chat stream with {len(messages)} messages")
-        try:
-            full_messages = [{"role": "system", "content": system_content}]
-            for m in messages:
-                if m.get("role") in ("user", "assistant") and m.get("content"):
-                    full_messages.append({"role": m["role"], "content": m["content"]})
-            effective_model = self._resolve_model_for_request(model, False)
-            async for chunk in self.provider.chat_completion_stream(
-                full_messages,
-                model=effective_model,
-                temperature=temperature,
-                top_p=top_p,
-                max_tokens=max_tokens,
-                frequency_penalty=frequency_penalty,
-                presence_penalty=presence_penalty,
-            ):
-                yield chunk
-        except Exception as e:
-            logger.error(f"CYOA chat stream error: {str(e)}", exc_info=True)
-            raise
-
     async def analyze_writing_style(self, text_sample: str) -> Dict:
-        """分析文本样本的写作风格 - 使用deepseek-reasoner模型"""
+        """分析文本样本的写作风格 - 使用deepseek-v4-pro thinking模式"""
         logger.debug(f"Starting writing style analysis for text of length: {len(text_sample)}")
 
         try:
@@ -1043,7 +974,8 @@ class AIService:
             response = await self.provider.chat_completion(
                 messages,
                 model=model,
-                max_tokens=64000
+                max_tokens=64000,
+                reasoning_mode=True,
             )
 
             # Extract content from response (provider returns string directly)
@@ -1081,7 +1013,7 @@ class AIService:
             raise Exception(f"写作风格分析失败: {str(e)}")
 
     async def analyze_nsfw_writing_style(self, text_sample: str) -> Dict:
-        """分析NSFW文本样本的写作风格 - 使用deepseek-reasoner模型"""
+        """分析NSFW文本样本的写作风格 - 使用deepseek-v4-pro thinking模式"""
         logger.debug(f"Starting NSFW writing style analysis for text of length: {len(text_sample)}")
 
         try:
@@ -1106,7 +1038,8 @@ class AIService:
             response = await self.provider.chat_completion(
                 messages,
                 model=model,
-                max_tokens=64000
+                max_tokens=64000,
+                reasoning_mode=True,
             )
 
             # Extract content from response (provider returns string directly)

@@ -246,32 +246,6 @@ const handleAutoSave = async () => {
 
 ## AI Integration in Editor
 
-### Continue Writing Feature
-```typescript
-const handleAIContinue = async () => {
-  const eventSource = aiApi.continueStream(
-    work.id,
-    chapter.id,
-    // onChunk - called for each piece of text
-    (chunk: string) => {
-      accumulatedContent += chunk;
-      const newContent = content + accumulatedContent;
-      onChange(newContent);
-    },
-    // onStart
-    () => {
-      setIsAIContinueLoading(true);
-    },
-    // onEnd
-    () => {
-      setIsAIContinueLoading(false);
-      // Trigger auto-save after AI generation
-      if (onSave) onSave();
-    }
-  );
-};
-```
-
 ### Auto-Edit Feature
 - **Selection-based**: User selects text to edit
 - **AI-powered**: Uses DeepSeek to rewrite selected text

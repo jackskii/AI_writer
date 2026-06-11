@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 # OpenRouter models are centrally configured here for easy future updates.
 OPENROUTER_MODELS = [
+    {"id": "z-ai/glm-5.1", "name": "glm-5.1"},
     {"id": "x-ai/grok-4.1-fast", "name": "grok-4.1"},
     {"id": "google/gemini-3-flash-preview", "name": "gemini"},
     {"id": "anthropic/claude-sonnet-4.6", "name": "claude"},
@@ -27,8 +28,8 @@ PROVIDER_CONFIG = {
     'deepseek': {
         'name': 'DeepSeek',
         'base_url': 'https://api.deepseek.com/v1',
-        'default_model': 'deepseek-chat',
-        'reasoning_model': 'deepseek-reasoner',
+        'default_model': 'deepseek-v4-pro',
+        'reasoning_model': 'deepseek-v4-pro',
         'supports_reasoning': True,
     },
     'qwen': {
@@ -342,6 +343,150 @@ class DeepSeekProvider(LLMProvider):
     @property
     def reasoning_model(self) -> Optional[str]:
         return self._config['reasoning_model']
+
+    def _build_thinking_payload(self) -> Dict:
+        return {"thinking": {"type": "enabled"}}
+
+    @staticmethod
+    def _should_retry_without_thinking(error: Exception) -> bool:
+        message = str(error).lower()
+        return "thinking" in message or "unsupported" in message or "invalid" in message
+
+    async def chat_completion_stream(
+        self,
+        messages: List[Dict],
+        model: str = None,
+        max_tokens: int = None,
+        temperature: float = None,
+        top_p: float = None,
+        frequency_penalty: float = None,
+        presence_penalty: float = None,
+        reasoning_mode: bool = False
+    ) -> AsyncGenerator[str, None]:
+        model = model or self.default_model
+        params = {
+            "model": model,
+            "messages": messages,
+            "stream": True,
+        }
+
+        if max_tokens is not None:
+            params["max_tokens"] = max_tokens
+        if temperature is not None:
+            params["temperature"] = temperature
+        if top_p is not None:
+            params["top_p"] = top_p
+        if frequency_penalty is not None:
+            params["frequency_penalty"] = frequency_penalty
+        if presence_penalty is not None:
+            params["presence_penalty"] = presence_penalty
+
+        logger.debug(f"[{self.provider_name}] Streaming request with model: {model}")
+
+        try:
+            if reasoning_mode:
+                try:
+                    response = await self.client.chat.completions.create(
+                        **params,
+                        extra_body=self._build_thinking_payload()
+                    )
+                except Exception as e:
+                    if not self._should_retry_without_thinking(e):
+                        raise
+                    logger.warning(
+                        f"[{self.provider_name}] Thinking payload rejected for model {model}, retrying without thinking: {e}"
+                    )
+                    response = await self.client.chat.completions.create(**params)
+            else:
+                response = await self.client.chat.completions.create(**params)
+
+            reasoning_started = False
+            answer_started = False
+            async for chunk in response:
+                if chunk.choices and len(chunk.choices) > 0:
+                    delta = chunk.choices[0].delta
+                    reasoning_text, encrypted_reasoning = self._extract_reasoning_info(delta)
+                    if reasoning_text:
+                        if not reasoning_started:
+                            yield "【思考过程】\n"
+                            reasoning_started = True
+                        yield reasoning_text
+                    elif encrypted_reasoning and not reasoning_started:
+                        yield "【思考过程】\n（当前模型返回加密推理，无法显示明文）"
+                        reasoning_started = True
+                    content_text = self._extract_content_text(delta)
+                    if content_text:
+                        if reasoning_started and not answer_started:
+                            yield "\n\n【回答】\n"
+                            answer_started = True
+                        yield content_text
+        except Exception as e:
+            logger.error(f"[{self.provider_name}] Streaming error: {str(e)}")
+            raise
+
+    async def chat_completion(
+        self,
+        messages: List[Dict],
+        model: str = None,
+        max_tokens: int = None,
+        temperature: float = None,
+        top_p: float = None,
+        frequency_penalty: float = None,
+        presence_penalty: float = None,
+        reasoning_mode: bool = False
+    ) -> str:
+        model = model or self.default_model
+        params = {
+            "model": model,
+            "messages": messages,
+            "stream": False,
+        }
+
+        if max_tokens is not None:
+            params["max_tokens"] = max_tokens
+        if temperature is not None:
+            params["temperature"] = temperature
+        if top_p is not None:
+            params["top_p"] = top_p
+        if frequency_penalty is not None:
+            params["frequency_penalty"] = frequency_penalty
+        if presence_penalty is not None:
+            params["presence_penalty"] = presence_penalty
+
+        logger.debug(f"[{self.provider_name}] Non-streaming request with model: {model}")
+
+        try:
+            if reasoning_mode:
+                try:
+                    response = await self.client.chat.completions.create(
+                        **params,
+                        extra_body=self._build_thinking_payload()
+                    )
+                except Exception as e:
+                    if not self._should_retry_without_thinking(e):
+                        raise
+                    logger.warning(
+                        f"[{self.provider_name}] Thinking payload rejected for model {model}, retrying without thinking: {e}"
+                    )
+                    response = await self.client.chat.completions.create(**params)
+            else:
+                response = await self.client.chat.completions.create(**params)
+
+            result = ""
+            if response.choices and len(response.choices) > 0:
+                message = response.choices[0].message
+                reasoning_text, encrypted_reasoning = self._extract_reasoning_info(message)
+                if reasoning_text:
+                    result = f"【思考过程】\n{reasoning_text}\n【回答】\n"
+                elif encrypted_reasoning:
+                    result = "【思考过程】\n（当前模型返回加密推理，无法显示明文）\n【回答】\n"
+                content_text = self._extract_content_text(message)
+                if content_text:
+                    result += content_text
+            return result
+        except Exception as e:
+            logger.error(f"[{self.provider_name}] Chat completion error: {str(e)}")
+            raise
 
 
 class QwenProvider(LLMProvider):

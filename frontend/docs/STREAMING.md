@@ -211,59 +211,26 @@ const handleSendMessage = async () => {
 };
 ```
 
-### 2. Continue Writing Streaming
-**File**: `frontend/src/components/editor/EditorPanel.tsx`
+### 2. Auto-Edit Streaming
+**Files**: `frontend/src/components/editor/EditorPanel.tsx`, `frontend/src/components/modals/AutoEditModal.tsx`
 
-```javascript
-const handleAIContinue = async () => {
-  let accumulatedContent = '';
-  const startingContentWithMarkers = contentWithMarkers || content;
+Auto-edit uses `fetch` with a readable stream (not EventSource). Chunks are accumulated in the modal; the user confirms before text is applied to the chapter.
 
-  const eventSource = aiApi.continueStream(
-    work.id,
-    chapter.id,
-    // onChunk - append to content in real-time
-    (chunk: string) => {
-      accumulatedContent += chunk;
-      const newContentWithMarkers = startingContentWithMarkers + accumulatedContent;
-
-      setContentWithMarkers(newContentWithMarkers);
-      onChange(newContentWithMarkers);
-
-      // Keep cursor at end during streaming
-      if (textareaRef.current) {
-        setTimeout(() => {
-          if (textareaRef.current) {
-            textareaRef.current.focus();
-            textareaRef.current.setSelectionRange(
-              newContentWithMarkers.length,
-              newContentWithMarkers.length
-            );
-          }
-        }, 0);
-      }
-    },
-    // onStart
-    () => {
-      setIsStreaming(true);
-    },
-    // onEnd
-    () => {
-      setIsStreaming(false);
-    },
-    // onError
-    (error: string) => {
-      setIsStreaming(false);
-      console.error('Continue writing stream error:', error);
-    },
-    guide,        // Optional writing guide
-    content,      // Current content
-    tokenCount    // Token limit
-  );
-
-  setStreamEventSource(eventSource);
-};
+```typescript
+await aiApi.autoEditStream(
+  work.id,
+  chapter.id,
+  originalText,
+  context,       // chapter/lore/style/reasoning options
+  onChunk,       // append streamed text to modal output
+  onStart,
+  onEnd,
+  onError,
+  signal         // AbortController for cancel
+);
 ```
+
+On accept, `EditorPanel` replaces the selected range (or inserts at cursor) with the edited text. Note positions are adjusted via `adjustPositions()` — chapter content stays plain text with no embedded markers.
 
 ### 3. Summary Streaming
 **File**: `frontend/src/services/api.ts`

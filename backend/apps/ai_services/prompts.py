@@ -16,7 +16,7 @@ CHAT_STREAM_SYSTEM_PROMPT = """你是专业的中文小说写作顾问。基于�
 
 保持专业客观的语气，提供建设性的反馈。既要指出作品的优点，也要直接指出需要改进的地方，并给出具体的修改建议。确保逻辑严谨，角色行为合理。"""
 
-CHAT_MODEL = "deepseek-chat"
+CHAT_MODEL = "deepseek-v4-pro"
 
 
 SUGGEST_SYSTEM_PROMPT = """你是一个专业的中文小说写作建议助手。请分析用户提供的作品内容，并给出具体的改进建议。建议类型可能包括：情节发展、人物塑造、对话优化、描写增强、节奏调整等。请提供3-5条具体可行的建议，每条建议应该简洁明了，并说明改进的理由。"""
@@ -104,80 +104,6 @@ AUTO_EDIT_PREFILLS = {
 
 # Default editing requirement
 AUTO_EDIT_DEFAULT_REQUIREMENT = AUTO_EDIT_PREFILLS['修改']
-
-# Default CYOA requirement for interactive fiction mode.
-# Frontend can override this text at runtime.
-CYOA_DEFAULT_REQUIREMENT = """你是互动叙述者。以第二人称（"你"）视角，生动推进用户的故事，营造沉浸式氛围。
-
-用户会输入行为、对话或指示。你必须：
-
-根据用户的输入或指示，继续发展故事。严格遵守任何指示（如剧情发展、角色反应）。
-仅以叙述者身份输出，不要以用户的身份说话或者思考、不要代用户做决定。
-不要提供选项/选择分支。不要询问用户接下来要怎么做。
-严格遵守用户指定的长度限制（如"简短回复"）；每次只推进一小段故事。
-输出纯叙述文本，自然描述当前场景进展、结果、对话或事件。以开放方式自然结束，等待玩家输入。
-基于用户输入动态构建并保持世界观一致性，角色行为逻辑合理。"""
-
-
-# =============================================================================
-# CYOA: Introduction generation (second person) and chat system prompt
-# =============================================================================
-# Editable in this file. Used when event + character are selected: generate an
-# introduction, then run the conversation with the chat system prompt below.
-
-CYOA_INTRODUCTION_SYSTEM = """你是一名互动小说开场写手。请根据给出的场景、目标和角色与状态，用第二人称（"你"）写一段简短的开场白，把读者带入情境。
-
-要求：
-- 严格使用第二人称（"你"），不要出现"我"或角色名代替玩家。
-- 长度约 2–5 句，自然过渡到玩家可以开始行动或对话的瞬间。
-- 不要列出选项或问"你要怎么做"，只做叙述性开场。
-- 语气与场景、角色状态一致。"""
-
-
-def format_cyoa_introduction_request(setting_description: str, goal: str, characters_text: str) -> str:
-    """Build the user message for CYOA introduction generation."""
-    parts = []
-    if setting_description and setting_description.strip():
-        parts.append("【场景】\n" + setting_description.strip())
-    if goal and goal.strip():
-        parts.append("【本场目标/主题】\n" + goal.strip())
-    if characters_text and characters_text.strip():
-        parts.append("【出场角色与当前状态】\n" + characters_text.strip())
-    if not parts:
-        return "请写一段第二人称开场白，描述玩家刚进入一个场景。"
-    return "\n\n".join(parts)
-
-
-# System prompt for the CYOA chatbot: event + character + introduction are injected below.
-CYOA_CHAT_SYSTEM_BASE = """你是互动叙述者。以第二人称（"你"）视角与玩家推进故事，营造沉浸式氛围。
-
-规则：
-- 仅以叙述者身份输出，不要代玩家做决定或替玩家说话。
-- 不要提供选项列表或问"你要怎么做"；根据玩家输入自然推进。
-- 每次回复保持适量篇幅，可分段；以开放方式结束，等待玩家输入。
-- 保持与场景、角色状态和已发生剧情一致。"""
-
-
-def format_cyoa_chat_system(
-    event_name: str,
-    setting_description: str,
-    goal: str,
-    characters_text: str,
-    introduction: str,
-) -> str:
-    """Build the full system message for CYOA chat: base prompt + event + characters + intro."""
-    parts = [CYOA_CHAT_SYSTEM_BASE.strip(), ""]
-    parts.append("【本场事件】 " + (event_name or "（无名称）"))
-    if setting_description and setting_description.strip():
-        parts.append("【场景】\n" + setting_description.strip())
-    if goal and goal.strip():
-        parts.append("【目标/主题】\n" + goal.strip())
-    if characters_text and characters_text.strip():
-        parts.append("【角色与当前状态】\n" + characters_text.strip())
-    if introduction and introduction.strip():
-        parts.append("【开场白（已发生）】\n" + introduction.strip())
-    parts.append("\n请基于以上设定与开场，接着玩家的输入继续叙述。")
-    return "\n\n".join(parts)
 
 
 # =============================================================================
@@ -331,7 +257,7 @@ def format_current_chapter(chapter_title: str, content: str = None) -> str:
 # Model Configuration
 # =============================================================================
 
-DEFAULT_MODEL = "deepseek-chat"
+DEFAULT_MODEL = "deepseek-v4-pro"
 DEFAULT_TEMPERATURE = 0.7
 DEFAULT_MAX_TOKENS = 2000
 

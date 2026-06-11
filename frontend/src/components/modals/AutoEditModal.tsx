@@ -24,11 +24,7 @@ interface AutoEditModalProps {
     signal?: AbortSignal
   ) => Promise<void>;
   isMobile?: boolean;
-  mode?: 'auto_edit' | 'cyoa';
-  modeLabel?: string;
   defaultEditRequirement?: string;
-  /** When in CYOA mode, predetermined scene/character context to prepend to the guide */
-  cyoaSceneContext?: string;
 }
 
 export interface AutoEditContext {
@@ -56,28 +52,21 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
   onRevert,
   onGenerateEdit,
   isMobile: isMobileProp,
-  mode = 'auto_edit',
-  modeLabel,
   defaultEditRequirement,
-  cyoaSceneContext
 }) => {
   const FACTION_FILTER_GROUP = '__factions__' as const;
 
   // Mobile detection - use prop if provided, otherwise detect
   const isMobileHook = useMobile();
   const isMobile = isMobileProp !== undefined ? isMobileProp : isMobileHook;
-  const isCyoaMode = mode === 'cyoa';
-  const prefillScope: 'auto_edit' | 'cyoa' = isCyoaMode ? 'cyoa' : 'auto_edit';
-  const selectedPrefillStorageKey = isCyoaMode ? 'cyoa_selectedPrefillId' : 'autoEdit_selectedPrefillId';
-  const titleText = modeLabel || (isCyoaMode ? '剧情推进模式（CYOA）' : (initialOriginalText ? '自动编辑' : 'AI 生成文本'));
-  const originalTextLabel = isCyoaMode ? '玩家输入（User）' : (initialOriginalText ? '原始文本' : '提示词（可选）');
-  const originalTextPlaceholder = isCyoaMode
-    ? '输入玩家动作、选择或要求...'
-    : (initialOriginalText ? '原始文本...' : '输入提示词来引导 AI 生成（可留空）...');
-  const guideLabel = isCyoaMode ? 'CYOA 指引' : '编辑指引';
-  const guidePlaceholder = isCyoaMode ? '输入 CYOA 生成规则...' : '输入编辑要求...';
-  const outputLabel = isCyoaMode ? 'Agent 输出' : '编辑文本';
-  const generateButtonText = isCyoaMode ? '生成剧情推进' : (initialOriginalText ? '自动编辑' : 'AI 生成');
+  const selectedPrefillStorageKey = 'autoEdit_selectedPrefillId';
+  const titleText = initialOriginalText ? '自动编辑' : 'AI 生成文本';
+  const originalTextLabel = initialOriginalText ? '原始文本' : '提示词（可选）';
+  const originalTextPlaceholder = initialOriginalText ? '原始文本...' : '输入提示词来引导 AI 生成（可留空）...';
+  const guideLabel = '编辑指引';
+  const guidePlaceholder = '输入编辑要求...';
+  const outputLabel = '编辑文本';
+  const generateButtonText = initialOriginalText ? '自动编辑' : 'AI 生成';
 
   // State for text boxes
   const [originalText, setOriginalText] = useState(initialOriginalText);
@@ -177,7 +166,6 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
   // All acts for accurate prompt length calculation
   const [allActs, setAllActs] = useState<Act[]>([]);
 
-  // Track selected prefill ID for persistence (different keys for cyoa vs auto_edit)
   const [selectedPrefillId, setSelectedPrefillId] = useState<number | null>(() => {
     const saved = localStorage.getItem(selectedPrefillStorageKey);
     return saved ? parseInt(saved, 10) : null;
@@ -186,7 +174,7 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
   // Load prefills from backend on mount (filtered by scope)
   const loadPrefills = async () => {
     try {
-      const response = await editPrefillsApi.list(prefillScope);
+      const response = await editPrefillsApi.list('auto_edit');
       setPrefills(response.data);
       // Use saved prefill ID or find default
       const savedId = localStorage.getItem(selectedPrefillStorageKey);
@@ -198,14 +186,9 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
       }
       
       if (!selectedPrefill) {
-        // For CYOA, find default "剧情推进"; for auto_edit, find "增加细节" or "修改"
-        if (isCyoaMode) {
-          selectedPrefill = response.data.find(p => p.is_default) || response.data[0];
-        } else {
-          selectedPrefill = response.data.find(p => p.is_default) || 
-                           response.data.find(p => p.name === '修改') ||
-                           response.data[0];
-        }
+        selectedPrefill = response.data.find(p => p.is_default) ||
+                         response.data.find(p => p.name === '修改') ||
+                         response.data[0];
       }
       
       if (selectedPrefill) {
@@ -229,7 +212,7 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
 
   useEffect(() => {
     loadPrefills();
-  }, [prefillScope, selectedPrefillStorageKey]);
+  }, [selectedPrefillStorageKey]);
 
   // Load writing styles when modal opens
   useEffect(() => {
@@ -293,7 +276,6 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
         abortControllerRef.current.abort();
         abortControllerRef.current = null;
       }
-      // For both CYOA and auto_edit, use selected prefill or fallback
       const selectedPrefill = prefills.find(p => p.id === selectedPrefillId) ||
                               prefills.find(p => p.is_default) ||
                               prefills[0];
@@ -311,7 +293,7 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
       loadLoreEntries();
       preselectTriggeredContextEntries(initialOriginalText);
     }
-  }, [isOpen, initialOriginalText, isLoadingPrefills, prefills, isCyoaMode, defaultEditRequirement, selectedPrefillId]);
+  }, [isOpen, initialOriginalText, isLoadingPrefills, prefills, defaultEditRequirement, selectedPrefillId]);
 
   // Lock background editor scroll when mobile auto-edit is open.
   useEffect(() => {
@@ -473,11 +455,7 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
     setEditedVersions(prev => [...prev, { text: '', timestamp: new Date() }]);
     setCurrentVersionIndex(newIndex);
 
-    const baseRequirement = editRequirement.trim() || (defaultEditRequirement || '修改');
-    const effectiveRequirement =
-      isCyoaMode && cyoaSceneContext?.trim()
-        ? `${cyoaSceneContext.trim()}\n\n---\n\n${baseRequirement}`
-        : baseRequirement;
+    const effectiveRequirement = editRequirement.trim() || (defaultEditRequirement || '修改');
     const context: AutoEditContext = {
       chapterSelection,
       customChapterCount: chapterSelection === 'custom' ? customChapterCount : undefined,
@@ -516,16 +494,13 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
       (chunk: string) => {
         resetInactivityTimer();
         accumulatedTextRef.current += chunk;
-        // Only show the answer during stream so the conversation loop is coherent (no reasoning output)
-        setCurrentEditedText(answerOnlyForDisplay(accumulatedTextRef.current));
+        setCurrentEditedText(cleanAutoEditOutput(accumulatedTextRef.current));
       },
       () => {
         // On end - clean up text, version already exists
         clearStreamTimers();
         const cleanedText = cleanAutoEditOutput(accumulatedTextRef.current);
-        // Display only the answer (same as during stream) so conversation stays coherent
-        const forDisplay = stripThoughtProcess(cleanedText) || answerOnlyForDisplay(accumulatedTextRef.current);
-        setCurrentEditedText(forDisplay);
+        setCurrentEditedText(cleanedText);
         setEditedVersions(prev => {
           const updated = [...prev];
           if (updated.length > 0) {
@@ -535,12 +510,6 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
         });
         setIsGenerating(false);
         abortControllerRef.current = null;
-        // Match CyoaChatPanel behavior: auto-save on completion so this flow has same UX
-        const toAccept = stripThoughtProcess(cleanedText);
-        if (toAccept.trim()) {
-          onAccept(toAccept);
-          onClose();
-        }
       },
       (error: string) => {
         // On error - clean up version with whatever text we have
@@ -592,17 +561,14 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
     return cleanedText.trim();
   };
 
-  // For display during stream: show only the answer when reasoning+answer format is used, so the conversation loop is coherent
-  const answerOnlyForDisplay = (text: string): string => {
-    if (!text) return '';
-    if (!text.includes('【回答】')) return text; // no reasoning format → show full response
-    const after = text.split('【回答】').pop() ?? '';
-    return after.replace(/^\s+/g, '').trimStart();
-  };
-
   // Handle accept
   const handleAccept = () => {
-    const cleanedText = stripThoughtProcess(currentEditedText);
+    const fullText =
+      currentVersionIndex >= 0
+        ? editedVersions[currentVersionIndex]?.text ?? currentEditedText
+        : currentEditedText;
+    const cleanedText = stripThoughtProcess(fullText);
+    if (!cleanedText.trim()) return;
     onAccept(cleanedText);
     onClose();
   };
@@ -1603,7 +1569,7 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
         onPrefillsUpdated={() => {
           loadPrefills();
         }}
-        scope={prefillScope}
+        scope="auto_edit"
       />
     </div>
   );

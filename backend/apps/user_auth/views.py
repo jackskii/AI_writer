@@ -24,9 +24,8 @@ def register_view(request):
         # 为新用户创建设置
         UserSettings.objects.create(user=user)
 
-        # 为新用户创建默认编辑指引预设（auto_edit 和 cyoa）
+        # 为新用户创建默认编辑指引预设
         create_default_edit_prefills_for_user(user, scope='auto_edit')
-        create_default_edit_prefills_for_user(user, scope='cyoa')
 
         # 为新用户创建模板作品
         create_template_work_for_user(user)
@@ -153,47 +152,36 @@ def create_default_edit_prefills_for_user(user, scope='auto_edit'):
     """为用户创建默认编辑指引预设（按scope）"""
     from apps.ai_services import prompts
     
-    if scope == 'cyoa':
-        default_prefills = [
-            {
-                'scope': 'cyoa',
-                'name': '剧情推进',
-                'prompt_text': prompts.CYOA_DEFAULT_REQUIREMENT,
-                'is_default': True,
-                'order': 0,
-            },
-        ]
-    else:
-        default_prefills = [
-            {
-                'scope': 'auto_edit',
-                'name': '增加细节',
-                'prompt_text': prompts.AUTO_EDIT_PREFILLS['增加细节'],
-                'is_default': True,
-                'order': 0
-            },
-            {
-                'scope': 'auto_edit',
-                'name': '润色',
-                'prompt_text': prompts.AUTO_EDIT_PREFILLS['润色'],
-                'is_default': False,
-                'order': 1
-            },
-            {
-                'scope': 'auto_edit',
-                'name': '修改',
-                'prompt_text': prompts.AUTO_EDIT_PREFILLS['修改'],
-                'is_default': False,
-                'order': 2
-            },
-            {
-                'scope': 'auto_edit',
-                'name': '续写',
-                'prompt_text': prompts.AUTO_EDIT_PREFILLS['续写'],
-                'is_default': False,
-                'order': 3
-            },
-        ]
+    default_prefills = [
+        {
+            'scope': 'auto_edit',
+            'name': '增加细节',
+            'prompt_text': prompts.AUTO_EDIT_PREFILLS['增加细节'],
+            'is_default': True,
+            'order': 0
+        },
+        {
+            'scope': 'auto_edit',
+            'name': '润色',
+            'prompt_text': prompts.AUTO_EDIT_PREFILLS['润色'],
+            'is_default': False,
+            'order': 1
+        },
+        {
+            'scope': 'auto_edit',
+            'name': '修改',
+            'prompt_text': prompts.AUTO_EDIT_PREFILLS['修改'],
+            'is_default': False,
+            'order': 2
+        },
+        {
+            'scope': 'auto_edit',
+            'name': '续写',
+            'prompt_text': prompts.AUTO_EDIT_PREFILLS['续写'],
+            'is_default': False,
+            'order': 3
+        },
+    ]
     
     for prefill_data in default_prefills:
         UserEditPrefill.objects.get_or_create(
@@ -213,9 +201,7 @@ def create_default_edit_prefills_for_user(user, scope='auto_edit'):
 def list_edit_prefills_view(request):
     """获取用户的编辑指引预设（按scope）"""
     try:
-        scope = request.GET.get('scope', 'auto_edit')
-        if scope not in ('auto_edit', 'cyoa'):
-            scope = 'auto_edit'
+        scope = 'auto_edit'
         prefills = UserEditPrefill.objects.filter(user=request.user, scope=scope)
     
         # Lazy initialization: if user has no prefills for this scope, create defaults
@@ -236,9 +222,7 @@ def list_edit_prefills_view(request):
 @permission_classes([IsAuthenticated])
 def create_edit_prefill_view(request):
     """创建新的编辑指引预设"""
-    scope = request.data.get('scope', 'auto_edit')
-    if scope not in ('auto_edit', 'cyoa'):
-        scope = 'auto_edit'
+    scope = 'auto_edit'
     
     # Check max limit (10 including the default one) per scope
     existing_count = UserEditPrefill.objects.filter(user=request.user, scope=scope).count()

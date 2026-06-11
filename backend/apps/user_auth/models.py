@@ -14,7 +14,7 @@ PROVIDER_CHOICES = [
 ]
 
 PROVIDER_DEFAULT_MODELS = {
-    'deepseek': 'deepseek-chat',
+    'deepseek': 'deepseek-v4-pro',
     'qwen': 'qwen-max',
     'openrouter': OPENROUTER_MODEL_CONFIGS[0]['id'],
 }
@@ -143,7 +143,7 @@ class UserSettings(models.Model):
         """获取当前provider的默认模型"""
         if self.api_provider == 'openrouter':
             return self.openrouter_model or PROVIDER_DEFAULT_MODELS['openrouter']
-        return PROVIDER_DEFAULT_MODELS.get(self.api_provider, 'deepseek-chat')
+        return PROVIDER_DEFAULT_MODELS.get(self.api_provider, 'deepseek-v4-pro')
 
     # Legacy methods for backward compatibility
     def has_valid_api_key(self):
@@ -162,7 +162,6 @@ class UserEditPrefill(models.Model):
     """用户自定义的编辑指引预设"""
     SCOPE_CHOICES = [
         ('auto_edit', '自动编辑'),
-        ('cyoa', 'CYOA'),
     ]
 
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='edit_prefills')

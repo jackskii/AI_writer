@@ -12,9 +12,7 @@ import { Button } from '../components/ui/Button';
 import { LoadingScreen } from '../components/ui/Loading';
 import { UserMenu } from '../components/ui/UserMenu';
 import { EditorPanel } from '../components/editor/EditorPanel';
-import { InteractiveEditorPanel } from '../components/editor/InteractiveEditorPanel';
 import { ChatPanel } from '../components/editor/ChatPanel';
-import { CyoaChatPanel } from '../components/cyoa/CyoaChatPanel';
 import { AutoSaveIndicator } from '../components/editor/AutoSaveIndicator';
 import { SettingsModal } from '../components/modals/SettingsModal';
 import { StyleManagerModal } from '../components/modals/StyleManagerModal';
@@ -58,7 +56,6 @@ export const EditorPage: React.FC = () => {
   const [mobileTab, setMobileTab] = useState<MobileTab>('editor');
   const [mobileAutoEditTriggerKey, setMobileAutoEditTriggerKey] = useState(0);
   const [mobileHeaderViewportTop, setMobileHeaderViewportTop] = useState(0);
-  const [interactiveActionMode, setInteractiveActionMode] = useState<'auto_edit' | 'cyoa'>('cyoa');
   
   const lastSaveContentRef = useRef('');
   const autoSaveTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -277,15 +274,9 @@ export const EditorPage: React.FC = () => {
     );
   }
 
-  // Use fetched data directly instead of store state; prefer store when same chapter so just-saved content shows (e.g. CYOA stream end)
   const currentWorkData = work || currentWork;
   const currentChapterData =
     (currentChapter?.id === chapterIdNum ? currentChapter : null) || chapter || currentChapter;
-  const isInteractiveWork = currentWorkData?.work_type === 'interactive_novel';
-  const isCyoaChapter = !!(currentChapterData?.cyoa_session);
-  const mobileActionText = isInteractiveWork
-    ? (interactiveActionMode === 'auto_edit' ? '局部自动编辑' : '剧情推进 CYOA')
-    : '自动编辑';
 
   console.log('EditorPage render - editorContent value:', { 
     editorContentLength: editorContent.length, 
@@ -400,10 +391,10 @@ export const EditorPage: React.FC = () => {
               size="sm"
               onClick={handleMobileTopAutoEdit}
               className="h-8 px-3 bg-blue-600 text-white hover:bg-blue-500"
-              title={mobileActionText}
+              title="自动编辑"
             >
               <Wand2 size={14} className="mr-1" />
-              {mobileActionText}
+              自动编辑
             </Button>
           </div>
 
@@ -431,38 +422,14 @@ export const EditorPage: React.FC = () => {
 
       {/* Main Editor Area - Desktop */}
       <div className="flex-1 hidden md:flex min-h-0">
-        {/* Left Panel - Editor or CYOA Chat */}
-        <div className={`flex flex-col min-h-0 ${isCyoaChapter ? 'flex-1' : 'flex-1'}`}>
-          {isCyoaChapter ? (
-            <CyoaChatPanel
-              work={currentWorkData}
-              chapter={currentChapterData}
-              onContentSaved={(content) => {
-                setEditorContent(content);
-                const updated = { ...currentChapterData, content };
-                setCurrentChapter(updated);
-                updateChapter(updated);
-                queryClient.invalidateQueries({ queryKey: ['chapter', workIdNum, chapterIdNum] });
-              }}
-            />
-          ) : isInteractiveWork ? (
-            <InteractiveEditorPanel
-              content={editorContent}
-              onChange={handleContentChange}
-              work={currentWorkData}
-              chapter={currentChapterData}
-              onSave={handleManualSave}
-              onActionModeChange={setInteractiveActionMode}
-            />
-          ) : (
-            <EditorPanel
-              content={editorContent}
-              onChange={handleContentChange}
-              work={currentWorkData}
-              chapter={currentChapterData}
-              onSave={handleManualSave}
-            />
-          )}
+        <div className="flex flex-col min-h-0 flex-1">
+          <EditorPanel
+            content={editorContent}
+            onChange={handleContentChange}
+            work={currentWorkData}
+            chapter={currentChapterData}
+            onSave={handleManualSave}
+          />
         </div>
 
         {/* Right Panel - Full Height Chat */}
@@ -486,43 +453,17 @@ export const EditorPage: React.FC = () => {
 
       {/* Main Editor Area - Mobile (tabbed) */}
       <div className="flex-1 flex flex-col md:hidden min-h-0 pb-[60px] pt-[56px]">
-        {/* Editor Tab Content (or CYOA when editor tab) */}
         {mobileTab === 'editor' && (
           <div className="flex-1 flex flex-col min-h-0">
-            {isCyoaChapter ? (
-              <CyoaChatPanel
-                work={currentWorkData}
-                chapter={currentChapterData}
-                onContentSaved={(content) => {
-                  setEditorContent(content);
-                  const updated = { ...currentChapterData, content };
-                  setCurrentChapter(updated);
-                  updateChapter(updated);
-                  queryClient.invalidateQueries({ queryKey: ['chapter', workIdNum, chapterIdNum] });
-                }}
-              />
-            ) : isInteractiveWork ? (
-              <InteractiveEditorPanel
-                content={editorContent}
-                onChange={handleContentChange}
-                work={currentWorkData}
-                chapter={currentChapterData}
-                onSave={handleManualSave}
-                isMobile={true}
-                autoEditTriggerKey={mobileAutoEditTriggerKey}
-                onActionModeChange={setInteractiveActionMode}
-              />
-            ) : (
-              <EditorPanel
-                content={editorContent}
-                onChange={handleContentChange}
-                work={currentWorkData}
-                chapter={currentChapterData}
-                onSave={handleManualSave}
-                isMobile={true}
-                autoEditTriggerKey={mobileAutoEditTriggerKey}
-              />
-            )}
+            <EditorPanel
+              content={editorContent}
+              onChange={handleContentChange}
+              work={currentWorkData}
+              chapter={currentChapterData}
+              onSave={handleManualSave}
+              isMobile={true}
+              autoEditTriggerKey={mobileAutoEditTriggerKey}
+            />
           </div>
         )}
 

@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { Work, Act, Chapter, Faction, LoreEntry, Note, ChatMessage, AutoEdit, Suggestion, WritingStyle, GameEvent, GameCharacter, CyoaCharacterVersion } from '../types';
+import type { Work, Act, Chapter, Faction, LoreEntry, Note, ChatMessage, AutoEdit, Suggestion, WritingStyle } from '../types';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8001/api';
 
@@ -142,38 +142,6 @@ export const loreApi = {
   update: (workId: number, id: number, data: Partial<LoreEntry> & { factions?: number[] }) => 
     api.patch<LoreEntry>(`/works/${workId}/lore/${id}/`, data),
   delete: (workId: number, id: number) => api.delete(`/works/${workId}/lore/${id}/`),
-};
-
-// CYOA: game events and characters (interactive_novel only)
-export const gameEventsApi = {
-  list: (workId: number) => api.get<GameEvent[]>(`/works/${workId}/game-events/`),
-  get: (workId: number, id: number) => api.get<GameEvent>(`/works/${workId}/game-events/${id}/`),
-  create: (workId: number, data: Partial<GameEvent>) =>
-    api.post<GameEvent>(`/works/${workId}/game-events/`, data),
-  update: (workId: number, id: number, data: Partial<GameEvent>) =>
-    api.patch<GameEvent>(`/works/${workId}/game-events/${id}/`, data),
-  delete: (workId: number, id: number) => api.delete(`/works/${workId}/game-events/${id}/`),
-};
-
-export const gameCharactersApi = {
-  list: (workId: number) => api.get<GameCharacter[]>(`/works/${workId}/game-characters/`),
-  get: (workId: number, id: number) => api.get<GameCharacter>(`/works/${workId}/game-characters/${id}/`),
-  create: (workId: number, data: Partial<GameCharacter>) =>
-    api.post<GameCharacter>(`/works/${workId}/game-characters/`, data),
-  update: (workId: number, id: number, data: Partial<GameCharacter>) =>
-    api.patch<GameCharacter>(`/works/${workId}/game-characters/${id}/`, data),
-  /** Update only basic info (name, age) for CYOA character */
-  updateBasic: (workId: number, id: number, data: { name?: string; age?: string }) =>
-    api.patch<GameCharacter>(`/works/${workId}/game-characters/${id}/`, data),
-  delete: (workId: number, id: number) => api.delete(`/works/${workId}/game-characters/${id}/`),
-  listVersions: (workId: number, characterId: number) =>
-    api.get<CyoaCharacterVersion[]>(`/works/${workId}/game-characters/${characterId}/versions/`),
-  createVersion: (workId: number, characterId: number, data: Partial<CyoaCharacterVersion>) =>
-    api.post<CyoaCharacterVersion>(`/works/${workId}/game-characters/${characterId}/versions/`, data),
-  updateVersion: (workId: number, characterId: number, versionId: number, data: Partial<CyoaCharacterVersion>) =>
-    api.patch<CyoaCharacterVersion>(`/works/${workId}/game-characters/${characterId}/versions/${versionId}/`, data),
-  deleteVersion: (workId: number, characterId: number, versionId: number) =>
-    api.delete(`/works/${workId}/game-characters/${characterId}/versions/${versionId}/`),
 };
 
 // 笔记相关 API
@@ -688,98 +656,6 @@ export const aiApi = {
     return eventSource;
   },
 
-  // CYOA: generate introduction (second person) from event + character state
-  cyoaIntroduction: async (workId: number, chapterId: number): Promise<{ introduction: string }> => {
-    const authStorage = localStorage.getItem('auth-storage');
-    let token = '';
-    if (authStorage) {
-      try {
-        const parsed = JSON.parse(authStorage);
-        token = parsed?.state?.token || '';
-      } catch (_) {}
-    }
-    const res = await fetch(`${API_BASE_URL}/ai/cyoa-introduction/`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify({ work_id: workId, chapter_id: chapterId, token: token || undefined }),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || '生成开场白失败');
-    return { introduction: data.introduction || '' };
-  },
-
-  // CYOA: generate character characteristics blob
-  // CYOA: chat stream (standard chat API: system + messages, stream response)
-  cyoaChatStream: async (
-    workId: number,
-    chapterId: number,
-    messages: Array<{ role: 'user' | 'assistant'; content: string }>,
-    onChunk: (chunk: string) => void,
-    onEnd?: (fullResponse: string) => void,
-    onError?: (error: string) => void,
-    signal?: AbortSignal
-  ): Promise<void> => {
-    const authStorage = localStorage.getItem('auth-storage');
-    let token = '';
-    if (authStorage) {
-      try {
-        const parsed = JSON.parse(authStorage);
-        token = parsed?.state?.token || '';
-      } catch (_) {}
-    }
-    const response = await fetch(`${API_BASE_URL}/ai/cyoa-chat/stream/`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify({
-        work_id: workId,
-        chapter_id: chapterId,
-        messages,
-        token: token || undefined,
-      }),
-      signal,
-    });
-    if (!response.ok) {
-      const err = await response.json().catch(() => ({}));
-      onError?.(err.error || `HTTP ${response.status}`);
-      return;
-    }
-    const reader = response.body?.getReader();
-    if (!reader) {
-      onError?.('无法读取响应');
-      return;
-    }
-    const decoder = new TextDecoder();
-    let buffer = '';
-    let fullResponse = '';
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const parts = buffer.split('\n\n');
-      buffer = parts.pop() || '';
-      for (const msg of parts) {
-        if (!msg.trim()) continue;
-        const m = msg.match(/^data: (.+)$/m);
-        if (!m) continue;
-        try {
-          const data = JSON.parse(m[1]);
-          if (data.type === 'chunk') {
-            fullResponse += data.content || '';
-            onChunk(data.content || '');
-          } else if (data.type === 'end') {
-            onEnd?.(data.full_response ?? fullResponse);
-            return;
-          } else if (data.type === 'error') {
-            onError?.(data.message);
-            return;
-          }
-        } catch (_) {}
-      }
-    }
-  },
-
   workChatStream: (
     workId: number,
     message: string,
@@ -1020,108 +896,12 @@ export const aiApi = {
     }
   },
 
-  // CYOA character: same as lore - chapters that mention character name
-  getChaptersWithCharacter: async (workId: number, characterName: string) => {
-    const authStorage = localStorage.getItem('auth-storage');
-    const requestBody: Record<string, unknown> = { work_id: workId, character_name: characterName };
-    try {
-      const parsed = JSON.parse(authStorage || '{}');
-      const token = parsed?.state?.token;
-      if (token) requestBody.token = token;
-    } catch (_) {}
-    const response = await fetch(`${API_BASE_URL}/ai/auto-describe-character/chapters/`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify(requestBody),
-    });
-    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-    const data = await response.json();
-    return data.chapters || [];
-  },
-
-  // CYOA character: streaming auto-describe (same shape as autoDescribeEntry)
-  autoDescribeCharacter: async (
-    workId: number,
-    characterName: string,
-    onChunk: (chunk: string) => void,
-    onStart?: (usedChapters: Array<{ chapter_number: number; title: string; id?: number }>) => void,
-    onEnd?: (characteristics: string, usedChapters: Array<{ chapter_number: number; title: string; id?: number }>) => void,
-    onError?: (error: string) => void,
-    options?: {
-      chapterIds?: number[];
-      additionalContext?: string;
-      isUpdate?: boolean;
-      originalCharacteristics?: string;
-    }
-  ) => {
-    const requestBody: Record<string, unknown> = { work_id: workId, character_name: characterName };
-    if (options?.chapterIds && options.chapterIds.length > 0) requestBody.chapter_ids = options.chapterIds;
-    if (options?.additionalContext) requestBody.additional_context = options.additionalContext;
-    if (options?.isUpdate) {
-      requestBody.is_update = true;
-      requestBody.original_characteristics = options.originalCharacteristics || '';
-    }
-    try {
-      const parsed = JSON.parse(localStorage.getItem('auth-storage') || '{}');
-      if (parsed?.state?.token) requestBody.token = parsed.state.token;
-    } catch (_) {}
-    const response = await fetch(`${API_BASE_URL}/ai/auto-describe-character/`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify(requestBody),
-    });
-    if (!response.ok) {
-      onError?.(`HTTP error! status: ${response.status}`);
-      return;
-    }
-    const reader = response.body?.getReader();
-    if (!reader) {
-      onError?.('Failed to get response reader');
-      return;
-    }
-    const decoder = new TextDecoder();
-    let buffer = '';
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const messages = buffer.split('\n\n');
-      buffer = messages.pop() || '';
-      for (const message of messages) {
-        if (!message.trim()) continue;
-        const dataMatch = message.match(/^data: (.+)$/m);
-        if (!dataMatch) continue;
-        try {
-          const data = JSON.parse(dataMatch[1]);
-          switch (data.type) {
-            case 'start':
-              onStart?.(data.used_chapters || []);
-              break;
-            case 'chunk':
-              onChunk(data.content);
-              break;
-            case 'end':
-              onEnd?.(data.description || '', data.used_chapters || []);
-              return;
-            case 'error':
-              onError?.(data.message);
-              return;
-          }
-        } catch (e) {
-          onError?.('Error parsing server response');
-          return;
-        }
-      }
-    }
-  },
 };
 
 // Edit Prefills API
 export interface EditPrefill {
   id: number;
-  scope: 'auto_edit' | 'cyoa';
+  scope: 'auto_edit';
   name: string;
   prompt_text: string;
   is_default: boolean;
@@ -1131,9 +911,9 @@ export interface EditPrefill {
 }
 
 export const editPrefillsApi = {
-  list: (scope: 'auto_edit' | 'cyoa' = 'auto_edit') =>
+  list: (scope: 'auto_edit' = 'auto_edit') =>
     api.get<EditPrefill[]>('/auth/edit-prefills/', { params: { scope } }),
-  create: (data: { name: string; prompt_text: string; scope: 'auto_edit' | 'cyoa' }) =>
+  create: (data: { name: string; prompt_text: string; scope?: 'auto_edit' }) =>
     api.post<EditPrefill>('/auth/edit-prefills/create/', data),
   update: (id: number, data: Partial<{ name: string; prompt_text: string }>) =>
     api.patch<EditPrefill>(`/auth/edit-prefills/${id}/`, data),
