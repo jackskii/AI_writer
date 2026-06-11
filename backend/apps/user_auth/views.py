@@ -106,25 +106,6 @@ def logout_view(request):
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
-def user_profile_view(request):
-    """获取用户信息"""
-    serializer = UserSerializer(request.user)
-    return Response(serializer.data)
-
-
-@api_view(['PUT'])
-@permission_classes([IsAuthenticated])
-def update_profile_view(request):
-    """更新用户信息"""
-    serializer = UserSerializer(request.user, data=request.data, partial=True)
-    if serializer.is_valid():
-        serializer.save()
-        return Response(serializer.data)
-    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-
-@api_view(['GET'])
-@permission_classes([IsAuthenticated])
 def get_user_settings_view(request):
     """获取用户设置"""
     # Get or create user settings

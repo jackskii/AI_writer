@@ -32,7 +32,7 @@ import type { Work, Act, Chapter, Faction, LoreEntry } from '../types';
 export const WorkDetailPage: React.FC = () => {
   const { workId } = useParams<{ workId: string }>();
   const navigate = useNavigate();
-  const { setCurrentWork, setChapters, loreEntries, setLoreEntries } = useWorkStore();
+  const { setCurrentWork, loreEntries, setLoreEntries } = useWorkStore();
   
   const [activeTab, setActiveTab] = useState<'synopsis' | 'chapters' | 'lore'>('chapters');
   const [mobileSynopsisTab, setMobileSynopsisTab] = useState<'synopsis' | 'chat'>('synopsis');
@@ -218,10 +218,6 @@ export const WorkDetailPage: React.FC = () => {
   useEffect(() => {
     if (work) setCurrentWork(work);
   }, [work, setCurrentWork]);
-
-  useEffect(() => {
-    if (chaptersData) setChapters(workIdNum, chaptersData);
-  }, [chaptersData, workIdNum, setChapters]);
 
   useEffect(() => {
     if (loreData) setLoreEntries(workIdNum, loreData);

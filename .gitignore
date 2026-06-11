@@ -115,6 +115,5 @@ jspm_packages/
 .claude/
 CLAUDE.md
 
-# Local dev helper scripts (do not commit)
-restart-frontend.sh
-restart-backend.sh
+# Runtime logs directory (bind-mounted in dev)
+backend/logs/

@@ -10,6 +10,7 @@ import { aiApi, notesApi, autoEditApi } from '../../services/api';
 import { DeleteNoteConfirmDialog } from '../modals/DeleteNoteConfirmDialog';
 import { AutoEditModal, type AutoEditContext } from '../modals/AutoEditModal';
 import type { Work, Chapter, Note, AutoEdit } from '../../types';
+import { adjustPositionMap } from '../../utils/positionAdjust';
 
 interface EditorPanelProps {
   content: string;
@@ -115,61 +116,9 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
     enabled: !!chapter?.id
   });
 
-  // Function to adjust positions when content changes
   const adjustPositions = (oldContent: string, newContent: string) => {
-    if (oldContent === newContent) return;
-
-    // Find the change position
-    let changeStart = 0;
-    while (changeStart < Math.min(oldContent.length, newContent.length) &&
-           oldContent[changeStart] === newContent[changeStart]) {
-      changeStart++;
-    }
-
-    // Calculate the change in length
-    const oldAfterChange = oldContent.slice(changeStart);
-    const newAfterChange = newContent.slice(changeStart);
-    const lengthDiff = newAfterChange.length - oldAfterChange.length;
-
-    // Update positions for notes that come after the change
-    setNotePositions(prev => {
-      const updated = new Map(prev);
-      for (const [noteId, position] of updated) {
-        if (position.start > changeStart) {
-          updated.set(noteId, {
-            start: Math.max(changeStart, position.start + lengthDiff),
-            end: Math.max(changeStart, position.end + lengthDiff)
-          });
-        } else if (position.end > changeStart) {
-          // Note spans across the change point, adjust end position
-          updated.set(noteId, {
-            start: position.start,
-            end: Math.max(position.start, position.end + lengthDiff)
-          });
-        }
-      }
-      return updated;
-    });
-
-    // Update positions for auto-edits that come after the change
-    setAutoEditPositions(prev => {
-      const updated = new Map(prev);
-      for (const [autoEditId, position] of updated) {
-        if (position.start > changeStart) {
-          updated.set(autoEditId, {
-            start: Math.max(changeStart, position.start + lengthDiff),
-            end: Math.max(changeStart, position.end + lengthDiff)
-          });
-        } else if (position.end > changeStart) {
-          // Auto-edit spans across the change point, adjust end position
-          updated.set(autoEditId, {
-            start: position.start,
-            end: Math.max(position.start, position.end + lengthDiff)
-          });
-        }
-      }
-      return updated;
-    });
+    setNotePositions((prev) => adjustPositionMap(prev, oldContent, newContent));
+    setAutoEditPositions((prev) => adjustPositionMap(prev, oldContent, newContent));
   };
 
   // Create note mutation

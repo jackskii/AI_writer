@@ -31,7 +31,6 @@ THIRD_PARTY_APPS = [
     'rest_framework',
     'rest_framework.authtoken',
     'corsheaders',
-    'channels',
     'axes',  # Login attempt monitoring
     # 'django_filters',
     # 'drf_spectacular',
@@ -211,16 +210,6 @@ MEDIA_ROOT = BASE_DIR / 'media'
 # Default primary key field type
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
-# Django Channels Configuration
-CHANNEL_LAYERS = {
-    "default": {
-        "BACKEND": "channels_redis.core.RedisChannelLayer",
-        "CONFIG": {
-            "hosts": [os.environ.get('REDIS_URL', 'redis://localhost:6380/0')],
-        },
-    },
-}
-
 # DeepSeek API Configuration
 # Note: API keys are now stored per-user in UserSettings model
 DEEPSEEK_API_BASE = os.environ.get('DEEPSEEK_API_BASE', 'https://api.deepseek.com/v1')
@@ -230,7 +219,6 @@ QWEN_API_BASE = os.environ.get('QWEN_API_BASE', 'https://dashscope-intl.aliyuncs
 
 # Auto-save settings
 AUTO_SAVE_INTERVAL = 5  # seconds
-SUGGESTION_TRIGGER_WORDS = 300  # words before triggering auto-suggestion
 
 # Logging
 LOGGING = {

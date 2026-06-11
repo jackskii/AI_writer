@@ -1,15 +1,13 @@
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import IsAuthenticated, AllowAny
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from django.shortcuts import get_object_or_404
 from django.http import StreamingHttpResponse, JsonResponse, HttpResponse
 from django.db import models
-from django.db.utils import ProgrammingError, OperationalError
 from asgiref.sync import sync_to_async
 from apps.works.models import Work, Act, Chapter, LoreEntry, Faction
 from .services import AIService, run_async_ai_task
-from .models import Suggestion
 from . import prompts
 import logging
 import json
@@ -318,43 +316,6 @@ def get_user_api_key(user):
         raise ValueError("用户设置不存在，请先配置API密钥")
     except Exception as e:
         raise ValueError(f"获取API密钥失败: {str(e)}")
-
-
-@api_view(['GET'])
-@permission_classes([AllowAny])
-def ai_prefills(request):
-    """Get auto-edit prefill options."""
-    from apps.user_auth.models import UserEditPrefill
-    from apps.user_auth.views import create_default_edit_prefills_for_user
-
-    scope = 'auto_edit'
-
-    # Get user's custom prefills, or fall back to defaults if none exist
-    if request.user.is_authenticated:
-        try:
-            user_prefills = UserEditPrefill.objects.filter(user=request.user, scope=scope)
-
-            # Lazy initialization: if user has no prefills for this scope, create defaults
-            if not user_prefills.exists():
-                create_default_edit_prefills_for_user(request.user, scope=scope)
-                user_prefills = UserEditPrefill.objects.filter(user=request.user, scope=scope)
-
-            if user_prefills.exists():
-                # Convert to dict format for backward compatibility
-                prefills_dict = {prefill.name: prefill.prompt_text for prefill in user_prefills}
-                return Response({
-                    'prefills': prefills_dict
-                })
-        except (ProgrammingError, OperationalError):
-            # Migration not applied yet; fall back to static defaults
-            return Response({
-                'prefills': prompts.AUTO_EDIT_PREFILLS
-            })
-
-    # Fall back to default prefills for unauthenticated users or users without custom prefills
-    return Response({
-        'prefills': prompts.AUTO_EDIT_PREFILLS
-    })
 
 
 @api_view(['POST'])

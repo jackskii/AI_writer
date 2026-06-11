@@ -47,9 +47,7 @@ urlpatterns = [
         'patch': 'partial_update',
         'delete': 'destroy'
     }), name='work-factions-detail'),
-    path('api/works/<int:work_pk>/factions/<int:pk>/toggle_collapse/',
-         FactionViewSet.as_view({'patch': 'toggle_collapse'}), name='work-factions-toggle-collapse'),
-    
+
     # Lore routes
     path('api/works/<int:work_pk>/lore/', LoreEntryViewSet.as_view({
         'get': 'list',

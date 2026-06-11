@@ -1,8 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { flushSync } from 'react-dom';
-import { Send, Bot, User, Square, Trash2, RotateCcw } from 'lucide-react';
-import ReactMarkdown from 'react-markdown';
+import { Send, Square } from 'lucide-react';
 import { aiApi, chatApi } from '../../services/api';
+import { ChatMessageList } from '../chat/ChatMessageList';
 import { Button } from '../ui/Button';
 import { Textarea } from '../ui/Input';
 import type { Work, Chapter, ChatMessage } from '../../types';
@@ -422,154 +422,17 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ work, chapter }) => {
 
       {/* Chat Messages */}
       <div ref={messagesContainerRef} className="flex-1 overflow-y-auto p-4 space-y-4">
-        {messages.map((message) => (
-          <div key={message.id} className="w-full">
-            {/* Avatar on top */}
-            <div className={`flex items-center mb-2 ${
-              message.role === 'user' ? 'justify-end' : 'justify-start'
-            }`}>
-              <div className={`flex items-center gap-2 ${
-                message.role === 'user' ? 'flex-row-reverse' : 'flex-row'
-              }`}>
-                <div className={`flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center ${
-                  message.role === 'assistant' 
-                    ? 'bg-dark-primary' 
-                    : 'bg-dark-secondary'
-                }`}>
-                  {message.role === 'assistant' ? (
-                    <Bot size={12} className="text-white" />
-                  ) : (
-                    <User size={12} className="text-white" />
-                  )}
-                </div>
-                <span className="text-xs text-dark-text-muted">
-                  {message.role === 'assistant' ? 'AI助手' : '你'}
-                </span>
-              </div>
-            </div>
-            
-            {/* Full width text bubble */}
-            <div
-              className={`w-full p-3 rounded-lg text-sm mb-1 ${
-                message.role === 'user'
-                  ? 'bg-dark-primary text-white'
-                  : 'bg-dark-surface border border-dark-border text-dark-text'
-              }`}
-            >
-              {message.role === 'assistant' ? (
-                <div className="prose prose-sm prose-invert max-w-none">
-                  <ReactMarkdown>{message.content}</ReactMarkdown>
-                </div>
-              ) : (
-                <div className="whitespace-pre-wrap">{message.content}</div>
-              )}
-            </div>
-
-            {/* Timestamp and Action Buttons */}
-            <div className={`flex items-center gap-2 mb-4 ${
-              message.role === 'user'
-                ? 'justify-end'
-                : 'justify-start'
-            }`}>
-              <div className={`text-xs opacity-70 ${
-                message.role === 'user'
-                  ? 'text-blue-100'
-                  : 'text-dark-text-muted'
-              }`}>
-                {new Date(message.timestamp).toLocaleTimeString('zh-CN', {
-                  hour: '2-digit',
-                  minute: '2-digit'
-                })}
-              </div>
-
-              {/* Action buttons */}
-              <div className="flex items-center gap-1">
-                {message.role === 'assistant' && (
-                  <button
-                    onClick={() => handleRegenerateMessage(message.id)}
-                    disabled={isStreamingChat}
-                    className="p-1 rounded hover:bg-dark-bg text-dark-text-muted hover:text-dark-text transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                    title="重新生成"
-                  >
-                    <RotateCcw size={12} />
-                  </button>
-                )}
-                <button
-                  onClick={() => handleDeleteMessage(message.id)}
-                  disabled={isStreamingChat}
-                  className="p-1 rounded hover:bg-dark-bg text-dark-text-muted hover:text-red-400 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                  title="删除此消息及之后的消息"
-                >
-                  <Trash2 size={12} />
-                </button>
-              </div>
-            </div>
-          </div>
-        ))}
-        
-        {/* Streaming message indicator */}
-        {isStreamingChat && (
-          <div className="w-full">
-            {/* Avatar on top */}
-            <div className="flex items-center mb-2 justify-start">
-              <div className="flex items-center gap-2">
-                <div className="flex-shrink-0 w-6 h-6 bg-dark-primary rounded-full flex items-center justify-center">
-                  <Bot size={12} className="text-white" />
-                </div>
-                <span className="text-xs text-dark-text-muted">AI助手</span>
-              </div>
-            </div>
-
-            {/* Streaming content */}
-            <div className="w-full bg-dark-surface border border-dark-border rounded-lg p-3 mb-1">
-              <div className="prose prose-sm prose-invert max-w-none text-dark-text">
-                <ReactMarkdown>{streamingMessage}</ReactMarkdown>
-                <span className="inline-block w-2 h-4 bg-dark-primary animate-pulse ml-1" />
-              </div>
-            </div>
-
-            {/* Timestamp */}
-            <div className="text-xs opacity-70 mb-4 text-left text-dark-text-muted">
-              正在输入...
-            </div>
-          </div>
-        )}
-
-        {/* Error message display */}
-        {errorMessage && !isStreamingChat && (
-          <div className="w-full">
-            {/* Avatar on top */}
-            <div className="flex items-center mb-2 justify-start">
-              <div className="flex items-center gap-2">
-                <div className="flex-shrink-0 w-6 h-6 bg-red-600 rounded-full flex items-center justify-center">
-                  <Bot size={12} className="text-white" />
-                </div>
-                <span className="text-xs text-dark-text-muted">系统提示</span>
-              </div>
-            </div>
-
-            {/* Error content */}
-            <div className="w-full bg-red-900/20 border border-red-600/50 rounded-lg p-3 mb-1">
-              <div className="text-sm text-red-300">
-                <p className="font-semibold mb-1">错误</p>
-                <p>{errorMessage}</p>
-                {(errorMessage.includes('API密钥') || errorMessage.includes('API key')) && (
-                  <p className="mt-2 text-xs">请点击右上角设置按钮配置您的API密钥</p>
-                )}
-              </div>
-            </div>
-
-            {/* Timestamp */}
-            <div className="text-xs opacity-70 mb-4 text-left text-red-300">
-              {new Date().toLocaleTimeString('zh-CN', {
-                hour: '2-digit',
-                minute: '2-digit'
-              })}
-            </div>
-          </div>
-        )}
-
-        <div ref={messagesEndRef} />
+        <ChatMessageList
+          messages={messages}
+          streamingMessage={streamingMessage}
+          isStreamingChat={isStreamingChat}
+          errorMessage={errorMessage}
+          assistantLabel="AI助手"
+          isStreamingChatDisabled={isStreamingChat}
+          onRegenerate={handleRegenerateMessage}
+          onDelete={handleDeleteMessage}
+          messagesEndRef={messagesEndRef}
+        />
       </div>
 
       {/* Input Area */}

@@ -13,6 +13,5 @@ urlpatterns = [
 
     # Non-streaming endpoints
     path('api/ai/suggest/', views.ai_suggest, name='ai-suggest'),
-    path('api/ai/prefills/', views.ai_prefills, name='ai-prefills'),
     path('api/ai/lore-template/default/', views.get_default_lore_template, name='ai-lore-template-default'),
 ]

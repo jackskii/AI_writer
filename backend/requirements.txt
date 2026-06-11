@@ -4,9 +4,6 @@ django-cors-headers
 django-axes
 psycopg2-binary
 redis
-celery
-channels
-channels-redis
 daphne
 python-decouple
 Pillow

@@ -104,19 +104,6 @@ body {
   letter-spacing: 0.02em;
 }
 
-/* Monaco Editor dark theme customization */
-.monaco-editor {
-  background-color: #1a1a1a !important;
-}
-
-.monaco-editor .margin {
-  background-color: #1a1a1a !important;
-}
-
-.monaco-editor-background {
-  background-color: #1a1a1a !important;
-}
-
 /* Loading spinner */
 .spinner {
   border: 2px solid #333333;

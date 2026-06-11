@@ -1,3 +1,5 @@
+# DEPRECATED: Use `bash start.sh` instead. This file is kept for reference only.
+# If you use compose, set VITE_API_URL=/api so nginx proxies API correctly.
 services:
   postgres:
     image: postgres:16-alpine
@@ -73,7 +75,7 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
       args:
-        - VITE_API_URL=${VITE_API_URL:-http://localhost:8001/api}
+        - VITE_API_URL=${VITE_API_URL:-/api}
     container_name: novel_ai_frontend
     ports:
       - "${FRONTEND_PORT:-3000}:80"

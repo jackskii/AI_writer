@@ -24,9 +24,9 @@ AI 驱动的中文小说创作平台，支持长篇写作、多卷管理、世�
 - Python 3.11
 - Django + Django REST Framework
 - PostgreSQL
-- Redis
-- Channels / Daphne
-- DeepSeek / Qwen（通过用户设置选择）
+- Redis（缓存；可选）
+- Daphne (ASGI / SSE)
+- DeepSeek / Qwen / OpenRouter（通过用户设置选择）
 
 ### Frontend
 

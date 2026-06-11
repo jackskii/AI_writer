@@ -97,8 +97,6 @@ export const chaptersApi = {
   delete: (workId: number, id: number) => api.delete(`/works/${workId}/chapters/${id}/`),
   autoSave: (workId: number, id: number, content: string) =>
     api.patch(`/works/${workId}/chapters/${id}/autosave/`, { content }),
-  generateSummary: (workId: number, id: number) =>
-    api.post<{ summary: string }>(`/works/${workId}/chapters/${id}/summary/`),
   reorder: (workId: number, actId: number, chapterIds: number[]) =>
     api.post<{ status: string; updated: number }>(`/works/${workId}/chapters/reorder/`, {
       act_id: actId,
@@ -123,20 +121,16 @@ export const actsApi = {
 // 阵营相关 API
 export const factionsApi = {
   list: (workId: number) => api.get<Faction[]>(`/works/${workId}/factions/`),
-  get: (workId: number, id: number) => api.get<Faction>(`/works/${workId}/factions/${id}/`),
   create: (workId: number, data: Partial<Faction>) => 
     api.post<Faction>(`/works/${workId}/factions/`, data),
   update: (workId: number, id: number, data: Partial<Faction>) => 
     api.patch<Faction>(`/works/${workId}/factions/${id}/`, data),
   delete: (workId: number, id: number) => api.delete(`/works/${workId}/factions/${id}/`),
-  toggleCollapse: (workId: number, id: number) => 
-    api.patch<{ is_collapsed: boolean }>(`/works/${workId}/factions/${id}/toggle_collapse/`),
 };
 
 // 世界观条目相关 API
 export const loreApi = {
   list: (workId: number) => api.get<LoreEntry[]>(`/works/${workId}/lore/`),
-  get: (workId: number, id: number) => api.get<LoreEntry>(`/works/${workId}/lore/${id}/`),
   create: (workId: number, data: Partial<LoreEntry> & { factions?: number[] }) => 
     api.post<LoreEntry>(`/works/${workId}/lore/`, data),
   update: (workId: number, id: number, data: Partial<LoreEntry> & { factions?: number[] }) => 
@@ -166,10 +160,6 @@ export const autoEditApi = {
     if (chapterId) url += `?chapter=${chapterId}`;
     return api.get<AutoEdit[]>(url);
   },
-
-  get: (id: number) => api.get<AutoEdit>(`/auto-edits/${id}/`),
-
-  create: (data: Partial<AutoEdit>) => api.post<AutoEdit>('/auto-edits/', data),
 
   update: (id: number, data: Partial<AutoEdit>) =>
     api.patch<AutoEdit>(`/auto-edits/${id}/`, data),
@@ -418,9 +408,6 @@ export const aiApi = {
       callbacks.onError?.(`连接错误: ${error instanceof Error ? error.message : String(error)}`);
     }
   },
-
-  // Get auto-edit prefills
-  getPrefills: () => api.get<{ prefills: Record<string, string> }>('/ai/prefills/'),
 
   // Get default lore entry template
   getDefaultLoreTemplate: () => api.get<{ template: string }>('/ai/lore-template/default/'),
@@ -924,8 +911,6 @@ export const editPrefillsApi = {
 export const stylesApi = {
   list: () => api.get<WritingStyle[]>('/styles/'),
 
-  get: (id: number) => api.get<WritingStyle>(`/styles/${id}/`),
-
   create: (data: Partial<WritingStyle>) => api.post<WritingStyle>('/styles/', data),
 
   update: (id: number, data: Partial<WritingStyle>) =>
@@ -961,145 +946,3 @@ export const stylesApi = {
       name: string;
     }>('/styles/analyze_nsfw/', { text, name }),
 };
-
-// WebSocket 连接管理
-export class ChatWebSocket {
-  private ws: WebSocket | null = null;
-  private url: string;
-  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-  private maxReconnectAttempts = 5;
-  private reconnectAttempts = 0;
-  
-  constructor(workId: number, chapterId: number) {
-    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsHost = import.meta.env.VITE_WS_HOST || 'localhost:8001';
-    this.url = `${wsProtocol}//${wsHost}/ws/chat/${workId}/${chapterId}/`;
-  }
-  
-  connect(onMessage: (message: unknown) => void, onError?: (error: Event) => void) {
-    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      return;
-    }
-    
-    this.ws = new WebSocket(this.url);
-    
-    this.ws.onopen = () => {
-      console.log('WebSocket连接已建立');
-      this.reconnectAttempts = 0;
-    };
-    
-      this.ws.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        onMessage(data);
-      } catch (error) {
-        console.error('WebSocket消息解析错误:', error);
-      }
-    };
-    
-      this.ws.onerror = (error) => {
-      console.error('WebSocket错误:', error);
-      if (onError) {
-        onError(error);
-      }
-    };
-    
-      this.ws.onclose = (event) => {
-      console.log('WebSocket连接已关闭', event.code, event.reason);
-      this.attemptReconnect(onMessage, onError);
-    };
-  }
-  
-  private attemptReconnect(onMessage: (message: unknown) => void, onError?: (error: Event) => void) {
-    if (this.reconnectAttempts < this.maxReconnectAttempts) {
-      this.reconnectAttempts++;
-      console.log(`尝试重连 (${this.reconnectAttempts}/${this.maxReconnectAttempts})...`);
-      
-      this.reconnectTimer = setTimeout(() => {
-        this.connect(onMessage, onError);
-      }, 2000 * this.reconnectAttempts);
-    } else {
-      console.error('WebSocket重连失败，已达到最大重试次数');
-    }
-  }
-  
-  send(message: unknown) {
-    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify(message));
-    } else {
-      console.warn('WebSocket连接未建立，无法发送消息');
-    }
-  }
-  
-  sendChatMessage(message: string) {
-    this.send({
-      type: 'chat',
-      message: message
-    });
-  }
-  
-  sendTypingIndicator(isTyping: boolean) {
-    this.send({
-      type: 'typing',
-      is_typing: isTyping
-    });
-  }
-  
-  disconnect() {
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = null;
-    }
-    
-    if (this.ws) {
-      this.ws.close();
-      this.ws = null;
-    }
-    
-    this.reconnectAttempts = 0;
-  }
-}
-
-// 通知 WebSocket 连接管理
-export class NotificationWebSocket {
-  private ws: WebSocket | null = null;
-  private url: string;
-  
-  constructor(workId: number) {
-    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsHost = import.meta.env.VITE_WS_HOST || 'localhost:8001';
-    this.url = `${wsProtocol}//${wsHost}/ws/notifications/${workId}/`;
-  }
-  
-  connect(onNotification: (notification: unknown) => void) {
-    this.ws = new WebSocket(this.url);
-    
-    this.ws.onopen = () => {
-      console.log('通知WebSocket连接已建立');
-    };
-    
-    this.ws.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        onNotification(data);
-      } catch (error) {
-        console.error('通知消息解析错误:', error);
-      }
-    };
-    
-    this.ws.onerror = (error) => {
-      console.error('通知WebSocket错误:', error);
-    };
-    
-    this.ws.onclose = () => {
-      console.log('通知WebSocket连接已关闭');
-    };
-  }
-  
-  disconnect() {
-    if (this.ws) {
-      this.ws.close();
-      this.ws = null;
-    }
-  }
-}

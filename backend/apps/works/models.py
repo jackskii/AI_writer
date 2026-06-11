@@ -186,8 +186,7 @@ class Faction(models.Model):
         default='normal'
     )
     order = models.PositiveIntegerField('排序', default=0)
-    is_collapsed = models.BooleanField('是否折叠', default=False)
-    
+
     created_at = models.DateTimeField('创建时间', auto_now_add=True)
     updated_at = models.DateTimeField('更新时间', auto_now=True)
     

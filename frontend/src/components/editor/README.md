@@ -114,7 +114,7 @@ The textarea binds directly to `content` — no stripping or marker encoding:
 
 Provides chapter-scoped AI chat with SSE streaming via `aiApi.chatStream`, history persistence, and markdown rendering for assistant messages.
 
-See [`frontend/docs/STREAMING.md`](../../../docs/STREAMING.md) for streaming implementation details.
+See [`frontend/docs/ARCHITECTURE.md`](../../../docs/ARCHITECTURE.md) for auth and streaming details.
 
 ## Integration (EditorPage)
 

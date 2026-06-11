@@ -100,4 +100,4 @@ VITE_API_URL=/api
 
 - 根文档：`../README.md`
 - 编辑器系统：`docs/EDITOR_SYSTEM.md`
-- 流式接口：`docs/STREAMING.md`
+- 架构（认证 + SSE）：`docs/ARCHITECTURE.md`

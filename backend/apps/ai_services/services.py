@@ -3,204 +3,11 @@ import asyncio
 from typing import Dict, List, Optional, AsyncGenerator
 from django.conf import settings
 from apps.works.models import Work, Chapter, LoreEntry, Act
-from apps.chat.models import AIRequest
-from .models import Suggestion
 from . import prompts
 from .providers import get_provider, LLMProvider, PROVIDER_CONFIG
 import logging
-from openai import AsyncOpenAI
 
 logger = logging.getLogger('ai_services')
-
-
-class DeepSeekAPI:
-    """DeepSeek API Client - Uses OpenAI client library"""
-
-    def __init__(self, api_key: str = None):
-        # Use provided API key, or fall back to settings (for backward compatibility)
-        self.api_key = api_key or getattr(settings, 'DEEPSEEK_API_KEY', None)
-        self.base_url = settings.DEEPSEEK_API_BASE
-
-        if not self.api_key:
-            raise ValueError("API密钥未配置。请在设置中配置您的DeepSeek API密钥。")
-
-        self.client = AsyncOpenAI(
-            api_key=self.api_key,
-            base_url=self.base_url
-        )
-
-    async def chat_completion(
-        self,
-        messages: List[Dict],
-        model: str = None,
-        stream: bool = True,
-        max_tokens: int = None,
-        response_format: Optional[Dict] = None,
-        temperature: float = None,
-        top_p: float = None,
-        frequency_penalty: float = None,
-        presence_penalty: float = None
-    ) -> Dict:
-        """Send chat completion request"""
-        model = model or prompts.DEFAULT_MODEL
-        max_tokens = max_tokens or prompts.DEFAULT_MAX_TOKENS
-        temperature = temperature if temperature is not None else prompts.DEFAULT_TEMPERATURE
-
-        try:
-            if stream:
-                # Stream response and collect chunks
-                content_chunks = []
-                stream_kwargs = {
-                    "model": model,
-                    "messages": messages,
-                    "temperature": temperature,
-                    "max_tokens": max_tokens,
-                    "stream": True
-                }
-                if top_p is not None:
-                    stream_kwargs["top_p"] = top_p
-                if frequency_penalty is not None:
-                    stream_kwargs["frequency_penalty"] = frequency_penalty
-                if presence_penalty is not None:
-                    stream_kwargs["presence_penalty"] = presence_penalty
-                if response_format:
-                    stream_kwargs["response_format"] = response_format
-
-                stream_response = await self.client.chat.completions.create(**stream_kwargs)
-
-                reasoning_chunks = []
-                content_chunks = []
-                async for chunk in stream_response:
-                    if chunk.choices and len(chunk.choices) > 0 and chunk.choices[0].delta:
-                        delta = chunk.choices[0].delta
-                        # Collect reasoning content (for deepseek-reasoner)
-                        if hasattr(delta, 'reasoning_content') and delta.reasoning_content:
-                            reasoning_chunks.append(delta.reasoning_content)
-                        # Collect regular content
-                        if delta.content:
-                            content_chunks.append(delta.content)
-
-                # Return in the same format as non-streaming
-                reasoning_content = ''.join(reasoning_chunks)
-                content = ''.join(content_chunks)
-
-                # Format: show reasoning before content
-                full_content = ""
-                if reasoning_content:
-                    full_content = f"【思考过程】\n{reasoning_content}\n\n【回答】\n{content}"
-                else:
-                    full_content = content
-
-                return {
-                    "choices": [{
-                        "message": {
-                            "content": full_content
-                        }
-                    }]
-                }
-            else:
-                # Non-streaming response
-                non_stream_kwargs = {
-                    "model": model,
-                    "messages": messages,
-                    "temperature": temperature,
-                    "max_tokens": max_tokens,
-                    "stream": False
-                }
-                if top_p is not None:
-                    non_stream_kwargs["top_p"] = top_p
-                if frequency_penalty is not None:
-                    non_stream_kwargs["frequency_penalty"] = frequency_penalty
-                if presence_penalty is not None:
-                    non_stream_kwargs["presence_penalty"] = presence_penalty
-                if response_format:
-                    non_stream_kwargs["response_format"] = response_format
-
-                response = await self.client.chat.completions.create(**non_stream_kwargs)
-
-                message = response.choices[0].message
-                reasoning_content = getattr(message, 'reasoning_content', '')
-                content = message.content
-
-                # Format: show reasoning before content
-                full_content = ""
-                if reasoning_content:
-                    full_content = f"【思考过程】\n{reasoning_content}\n\n【回答】\n{content}"
-                else:
-                    full_content = content
-
-                return {
-                    "choices": [{
-                        "message": {
-                            "content": full_content
-                        }
-                    }]
-                }
-
-        except Exception as e:
-            logger.error(f"DeepSeek API error: {str(e)}")
-            raise
-
-    async def chat_completion_stream(
-        self,
-        messages: List[Dict],
-        model: str = None,
-        max_tokens: int = None,
-        stop: List[str] = None,
-        temperature: float = None,
-        top_p: float = None,
-        frequency_penalty: float = None,
-        presence_penalty: float = None
-    ) -> AsyncGenerator[str, None]:
-        """Send chat completion request and stream content chunks"""
-        model = model or prompts.DEFAULT_MODEL
-        max_tokens = max_tokens or prompts.DEFAULT_MAX_TOKENS
-        temperature = temperature if temperature is not None else prompts.DEFAULT_TEMPERATURE
-
-        try:
-            kwargs = {
-                "model": model,
-                "messages": messages,
-                "temperature": temperature,
-                "max_tokens": max_tokens,
-                "stream": True
-            }
-            if top_p is not None:
-                kwargs["top_p"] = top_p
-            if frequency_penalty is not None:
-                kwargs["frequency_penalty"] = frequency_penalty
-            if presence_penalty is not None:
-                kwargs["presence_penalty"] = presence_penalty
-            if stop:
-                kwargs["stop"] = stop
-
-            stream_response = await self.client.chat.completions.create(**kwargs)
-
-            reasoning_started = False
-            content_started = False
-
-            async for chunk in stream_response:
-                if chunk.choices and len(chunk.choices) > 0 and chunk.choices[0].delta:
-                    delta = chunk.choices[0].delta
-
-                    # Handle reasoning content (for deepseek-reasoner)
-                    if hasattr(delta, 'reasoning_content') and delta.reasoning_content:
-                        if not reasoning_started:
-                            yield "【思考过程】\n"
-                            reasoning_started = True
-                        yield delta.reasoning_content
-
-                    # Handle regular content
-                    if delta.content:
-                        if not content_started:
-                            if reasoning_started:
-                                yield "\n\n【回答】\n"
-                            content_started = True
-                        yield delta.content
-
-        except Exception as e:
-            logger.error(f"DeepSeek API streaming error: {str(e)}")
-            raise
 
 
 class ContextBuilder:
@@ -556,10 +363,6 @@ class AIService:
             # Fallback to DeepSeek for backward compatibility
             self.provider = get_provider('deepseek', api_key, default_model=default_model)
 
-        # Keep deepseek reference for backward compatibility with existing code
-        # that specifically uses deepseek-reasoner (like style analysis)
-        self.deepseek = DeepSeekAPI(api_key=api_key) if provider_name == 'deepseek' else None
-
     def _format_context_for_user(self, context: Dict) -> str:
         """Format context information for user message"""
         formatted_parts = []
@@ -692,27 +495,10 @@ class AIService:
                     # Try other possible keys if "建议" is not present
                     suggestion_content = json_response.get("suggestion", json_response.get("content", "无法生成建议"))
 
-                # Create suggestion in database
-                async def create_suggestion(content_text):
-                    def _create():
-                        return Suggestion.objects.create(
-                            work=chapter.work,
-                            chapter=chapter,
-                            suggestion_type='improve',
-                            content=content_text,
-                            target_text=target_text or '',
-                            trigger_reason='manual' if target_text else 'auto',
-                            model_used=prompts.DEFAULT_MODEL
-                        )
-                    return await sync_to_async(_create)()
-
-                suggestion = await create_suggestion(suggestion_content)
-
                 return [{
-                    'id': suggestion.id,
-                    'type': suggestion.suggestion_type,
-                    'content': suggestion.content,
-                    'target_text': suggestion.target_text
+                    'type': 'improve',
+                    'content': suggestion_content,
+                    'target_text': target_text or '',
                 }]
 
             except json.JSONDecodeError as je:

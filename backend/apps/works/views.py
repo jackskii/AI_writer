@@ -226,30 +226,6 @@ class ChapterViewSet(viewsets.ModelViewSet):
         
         return Response({'status': 'saved', 'timestamp': chapter.last_autosave})
 
-    @action(detail=True, methods=['post'])
-    def summary(self, request, work_pk=None, pk=None):
-        """生成章节摘要"""
-        chapter = self.get_object()
-
-        try:
-            from apps.ai_services.services import AIService, run_async_ai_task
-            api_key, provider, default_model = get_user_api_key(request.user)
-            ai_service = AIService(api_key=api_key, provider_name=provider, default_model=default_model)
-            summary = run_async_ai_task(
-                ai_service.generate_summary(chapter)
-            )
-
-            # 保存摘要到章节
-            chapter.summary = summary
-            chapter.save(update_fields=['summary'])
-
-            return Response({'summary': summary})
-        except Exception as e:
-            return Response(
-                {'error': str(e)},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
-
     @action(detail=False, methods=['post'])
     def reorder(self, request, work_pk=None):
         """重新排序章节并自动更新章节号"""
@@ -385,15 +361,6 @@ class FactionViewSet(viewsets.ModelViewSet):
                     lore_entry.factions.add(no_faction)
         
         super().perform_destroy(instance)
-
-    @action(detail=True, methods=['patch'])
-    def toggle_collapse(self, request, work_pk=None, pk=None):
-        """Toggle faction collapsed state"""
-        faction = self.get_object()
-        faction.is_collapsed = not faction.is_collapsed
-        faction.save(update_fields=['is_collapsed'])
-        return Response({'is_collapsed': faction.is_collapsed})
-
 
 class LoreEntryViewSet(viewsets.ModelViewSet):
     serializer_class = LoreEntrySerializer

@@ -48,7 +48,6 @@ export interface Faction {
   is_default: boolean;
   faction_type: 'normal' | 'no_faction' | 'worldbuilding';
   order: number;
-  is_collapsed: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -109,11 +108,6 @@ export interface ChatMessage {
   timestamp: string;
 }
 
-export interface AIService {
-  type: 'chat' | 'continue' | 'suggest' | 'summary';
-  model: 'deepseek-v4-pro' | 'deepseek-reasoner' | 'deepseek-chat';
-}
-
 export interface Suggestion {
   id: string;
   type: 'expand' | 'improve' | 'rewrite' | 'continue';
@@ -124,14 +118,6 @@ export interface Suggestion {
     end: number;
   };
   created_at: string;
-}
-
-export interface AIContext {
-  synopsis: string;
-  loreEntries: LoreEntry[];
-  recentChapterSummaries: string[];
-  currentChapterContent: string;
-  guide?: string;
 }
 
 export interface WritingStylePerspective {

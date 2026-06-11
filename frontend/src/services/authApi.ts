@@ -80,16 +80,6 @@ export const authApi = {
     await authAxios.post(`${API_BASE_URL}/api/auth/logout/`, {});
   },
 
-  getProfile: async (): Promise<User> => {
-    const response = await authAxios.get(`${API_BASE_URL}/api/auth/profile/`);
-    return response.data;
-  },
-
-  updateProfile: async (data: Partial<User>): Promise<User> => {
-    const response = await authAxios.put(`${API_BASE_URL}/api/auth/profile/update/`, data);
-    return response.data;
-  },
-
   getSettings: async (): Promise<UserSettings> => {
     const response = await authAxios.get(`${API_BASE_URL}/api/auth/settings/`);
     return response.data;

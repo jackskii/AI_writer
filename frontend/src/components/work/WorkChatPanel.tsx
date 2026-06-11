@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Send, Bot, User, Square, Trash2, RotateCcw } from 'lucide-react';
-import ReactMarkdown from 'react-markdown';
+import { Send, Square } from 'lucide-react';
 import { aiApi, chatApi } from '../../services/api';
+import { ChatMessageList } from '../chat/ChatMessageList';
 import { Button } from '../ui/Button';
 import { Textarea } from '../ui/Input';
 import type { Work, ChatMessage } from '../../types';
@@ -420,99 +420,19 @@ export const WorkChatPanel: React.FC<WorkChatPanelProps> = ({ work, scrollToLate
       </div>
 
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
-        {messages.map((message) => (
-          <div key={message.id} className="w-full">
-            <div className={`flex items-center mb-2 ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-              <div className={`flex items-center gap-2 ${message.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
-                <div className={`flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center ${
-                  message.role === 'assistant' ? 'bg-dark-primary' : 'bg-dark-secondary'
-                }`}>
-                  {message.role === 'assistant' ? (
-                    <Bot size={12} className="text-white" />
-                  ) : (
-                    <User size={12} className="text-white" />
-                  )}
-                </div>
-                <span className="text-xs text-dark-text-muted">
-                  {message.role === 'assistant' ? 'AI顾问' : '你'}
-                </span>
-              </div>
-            </div>
-
-            <div className={`w-full ${message.role === 'user' ? 'bg-dark-secondary/40' : 'bg-dark-surface'} border border-dark-border rounded-lg p-3 mb-1`}>
-              {message.role === 'assistant' ? (
-                <div className="prose prose-sm prose-invert max-w-none text-dark-text">
-                  <ReactMarkdown>{message.content}</ReactMarkdown>
-                </div>
-              ) : (
-                <div className="whitespace-pre-wrap text-sm text-dark-text">
-                  {message.content}
-                </div>
-              )}
-            </div>
-
-            {/* Timestamp and Action Buttons */}
-            <div className={`flex items-center gap-2 mb-4 ${
-              message.role === 'user'
-                ? 'justify-end'
-                : 'justify-start'
-            }`}>
-              <div className={`text-xs opacity-70 ${
-                message.role === 'user'
-                  ? 'text-dark-text-muted'
-                  : 'text-dark-text-muted'
-              }`}>
-                {new Date(message.timestamp).toLocaleString()}
-              </div>
-
-              {/* Action buttons */}
-              <div className="flex items-center gap-1">
-                {message.role === 'assistant' && (
-                  <button
-                    onClick={() => handleRegenerateMessage(message.id)}
-                    disabled={isStreamingChat}
-                    className="p-1 rounded hover:bg-dark-bg text-dark-text-muted hover:text-dark-text transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                    title="重新生成"
-                  >
-                    <RotateCcw size={12} />
-                  </button>
-                )}
-                <button
-                  onClick={() => handleDeleteMessage(message.id)}
-                  disabled={isStreamingChat}
-                  className="p-1 rounded hover:bg-dark-bg text-dark-text-muted hover:text-red-400 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                  title="删除此消息及之后的消息"
-                >
-                  <Trash2 size={12} />
-                </button>
-              </div>
-            </div>
-          </div>
-        ))}
-
-        {isStreamingChat && (
-          <div className="w-full">
-            <div className="flex items-center mb-2 justify-start">
-              <div className="flex items-center gap-2">
-                <div className="flex-shrink-0 w-6 h-6 bg-dark-primary rounded-full flex items-center justify-center">
-                  <Bot size={12} className="text-white" />
-                </div>
-                <span className="text-xs text-dark-text-muted">AI顾问</span>
-              </div>
-            </div>
-            <div className="w-full bg-dark-surface border border-dark-border rounded-lg p-3 mb-1">
-              <div className="prose prose-sm prose-invert max-w-none text-dark-text">
-                <ReactMarkdown>{streamingMessage}</ReactMarkdown>
-                <span className="inline-block w-2 h-4 bg-dark-primary animate-pulse ml-1" />
-              </div>
-            </div>
-            <div className="text-xs opacity-70 mb-4 text-left text-dark-text-muted">
-              正在输入...
-            </div>
-          </div>
-        )}
-
-        <div ref={messagesEndRef} />
+        <ChatMessageList
+          messages={messages}
+          streamingMessage={streamingMessage}
+          isStreamingChat={isStreamingChat}
+          errorMessage=""
+          assistantLabel="AI顾问"
+          userBubbleClass="bg-dark-secondary/40 text-dark-text border border-dark-border"
+          isStreamingChatDisabled={isStreamingChat}
+          onRegenerate={handleRegenerateMessage}
+          onDelete={handleDeleteMessage}
+          messagesEndRef={messagesEndRef}
+          formatTimestamp={(ts) => new Date(ts).toLocaleString()}
+        />
       </div>
 
       <div className="flex-shrink-0 border-t border-dark-border bg-dark-surface p-4">

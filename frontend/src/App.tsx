@@ -6,6 +6,7 @@ import { WorkDetailPage } from './pages/WorkDetailPage';
 import { EditorPage } from './pages/EditorPage';
 import { AuthPage } from './pages/AuthPage';
 import { useAuthStore } from './stores/useAuthStore';
+import { Toast } from './components/ui/Toast';
 
 // Create a client
 const queryClient = new QueryClient({
@@ -29,6 +30,7 @@ function App() {
     <QueryClientProvider client={queryClient}>
       <Router>
         <div className="min-h-screen bg-dark-bg text-dark-text font-ui">
+          <Toast />
           <Routes>
             <Route path="/auth" element={<AuthPage />} />
             <Route path="/" element={

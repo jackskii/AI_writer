@@ -107,7 +107,7 @@ class FactionSerializer(serializers.ModelSerializer):
         model = Faction
         fields = [
             'id', 'work', 'name', 'description',
-            'is_default', 'faction_type', 'order', 'is_collapsed',
+            'is_default', 'faction_type', 'order',
             'created_at', 'updated_at'
         ]
         read_only_fields = ['work', 'is_default', 'faction_type', 'created_at', 'updated_at']

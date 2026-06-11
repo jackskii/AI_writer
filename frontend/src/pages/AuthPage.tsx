@@ -41,7 +41,7 @@ export const AuthPage: React.FC = () => {
             </h2>
             
             <p className="text-lg text-dark-text-muted mb-8 leading-relaxed">
-              智能续写、情节建议、角色分析... 
+              自动编辑、情节建议、章节对话... 
               专业的 AI 写作工具帮助您突破创作瓶颈，
               提升写作效率，创造精彩故事。
             </p>

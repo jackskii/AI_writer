@@ -21,10 +21,7 @@ export default defineConfig({
     chunkSizeWarningLimit: 1000
   },
   define: {
-    // Security: disable development features in production
     __DEV__: false,
-    // Fix for react-highlight-within-textarea/draft-js global dependency
-    global: 'globalThis',
   },
   // Environment variables prefix for security
   envPrefix: ['VITE_'],
