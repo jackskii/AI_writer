@@ -1,4 +1,5 @@
 import json
+import re
 import asyncio
 from typing import Dict, List, Optional, AsyncGenerator
 from django.conf import settings
@@ -8,6 +9,53 @@ from .providers import get_provider, LLMProvider, PROVIDER_CONFIG
 import logging
 
 logger = logging.getLogger('ai_services')
+
+ANSWER_MARKER = "【回答】"
+THOUGHT_MARKER = "【思考过程】"
+
+
+def _strip_answer_only_text(content: str) -> str:
+    """Strip reasoning/thinking markers from a non-streaming completion."""
+    if not content:
+        return ""
+    text = content
+    if THOUGHT_MARKER in text:
+        text = re.sub(
+            rf"{re.escape(THOUGHT_MARKER)}[\s\S]*?(?={re.escape(ANSWER_MARKER)}|$)",
+            "",
+            text,
+        )
+    if ANSWER_MARKER in text:
+        text = text.split(ANSWER_MARKER)[-1]
+    text = text.strip()
+    # Remove markdown code fences if the model wraps output
+    fence_match = re.match(r"^```(?:\w+)?\s*\n?([\s\S]*?)\n?```\s*$", text)
+    if fence_match:
+        text = fence_match.group(1).strip()
+    return text
+
+
+async def _yield_answer_only_stream(
+    provider: LLMProvider,
+    messages: List[Dict],
+    **kwargs,
+) -> AsyncGenerator[str, None]:
+    """Yield only answer content, stripping reasoning/thinking markers from the stream."""
+    buffer = ""
+    answer_started = False
+    async for chunk in provider.chat_completion_stream(messages, **kwargs):
+        if answer_started:
+            yield chunk
+            continue
+        buffer += chunk
+        if ANSWER_MARKER in buffer:
+            answer_started = True
+            after = buffer.split(ANSWER_MARKER)[-1]
+            buffer = ""
+            if after:
+                yield after
+    if not answer_started and buffer.strip():
+        yield buffer
 
 
 class ContextBuilder:
@@ -522,7 +570,7 @@ class AIService:
         ]
 
         try:
-            async for chunk in self.provider.chat_completion_stream(messages):
+            async for chunk in _yield_answer_only_stream(self.provider, messages):
                 yield chunk
         except Exception as e:
             logger.error(f"Generate summary stream error: {str(e)}")
@@ -551,7 +599,7 @@ class AIService:
         ]
 
         try:
-            async for chunk in self.provider.chat_completion_stream(messages):
+            async for chunk in _yield_answer_only_stream(self.provider, messages):
                 yield chunk
         except Exception as e:
             logger.error(f"Generate act synopsis stream error: {str(e)}")
@@ -712,43 +760,23 @@ class AIService:
 
             logger.debug(f"Sending streaming auto-describe request to {self.provider.provider_name} API")
 
-            # Strip reasoning: only yield content after 【回答】 so UI gets answer only
-            buffer = ""
-            answer_started = False
-            async for chunk in self.provider.chat_completion_stream(messages):
-                if answer_started:
-                    yield chunk
-                    continue
-                buffer += chunk
-                if "【回答】" in buffer:
-                    answer_started = True
-                    after = buffer.split("【回答】")[-1]
-                    buffer = ""
-                    if after:
-                        yield after
-            if not answer_started and buffer.strip():
-                # No marker: yield full content (non-reasoning model)
-                yield buffer
+            async for chunk in _yield_answer_only_stream(self.provider, messages):
+                yield chunk
 
         except Exception as e:
             logger.error(f"Auto-describe stream error: {str(e)}", exc_info=True)
             raise Exception(f"{prompts.ERROR_AUTO_DESCRIBE_FAILED}: {str(e)}")
 
-    async def analyze_writing_style(self, text_sample: str) -> Dict:
-        """分析文本样本的写作风格 - 使用deepseek-v4-pro thinking模式"""
+    async def analyze_writing_style(self, text_sample: str) -> str:
+        """分析文本样本的写作风格，返回纯文本风格指南"""
         logger.debug(f"Starting writing style analysis for text of length: {len(text_sample)}")
 
         try:
-            # Use prompt from prompts.py
             analysis_prompt = prompts.format_style_analysis_request(text_sample)
-
-            messages = [
-                {"role": "user", "content": analysis_prompt}
-            ]
+            messages = [{"role": "user", "content": analysis_prompt}]
 
             logger.debug(f"Sending style analysis request to {self.provider.provider_name} API")
 
-            # Use reasoning model if available, otherwise use default model
             if self.provider.supports_reasoning and self.provider.reasoning_model:
                 model = self.provider.reasoning_model
                 logger.debug(f"Using reasoning model: {model}")
@@ -756,7 +784,6 @@ class AIService:
                 model = self.provider.default_model
                 logger.debug(f"Provider does not support reasoning, using default model: {model}")
 
-            # Use provider's chat_completion method
             response = await self.provider.chat_completion(
                 messages,
                 model=model,
@@ -764,63 +791,31 @@ class AIService:
                 reasoning_mode=True,
             )
 
-            # Extract content from response (provider returns string directly)
-            content = response
-
-            # Parse JSON (handle case where reasoning is included)
-            # If content has reasoning sections, extract just the JSON part
-            if "【回答】" in content:
-                # Extract content after 【回答】
-                json_part = content.split("【回答】")[-1].strip()
-            else:
-                json_part = content
-
-            try:
-                analysis_result = json.loads(json_part)
-                logger.debug(f"Successfully parsed analysis result with {len(analysis_result.get('perspectives', []))} perspectives")
-                return analysis_result
-            except json.JSONDecodeError as json_err:
-                logger.error(f"Failed to parse JSON from AI response: {json_err}")
-                logger.error(f"Response content: {content[:500]}")
-                # Return a fallback structure
-                return {
-                    "overall": "AI返回格式异常，请重试",
-                    "perspectives": [
-                        {
-                            "name": "分析结果",
-                            "description": content,
-                            "examples": []
-                        }
-                    ]
-                }
+            style_text = _strip_answer_only_text(response)
+            if not style_text:
+                raise Exception("AI未返回有效的风格指南内容")
+            logger.debug(f"Style analysis completed, output length: {len(style_text)}")
+            return style_text
 
         except Exception as e:
             logger.error(f"Writing style analysis error: {str(e)}", exc_info=True)
-            raise Exception(f"写作风格分析失败: {str(e)}")
+            raise Exception(f"{prompts.ERROR_STYLE_ANALYSIS_FAILED}: {str(e)}")
 
-    async def analyze_nsfw_writing_style(self, text_sample: str) -> Dict:
-        """分析NSFW文本样本的写作风格 - 使用deepseek-v4-pro thinking模式"""
+    async def analyze_nsfw_writing_style(self, text_sample: str) -> str:
+        """分析NSFW文本样本的写作风格，返回纯文本风格指南"""
         logger.debug(f"Starting NSFW writing style analysis for text of length: {len(text_sample)}")
 
         try:
-            # Use prompt from prompts.py
             analysis_prompt = prompts.format_nsfw_style_analysis_request(text_sample)
-
-            messages = [
-                {"role": "user", "content": analysis_prompt}
-            ]
+            messages = [{"role": "user", "content": analysis_prompt}]
 
             logger.debug(f"Sending NSFW style analysis request to {self.provider.provider_name} API")
 
-            # Use reasoning model if available, otherwise use default model
             if self.provider.supports_reasoning and self.provider.reasoning_model:
                 model = self.provider.reasoning_model
-                logger.debug(f"Using reasoning model: {model}")
             else:
                 model = self.provider.default_model
-                logger.debug(f"Provider does not support reasoning, using default model: {model}")
 
-            # Use provider's chat_completion method
             response = await self.provider.chat_completion(
                 messages,
                 model=model,
@@ -828,39 +823,15 @@ class AIService:
                 reasoning_mode=True,
             )
 
-            # Extract content from response (provider returns string directly)
-            content = response
-
-            # Parse JSON (handle case where reasoning is included)
-            # If content has reasoning sections, extract just the JSON part
-            if "【回答】" in content:
-                # Extract content after 【回答】
-                json_part = content.split("【回答】")[-1].strip()
-            else:
-                json_part = content
-
-            try:
-                analysis_result = json.loads(json_part)
-                logger.debug(f"Successfully parsed NSFW analysis result with {len(analysis_result.get('perspectives', []))} perspectives")
-                return analysis_result
-            except json.JSONDecodeError as json_err:
-                logger.error(f"Failed to parse JSON from AI response: {json_err}")
-                logger.error(f"Response content: {content[:500]}")
-                # Return a fallback structure
-                return {
-                    "overall": "AI返回格式异常，请重试",
-                    "perspectives": [
-                        {
-                            "name": "分析结果",
-                            "description": content,
-                            "examples": []
-                        }
-                    ]
-                }
+            style_text = _strip_answer_only_text(response)
+            if not style_text:
+                raise Exception("AI未返回有效的NSFW风格指南内容")
+            logger.debug(f"NSFW style analysis completed, output length: {len(style_text)}")
+            return style_text
 
         except Exception as e:
             logger.error(f"NSFW writing style analysis error: {str(e)}", exc_info=True)
-            raise Exception(f"NSFW写作风格分析失败: {str(e)}")
+            raise Exception(f"{prompts.ERROR_NSFW_STYLE_ANALYSIS_FAILED}: {str(e)}")
 
 
 # Sync wrapper for use in Django views

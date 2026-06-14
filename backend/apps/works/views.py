@@ -428,14 +428,37 @@ class WritingStyleViewSet(viewsets.ModelViewSet):
     """用户全局写作风格管理"""
     serializer_class = WritingStyleSerializer
     permission_classes = [IsAuthenticated]
+    pagination_class = None  # Return all styles; list is small per user
 
     def get_queryset(self):
-        # Return only styles belonging to the current user
         return WritingStyle.objects.filter(user=self.request.user)
 
+    def list(self, request, *args, **kwargs):
+        self._ensure_nsfw_style(request.user)
+        return super().list(request, *args, **kwargs)
+
     def perform_create(self, serializer):
-        # Automatically set the user to the current user
+        if serializer.validated_data.get('is_nsfw'):
+            from rest_framework.exceptions import ValidationError
+            raise ValidationError({'is_nsfw': 'NSFW风格由系统管理，请通过风格管理器编辑'})
         serializer.save(user=self.request.user)
+
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        if instance.is_nsfw:
+            return Response(
+                {'error': 'NSFW风格不可删除'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        return super().destroy(request, *args, **kwargs)
+
+    @staticmethod
+    def _ensure_nsfw_style(user):
+        WritingStyle.objects.get_or_create(
+            user=user,
+            is_nsfw=True,
+            defaults={'name': 'NSFW风格', 'style_data': ''},
+        )
 
     @action(detail=False, methods=['post'])
     def analyze(self, request):
@@ -467,16 +490,12 @@ class WritingStyleViewSet(viewsets.ModelViewSet):
         try:
             api_key, provider, default_model = get_user_api_key(request.user)
             ai_service = AIService(api_key=api_key, provider_name=provider, default_model=default_model)
-            analysis_result = run_async_ai_task(
+            style_text = run_async_ai_task(
                 ai_service.analyze_writing_style(text_sample)
             )
 
-            # Format the analysis result into readable text
-            formatted_text = self._format_analysis_result(analysis_result)
-
             return Response({
-                'analysis_result': analysis_result,
-                'formatted_text': formatted_text,
+                'style_text': style_text,
                 'name': name
             })
 
@@ -516,16 +535,12 @@ class WritingStyleViewSet(viewsets.ModelViewSet):
         try:
             api_key, provider, default_model = get_user_api_key(request.user)
             ai_service = AIService(api_key=api_key, provider_name=provider, default_model=default_model)
-            analysis_result = run_async_ai_task(
+            style_text = run_async_ai_task(
                 ai_service.analyze_nsfw_writing_style(text_sample)
             )
 
-            # Format the analysis result into readable text
-            formatted_text = self._format_analysis_result(analysis_result)
-
             return Response({
-                'analysis_result': analysis_result,
-                'formatted_text': formatted_text,
+                'style_text': style_text,
                 'name': name
             })
 
@@ -534,35 +549,3 @@ class WritingStyleViewSet(viewsets.ModelViewSet):
                 {'error': f'NSFW分析失败：{str(e)}'},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
-
-    def _format_analysis_result(self, analysis_result):
-        """将结构化分析结果格式化为可读文本"""
-        if not analysis_result or 'perspectives' not in analysis_result:
-            return ''
-
-        formatted_parts = []
-
-        # Add overall description at the top if present
-        if 'overall' in analysis_result and analysis_result['overall']:
-            overall = f"【风格总览】\n{analysis_result['overall']}"
-            formatted_parts.append(overall)
-
-        # Format each perspective
-        for perspective in analysis_result['perspectives']:
-            name = perspective.get('name', '')
-            description = perspective.get('description', '')
-            examples = perspective.get('examples', [])
-
-            # Format with 【】brackets around name, description as paragraph
-            part = f"【{name}】\n{description}"
-
-            # Add examples on separate lines if present
-            if examples:
-                part += "\n示例：\n"
-                for example in examples:
-                    part += f"{example}\n"
-
-            formatted_parts.append(part)
-
-        # Join with double newline to create spacing between sections
-        return '\n\n'.join(formatted_parts)

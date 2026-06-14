@@ -5,6 +5,7 @@ import { Button } from '../ui/Button';
 import { Textarea } from '../ui/Input';
 import { Card, CardHeader, CardContent } from '../ui/Card';
 import { LoadingSpinner } from '../ui/Loading';
+import { appendAnswerOnlyChunk, stripThoughtProcess } from '../../utils/stripThoughtProcess';
 
 interface ChapterInfo {
   id: number;
@@ -95,13 +96,16 @@ export const AutoDescribeModal: React.FC<AutoDescribeModalProps> = ({
     setUsedChapters([]);
     setError('');
 
+    let accumulated = '';
+
     try {
       await aiApi.autoDescribeEntry(
         workId,
         entryName,
         // onChunk
         (chunk: string) => {
-          setGeneratedDescription(prev => prev + chunk);
+          accumulated = appendAnswerOnlyChunk(accumulated, chunk);
+          setGeneratedDescription(accumulated);
         },
         // onStart
         (chapters) => {
@@ -109,7 +113,9 @@ export const AutoDescribeModal: React.FC<AutoDescribeModalProps> = ({
         },
         // onEnd
         (description, chapters) => {
-          setGeneratedDescription(description);
+          const cleaned = stripThoughtProcess(description);
+          accumulated = cleaned;
+          setGeneratedDescription(cleaned);
           setUsedChapters(chapters as ChapterInfo[]);
           setIsGenerating(false);
         },

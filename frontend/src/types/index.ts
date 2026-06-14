@@ -130,6 +130,7 @@ export interface WritingStyle {
   id: number;
   name: string;
   style_data: string;
+  is_nsfw?: boolean;
   analysis_result?: {
     overall?: string;
     perspectives: WritingStylePerspective[];

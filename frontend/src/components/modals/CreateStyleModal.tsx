@@ -23,47 +23,28 @@ export const CreateStyleModal: React.FC<CreateStyleModalProps> = ({
   const [name, setName] = useState('');
   const [textSample, setTextSample] = useState('');
   const [styleData, setStyleData] = useState('');
-  const [analysisResult, setAnalysisResult] = useState<any>(null);
   const [showResult, setShowResult] = useState(false);
-  const [isNsfw, setIsNsfw] = useState(false);
 
-  // Reset state when modal closes
   const handleClose = () => {
     setCreationMethod(null);
     setName('');
     setTextSample('');
     setStyleData('');
-    setAnalysisResult(null);
     setShowResult(false);
-    setIsNsfw(false);
     onClose();
   };
 
-  // Analyze text mutation (normal)
   const analyzeMutation = useMutation({
     mutationFn: () => stylesApi.analyze(textSample, name || '未命名风格'),
     onSuccess: (response) => {
-      setAnalysisResult(response.data.analysis_result);
-      setStyleData(response.data.formatted_text);
+      setStyleData(response.data.style_text);
       setName(response.data.name);
       setShowResult(true);
     },
   });
 
-  // Analyze NSFW text mutation
-  const analyzeNsfwMutation = useMutation({
-    mutationFn: () => stylesApi.analyzeNsfw(textSample, name || '未命名NSFW风格'),
-    onSuccess: (response) => {
-      setAnalysisResult(response.data.analysis_result);
-      setStyleData(response.data.formatted_text);
-      setName(response.data.name);
-      setShowResult(true);
-    },
-  });
-
-  // Create style mutation
   const createMutation = useMutation({
-    mutationFn: (data: { name: string; style_data: string; analysis_result?: any }) =>
+    mutationFn: (data: { name: string; style_data: string }) =>
       stylesApi.create(data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['styles'] });
@@ -87,12 +68,7 @@ export const CreateStyleModal: React.FC<CreateStyleModalProps> = ({
       return;
     }
 
-    // Use appropriate mutation based on NSFW flag
-    if (isNsfw) {
-      analyzeNsfwMutation.mutate();
-    } else {
-      analyzeMutation.mutate();
-    }
+    analyzeMutation.mutate();
   };
 
   const handleCreateFromAnalysis = () => {
@@ -104,7 +80,6 @@ export const CreateStyleModal: React.FC<CreateStyleModalProps> = ({
     createMutation.mutate({
       name: name.trim(),
       style_data: styleData,
-      analysis_result: analysisResult,
     });
   };
 
@@ -132,23 +107,16 @@ export const CreateStyleModal: React.FC<CreateStyleModalProps> = ({
         <CardHeader className="border-b border-dark-border sticky top-0 bg-dark-surface z-10">
           <div className="flex items-center justify-between">
             <h2 className="text-xl font-semibold text-dark-text">创建写作风格</h2>
-            <button
-              onClick={handleClose}
-              className="text-dark-text-muted hover:text-dark-text transition-colors"
-            >
+            <button onClick={handleClose} className="text-dark-text-muted hover:text-dark-text transition-colors">
               <X size={24} />
             </button>
           </div>
         </CardHeader>
 
         <CardContent className="p-6 space-y-6">
-          {/* Method Selection */}
           {!creationMethod && (
             <div className="space-y-4">
-              <p className="text-dark-text-muted text-sm">
-                选择创建方式：
-              </p>
-
+              <p className="text-dark-text-muted text-sm">选择创建方式：</p>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <button
                   onClick={() => setCreationMethod('analyze')}
@@ -175,15 +143,12 @@ export const CreateStyleModal: React.FC<CreateStyleModalProps> = ({
                     </div>
                     <h3 className="font-semibold text-dark-text">空白模板</h3>
                   </div>
-                  <p className="text-sm text-dark-text-muted">
-                    从空白开始，手动编写风格描述
-                  </p>
+                  <p className="text-sm text-dark-text-muted">从空白开始，手动编写风格描述</p>
                 </button>
               </div>
             </div>
           )}
 
-          {/* Analyze from Text */}
           {creationMethod === 'analyze' && !showResult && (
             <div className="space-y-4">
               <button
@@ -194,9 +159,7 @@ export const CreateStyleModal: React.FC<CreateStyleModalProps> = ({
               </button>
 
               <div>
-                <label className="block text-sm font-medium text-dark-text mb-2">
-                  风格名称
-                </label>
+                <label className="block text-sm font-medium text-dark-text mb-2">风格名称</label>
                 <Input
                   value={name}
                   onChange={(e) => setName(e.target.value)}
@@ -205,28 +168,8 @@ export const CreateStyleModal: React.FC<CreateStyleModalProps> = ({
                 />
               </div>
 
-              {/* NSFW Toggle */}
-              <div className="bg-dark-bg border border-dark-border rounded-lg p-3">
-                <label className="flex items-center gap-3 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={isNsfw}
-                    onChange={(e) => setIsNsfw(e.target.checked)}
-                    className="w-4 h-4 rounded border-dark-border bg-dark-surface text-dark-primary focus:ring-dark-primary focus:ring-offset-0"
-                  />
-                  <div className="flex-1">
-                    <span className="text-sm font-medium text-dark-text">NSFW内容</span>
-                    <p className="text-xs text-dark-text-muted mt-0.5">
-                      勾选此项将使用专门的成人内容风格分析（分析维度包括：情欲描写、身体描写、动作描写、对话风格、氛围营造、心理描写）
-                    </p>
-                  </div>
-                </label>
-              </div>
-
               <div>
-                <label className="block text-sm font-medium text-dark-text mb-2">
-                  文章内容 (1000-100000字)
-                </label>
+                <label className="block text-sm font-medium text-dark-text mb-2">文章内容 (1000-100000字)</label>
                 <Textarea
                   value={textSample}
                   onChange={(e) => setTextSample(e.target.value)}
@@ -234,37 +177,17 @@ export const CreateStyleModal: React.FC<CreateStyleModalProps> = ({
                   className="bg-dark-bg border-dark-border min-h-[300px] font-mono text-sm"
                   rows={15}
                 />
-                <div className="space-y-1 mt-2">
-                  <div className="flex justify-between text-xs text-dark-text-muted">
-                    <span>字数: {textSample.length}</span>
-                    <span className={textSample.length < 1000 || textSample.length > 100000 ? 'text-yellow-500' : textSample.length < 10000 ? 'text-orange-400' : 'text-green-500'}>
-                      {textSample.length < 1000
-                        ? `还需${1000 - textSample.length}字`
-                        : textSample.length > 100000
-                        ? `超出${textSample.length - 100000}字`
-                        : textSample.length < 10000
-                        ? '建议至少10000字以获得更好的分析效果'
-                        : '字数符合要求'}
-                    </span>
-                  </div>
-                  {textSample.length >= 1000 && textSample.length < 10000 && (
-                    <p className="text-xs text-orange-400">
-                      提示：建议提供至少10000字的文本以获得更准确的风格分析
-                    </p>
-                  )}
-                </div>
+                <div className="text-xs text-dark-text-muted mt-2">字数: {textSample.length}</div>
               </div>
 
               <div className="flex justify-end gap-3">
-                <Button variant="outline" onClick={handleClose}>
-                  取消
-                </Button>
+                <Button variant="outline" onClick={handleClose}>取消</Button>
                 <Button
                   onClick={handleAnalyze}
-                  disabled={analyzeMutation.isPending || analyzeNsfwMutation.isPending || textSample.length < 1000 || textSample.length > 100000}
+                  disabled={analyzeMutation.isPending || textSample.length < 1000 || textSample.length > 100000}
                   className="flex items-center gap-2"
                 >
-                  {(analyzeMutation.isPending || analyzeNsfwMutation.isPending) ? (
+                  {analyzeMutation.isPending ? (
                     <>
                       <LoadingSpinner size="sm" />
                       分析中...
@@ -280,65 +203,37 @@ export const CreateStyleModal: React.FC<CreateStyleModalProps> = ({
             </div>
           )}
 
-          {/* Show Analysis Result */}
           {creationMethod === 'analyze' && showResult && (
             <div className="space-y-4">
               <div className="bg-dark-bg border border-dark-border rounded-lg p-4">
                 <h3 className="text-sm font-semibold text-green-500 mb-2">分析完成！</h3>
-                <p className="text-sm text-dark-text-muted">
-                  AI已分析完成，你可以在下方查看和编辑分析结果
-                </p>
+                <p className="text-sm text-dark-text-muted">你可以在下方查看和编辑分析结果</p>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-dark-text mb-2">
-                  风格名称
-                </label>
-                <Input
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  className="bg-dark-bg border-dark-border"
-                />
+                <label className="block text-sm font-medium text-dark-text mb-2">风格名称</label>
+                <Input value={name} onChange={(e) => setName(e.target.value)} className="bg-dark-bg border-dark-border" />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-dark-text mb-2">
-                  风格分析结果
-                </label>
+                <label className="block text-sm font-medium text-dark-text mb-2">风格分析结果</label>
                 <Textarea
                   value={styleData}
                   onChange={(e) => setStyleData(e.target.value)}
                   className="bg-dark-bg border-dark-border min-h-[400px] font-mono text-sm"
                   rows={20}
                 />
-                <p className="text-xs text-dark-text-muted mt-2">
-                  你可以编辑分析结果后再保存
-                </p>
               </div>
 
               <div className="flex justify-end gap-3">
-                <Button variant="outline" onClick={handleClose}>
-                  取消
-                </Button>
-                <Button
-                  onClick={handleCreateFromAnalysis}
-                  disabled={createMutation.isPending || !name.trim()}
-                  className="flex items-center gap-2"
-                >
-                  {createMutation.isPending ? (
-                    <>
-                      <LoadingSpinner size="sm" />
-                      创建中...
-                    </>
-                  ) : (
-                    '创建风格'
-                  )}
+                <Button variant="outline" onClick={handleClose}>取消</Button>
+                <Button onClick={handleCreateFromAnalysis} disabled={createMutation.isPending || !name.trim()}>
+                  {createMutation.isPending ? '创建中...' : '创建风格'}
                 </Button>
               </div>
             </div>
           )}
 
-          {/* Blank Template */}
           {creationMethod === 'blank' && (
             <div className="space-y-4">
               <button
@@ -349,9 +244,7 @@ export const CreateStyleModal: React.FC<CreateStyleModalProps> = ({
               </button>
 
               <div>
-                <label className="block text-sm font-medium text-dark-text mb-2">
-                  风格名称
-                </label>
+                <label className="block text-sm font-medium text-dark-text mb-2">风格名称</label>
                 <Input
                   value={name}
                   onChange={(e) => setName(e.target.value)}
@@ -361,34 +254,23 @@ export const CreateStyleModal: React.FC<CreateStyleModalProps> = ({
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-dark-text mb-2">
-                  风格描述
-                </label>
+                <label className="block text-sm font-medium text-dark-text mb-2">风格描述</label>
                 <Textarea
                   value={styleData}
                   onChange={(e) => setStyleData(e.target.value)}
-                  placeholder="编写你的风格描述...&#10;&#10;例如：&#10;## 句式特点&#10;- 使用短句，节奏明快&#10;- 多用动词，少用形容词&#10;&#10;## 对话风格&#10;- 简洁有力，符合人物性格..."
+                  placeholder={"编写你的风格描述...\n\n【类型与风格概述】\n\n\n【描写示例】\n1. \n2. \n\n【对话示例】\n1. \n2. \n\n【叙述示例】\n1. \n2. "}
                   className="bg-dark-bg border-dark-border min-h-[300px] font-mono text-sm"
                   rows={15}
                 />
               </div>
 
               <div className="flex justify-end gap-3">
-                <Button variant="outline" onClick={handleClose}>
-                  取消
-                </Button>
+                <Button variant="outline" onClick={handleClose}>取消</Button>
                 <Button
                   onClick={handleCreateBlank}
                   disabled={createMutation.isPending || !name.trim() || !styleData.trim()}
                 >
-                  {createMutation.isPending ? (
-                    <>
-                      <LoadingSpinner size="sm" />
-                      创建中...
-                    </>
-                  ) : (
-                    '创建风格'
-                  )}
+                  {createMutation.isPending ? '创建中...' : '创建风格'}
                 </Button>
               </div>
             </div>

@@ -260,6 +260,7 @@ class WritingStyle(models.Model):
         blank=True,
         help_text='AI分析的结构化数据，包含多个维度和示例'
     )
+    is_nsfw = models.BooleanField('NSFW风格', default=False)
 
     created_at = models.DateTimeField('创建时间', auto_now_add=True)
     updated_at = models.DateTimeField('更新时间', auto_now=True)

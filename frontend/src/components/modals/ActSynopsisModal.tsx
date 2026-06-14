@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { X, FileText, Sparkles, Zap, CheckCircle, AlertCircle, SkipForward } from 'lucide-react';
-import { actsApi, aiApi } from '../../services/api';
+import { X, FileText, Sparkles, Zap } from 'lucide-react';
+import { actsApi, aiApi, chaptersApi } from '../../services/api';
 import { Button } from '../ui/Button';
 import { Textarea } from '../ui/Input';
 import { Card, CardHeader, CardContent } from '../ui/Card';
+import { appendAnswerOnlyChunk, stripThoughtProcess } from '../../utils/stripThoughtProcess';
 import type { Act } from '../../types';
 
 interface ActSynopsisModalProps {
@@ -13,12 +14,6 @@ interface ActSynopsisModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSynopsisUpdated: (synopsis: string) => void;
-}
-
-interface ChapterProgressItem {
-  chapter: string;
-  status: 'pending' | 'generating' | 'done' | 'error' | 'skipped';
-  message?: string;
 }
 
 export const ActSynopsisModal: React.FC<ActSynopsisModalProps> = ({
@@ -30,11 +25,10 @@ export const ActSynopsisModal: React.FC<ActSynopsisModalProps> = ({
 }) => {
   const [synopsis, setSynopsis] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
-  const [chapterProgress, setChapterProgress] = useState<ChapterProgressItem[]>([]);
-  const [currentPhase, setCurrentPhase] = useState<'idle' | 'chapters' | 'synopsis'>('idle');
-  const [progressMessage, setProgressMessage] = useState('');
+  const [errorMessage, setErrorMessage] = useState('');
+  const accumulatedRef = useRef('');
   const queryClient = useQueryClient();
-  const abortControllerRef = useRef<AbortController | null>(null);
+
   const { data: actDetail } = useQuery({
     queryKey: ['act', workId, act?.id, 'synopsis-modal'],
     queryFn: async () => {
@@ -45,7 +39,23 @@ export const ActSynopsisModal: React.FC<ActSynopsisModalProps> = ({
     enabled: isOpen && !!act,
   });
 
+  const { data: workChapters } = useQuery({
+    queryKey: ['chapters', workId, 'act-synopsis-modal'],
+    queryFn: async () => {
+      const response = await chaptersApi.list(workId);
+      return response.data;
+    },
+    enabled: isOpen && !!act,
+  });
+
   const effectiveAct = actDetail || act;
+  const actChapters = (workChapters || []).filter(ch => ch.act === act?.id);
+  const missingSummaryChapters = actChapters.filter(
+    ch => !ch.summary || !ch.summary.trim()
+  );
+  const hasEnoughChapters = (effectiveAct?.chapter_count || actChapters.length) >= 3;
+  const allChaptersHaveSummary = actChapters.length > 0 && missingSummaryChapters.length === 0;
+  const canGenerate = hasEnoughChapters && allChaptersHaveSummary && !isGenerating;
 
   useEffect(() => {
     if (act) {
@@ -53,21 +63,19 @@ export const ActSynopsisModal: React.FC<ActSynopsisModalProps> = ({
     }
   }, [act, actDetail]);
 
-  // Reset state when modal closes
   useEffect(() => {
     if (!isOpen) {
-      setChapterProgress([]);
-      setCurrentPhase('idle');
-      setProgressMessage('');
+      setErrorMessage('');
       setIsGenerating(false);
     }
   }, [isOpen]);
 
   const updateMutation = useMutation({
-    mutationFn: (synopsisData: { synopsis: string }) => 
+    mutationFn: (synopsisData: { synopsis: string }) =>
       actsApi.update(workId, act!.id, synopsisData),
-    onSuccess: () => {
+    onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: ['acts', workId] });
+      onSynopsisUpdated(variables.synopsis);
     }
   });
 
@@ -78,108 +86,40 @@ export const ActSynopsisModal: React.FC<ActSynopsisModalProps> = ({
   };
 
   const handleGenerate = async () => {
-    if (!effectiveAct || isGenerating) return;
+    if (!effectiveAct || isGenerating || !canGenerate) return;
 
     setIsGenerating(true);
-    setCurrentPhase('chapters');
-    setChapterProgress([]);
+    setErrorMessage('');
     setSynopsis('');
-    setProgressMessage('');
+    accumulatedRef.current = '';
 
     try {
       await aiApi.generateActSynopsisStream(workId, effectiveAct.id, {
-        onStart: () => {
-          setProgressMessage('开始生成卷摘要...');
-        },
-        onChapterProgress: (info) => {
-          setCurrentPhase('chapters');
-          if (info.message && info.total > 0) {
-            setProgressMessage(info.message);
-          }
-          setChapterProgress(prev => {
-            const existing = prev.find(p => p.chapter === info.chapter);
-            if (existing) {
-              return prev.map(p => 
-                p.chapter === info.chapter 
-                  ? { ...p, status: info.status as ChapterProgressItem['status'] }
-                  : p
-              );
-            } else {
-              return [...prev, { chapter: info.chapter, status: info.status as ChapterProgressItem['status'] }];
-            }
-          });
-        },
-        onChapterDone: (chapter) => {
-          setChapterProgress(prev => 
-            prev.map(p => p.chapter === chapter ? { ...p, status: 'done' } : p)
-          );
-        },
-        onChapterSkip: (chapter, message) => {
-          setChapterProgress(prev => {
-            const existing = prev.find(p => p.chapter === chapter);
-            if (existing) {
-              return prev.map(p => 
-                p.chapter === chapter ? { ...p, status: 'skipped', message } : p
-              );
-            } else {
-              return [...prev, { chapter, status: 'skipped', message }];
-            }
-          });
-        },
-        onChapterError: (chapter, message) => {
-          setChapterProgress(prev => {
-            const existing = prev.find(p => p.chapter === chapter);
-            if (existing) {
-              return prev.map(p => 
-                p.chapter === chapter ? { ...p, status: 'error', message } : p
-              );
-            } else {
-              return [...prev, { chapter, status: 'error', message }];
-            }
-          });
-        },
-        onSynopsisProgress: (message) => {
-          setCurrentPhase('synopsis');
-          setProgressMessage(message);
-        },
         onChunk: (chunk) => {
-          setSynopsis(prev => prev + chunk);
+          accumulatedRef.current = appendAnswerOnlyChunk(accumulatedRef.current, chunk);
+          setSynopsis(accumulatedRef.current);
         },
         onEnd: (finalSynopsis) => {
-          setSynopsis(finalSynopsis);
+          const cleaned = stripThoughtProcess(finalSynopsis);
+          accumulatedRef.current = cleaned;
+          setSynopsis(cleaned);
           setIsGenerating(false);
-          setCurrentPhase('idle');
-          setProgressMessage('生成完成');
-          onSynopsisUpdated(finalSynopsis);
-          // Invalidate queries to refresh act data
-          queryClient.invalidateQueries({ queryKey: ['acts', workId] });
         },
         onError: (error) => {
           setIsGenerating(false);
-          setCurrentPhase('idle');
-          setProgressMessage(`生成失败: ${error}`);
+          setErrorMessage(error);
         }
       });
     } catch (error) {
       setIsGenerating(false);
-      setCurrentPhase('idle');
-      setProgressMessage(`生成失败: ${error}`);
+      setErrorMessage(`生成失败: ${error}`);
     }
-  };
-
-  const handleCancel = () => {
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-    }
-    setIsGenerating(false);
-    setCurrentPhase('idle');
-    setProgressMessage('已取消');
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Escape' && !isGenerating) {
       onClose();
-    } else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+    } else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !isGenerating) {
       handleSave();
     }
   };
@@ -208,58 +148,12 @@ export const ActSynopsisModal: React.FC<ActSynopsisModalProps> = ({
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
-          {/* Progress Display */}
-          {isGenerating && (
-            <div className="bg-dark-bg border border-dark-border rounded-lg p-4 space-y-3">
-              <div className="flex items-center gap-2">
-                <Zap size={16} className="animate-pulse text-yellow-400" />
-                <span className="text-sm text-dark-text font-medium">{progressMessage}</span>
-              </div>
-
-              {/* Chapter Progress List */}
-              {chapterProgress.length > 0 && currentPhase === 'chapters' && (
-                <div className="space-y-2 max-h-40 overflow-y-auto">
-                  {chapterProgress.map((item, idx) => (
-                    <div key={idx} className="flex items-center gap-2 text-sm">
-                      {item.status === 'generating' && (
-                        <Zap size={14} className="animate-pulse text-yellow-400" />
-                      )}
-                      {item.status === 'done' && (
-                        <CheckCircle size={14} className="text-green-500" />
-                      )}
-                      {item.status === 'error' && (
-                        <AlertCircle size={14} className="text-red-500" />
-                      )}
-                      {item.status === 'skipped' && (
-                        <SkipForward size={14} className="text-dark-text-muted" />
-                      )}
-                      {item.status === 'pending' && (
-                        <div className="w-3.5 h-3.5 rounded-full border-2 border-dark-border" />
-                      )}
-                      <span className={`${
-                        item.status === 'generating' ? 'text-yellow-400' :
-                        item.status === 'done' ? 'text-green-500' :
-                        item.status === 'error' ? 'text-red-500' :
-                        item.status === 'skipped' ? 'text-dark-text-muted' :
-                        'text-dark-text-muted'
-                      }`}>
-                        {item.chapter}
-                        {item.message && <span className="text-xs ml-2">({item.message})</span>}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {currentPhase === 'synopsis' && (
-                <div className="text-sm text-dark-text-muted">
-                  正在生成卷摘要...
-                </div>
-              )}
+          {errorMessage && (
+            <div className="bg-red-900/20 border border-red-700/30 rounded-lg p-3">
+              <p className="text-sm text-red-300">{errorMessage}</p>
             </div>
           )}
 
-          {/* Synopsis Textarea */}
           <div className="space-y-2">
             <label className="block text-sm font-medium text-dark-text">
               摘要内容
@@ -280,19 +174,18 @@ export const ActSynopsisModal: React.FC<ActSynopsisModalProps> = ({
             )}
           </div>
 
-          {/* Actions */}
           <div className="flex items-center justify-between pt-4">
             <div className="flex items-center gap-2">
               <Button
                 variant="outline"
                 onClick={handleGenerate}
-                disabled={isGenerating || (effectiveAct?.chapter_count || 0) < 3}
+                disabled={!canGenerate}
                 className="flex items-center gap-2"
               >
                 {isGenerating ? (
                   <>
                     <Zap size={16} className="animate-pulse text-yellow-400" />
-                    生成中...
+                    流式生成中...
                   </>
                 ) : (
                   <>
@@ -301,17 +194,6 @@ export const ActSynopsisModal: React.FC<ActSynopsisModalProps> = ({
                   </>
                 )}
               </Button>
-              
-              {isGenerating && (
-                <Button
-                  variant="outline"
-                  onClick={handleCancel}
-                  className="flex items-center gap-1 px-3 py-2 border-red-500 text-red-500 hover:bg-red-500 hover:text-white"
-                >
-                  <X size={14} />
-                  取消
-                </Button>
-              )}
             </div>
 
             <div className="flex gap-3">
@@ -331,19 +213,26 @@ export const ActSynopsisModal: React.FC<ActSynopsisModalProps> = ({
             </div>
           </div>
 
-          {/* Warning if insufficient chapters */}
-          {(effectiveAct?.chapter_count || 0) < 3 && (
+          {!hasEnoughChapters && (
             <div className="bg-yellow-900/20 border border-yellow-700/30 rounded-lg p-3">
               <p className="text-sm text-yellow-300">
-                💡 本卷章节不足，需要至少3个章节才能生成卷摘要（当前{effectiveAct?.chapter_count || 0}章）
+                本卷章节不足，需要至少3个章节才能生成卷摘要（当前{effectiveAct?.chapter_count || actChapters.length}章）
               </p>
             </div>
           )}
 
-          {/* Tips */}
+          {hasEnoughChapters && missingSummaryChapters.length > 0 && (
+            <div className="bg-yellow-900/20 border border-yellow-700/30 rounded-lg p-3">
+              <p className="text-sm text-yellow-300">
+                请先生成所有章节的摘要后再生成卷摘要：
+                {missingSummaryChapters.map(ch => `第${ch.chapter_number}章《${ch.title}》`).join('、')}
+              </p>
+            </div>
+          )}
+
           <div className="text-xs text-dark-text-muted border-t border-dark-border pt-3">
-            <p>快捷键：Ctrl/Cmd + Enter 保存手动编辑，Esc 关闭</p>
-            <p className="mt-1">提示：AI生成的摘要会自动保存。章节摘要需要至少1000字，卷摘要需要至少3个章节。</p>
+            <p>快捷键：Ctrl/Cmd + Enter 保存，Esc 关闭（生成中不可用）</p>
+            <p className="mt-1">提示：AI生成后不会自动保存，请点击“保存”后生效</p>
           </div>
         </CardContent>
       </Card>

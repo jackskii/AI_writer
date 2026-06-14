@@ -109,34 +109,11 @@ def get_work_chat_history(work, user):
 
 
 @sync_to_async
-def save_chapter_summary(chapter, summary):
-    """Save chapter summary (async version)"""
-    chapter.summary = summary
-    chapter.save(update_fields=['summary'])
-
-
-@sync_to_async
 def get_act_by_id(work_id, act_id, user):
     """Get act by id (async version)"""
     work = get_object_or_404(Work, id=work_id, author=user)
     act = get_object_or_404(Act, id=act_id, work=work)
     return act
-
-
-@sync_to_async
-def save_act_synopsis(act, synopsis):
-    """Save act synopsis (async version)"""
-    act.synopsis = synopsis
-    act.save(update_fields=['synopsis'])
-
-
-@sync_to_async
-def get_chapters_without_summary(act):
-    """Get chapters in act that don't have summaries"""
-    chapters = act.chapters.filter(
-        models.Q(summary__isnull=True) | models.Q(summary='')
-    ).order_by('order')
-    return list(chapters)
 
 
 @sync_to_async
@@ -173,7 +150,7 @@ def get_lore_entries_for_act(act):
 
 
 @sync_to_async
-def build_auto_edit_context(work, chapter, user, style_id, selected_lore_ids, selected_faction_ids, chapter_selection, custom_chapter_count):
+def build_auto_edit_context(work, chapter, user, style_id, selected_lore_ids, selected_faction_ids, chapter_selection, custom_chapter_count, use_nsfw_style=False):
     """Build context for auto-edit (async version)
     
     New logic:
@@ -188,13 +165,22 @@ def build_auto_edit_context(work, chapter, user, style_id, selected_lore_ids, se
     current_act = chapter.act
     is_side_chapter = current_act and current_act.act_type == 'side_chapters'
 
-    # Add writing style if selected
+    # Add writing style if selected (regular styles only)
     if style_id:
         try:
             from apps.works.models import WritingStyle
-            style = WritingStyle.objects.get(id=int(style_id), user=user)
+            style = WritingStyle.objects.get(id=int(style_id), user=user, is_nsfw=False)
             formatted_context += f"写作风格参考：\n\n{style.style_data}\n\n---\n\n"
         except (WritingStyle.DoesNotExist, ValueError):
+            pass
+
+    if use_nsfw_style:
+        try:
+            from apps.works.models import WritingStyle
+            nsfw_style = WritingStyle.objects.filter(user=user, is_nsfw=True).first()
+            if nsfw_style and nsfw_style.style_data and nsfw_style.style_data.strip():
+                formatted_context += f"NSFW风格参考：\n\n{nsfw_style.style_data.strip()}\n\n---\n\n"
+        except Exception:
             pass
 
     # Add synopsis
@@ -626,8 +612,6 @@ async def ai_summarize_stream(request):
                     accumulated_summary += chunk
                     yield f"data: {json.dumps({'type': 'chunk', 'content': chunk})}\n\n"
 
-                # Save summary to chapter
-                await save_chapter_summary(chapter, accumulated_summary)
                 yield f"data: {json.dumps({'type': 'end', 'message': 'AI摘要生成完成', 'summary': accumulated_summary})}\n\n"
             except Exception as e:
                 logger.error(f"Stream AI summarize error during generation: {str(e)}")
@@ -649,13 +633,7 @@ async def ai_summarize_stream(request):
 
 @csrf_exempt
 async def ai_generate_act_synopsis(request):
-    """AI生成卷摘要端点 - SSE流式响应
-    
-    This endpoint will:
-    1. Check which chapters in the act lack summaries
-    2. Generate summaries for those chapters first (streaming progress)
-    3. Then generate the act synopsis using all chapter summaries + lore entries
-    """
+    """AI生成卷摘要端点 - SSE流式响应（需所有章节已有摘要）"""
     if request.method != 'POST':
         return HttpResponse(
             'data: {"type": "error", "message": "仅支持POST请求"}\n\n',
@@ -710,9 +688,7 @@ async def ai_generate_act_synopsis(request):
             status=404
         )
 
-    # Constants for validation
     MIN_CHAPTERS_FOR_ACT_SYNOPSIS = 3
-    MIN_CHAPTER_WORDS = 1000
 
     async def generate_stream():
         """生成SSE数据流"""
@@ -722,7 +698,6 @@ async def ai_generate_act_synopsis(request):
 
             yield f"data: {json.dumps({'type': 'start', 'message': '开始生成卷摘要'})}\n\n"
 
-            # Step 1: Get all chapters and validate minimum count
             all_chapters = await get_all_chapters_in_act(act)
 
             if not all_chapters:
@@ -733,58 +708,24 @@ async def ai_generate_act_synopsis(request):
                 yield f"data: {json.dumps({'type': 'error', 'message': f'本卷章节数不足，需要至少{MIN_CHAPTERS_FOR_ACT_SYNOPSIS}个章节才能生成卷摘要（当前{len(all_chapters)}章）'})}\n\n"
                 return
 
-            # Step 2: Get chapters without summaries (only those with sufficient word count)
-            chapters_without_summary = await get_chapters_without_summary(act)
-            
-            # Step 3: Generate summaries for chapters that don't have them
-            if chapters_without_summary:
-                # Filter to only chapters with sufficient word count
-                eligible_chapters = [ch for ch in chapters_without_summary if len(ch.content or '') >= MIN_CHAPTER_WORDS]
-                skipped_chapters = [ch for ch in chapters_without_summary if len(ch.content or '') < MIN_CHAPTER_WORDS]
-                
-                if eligible_chapters:
-                    yield f"data: {json.dumps({'type': 'chapter_progress', 'message': f'需要先为 {len(eligible_chapters)} 个章节生成摘要', 'total': len(eligible_chapters), 'current': 0})}\n\n"
-                
-                # Report skipped chapters due to insufficient word count
-                for chapter in skipped_chapters:
-                    word_count = len(chapter.content or '')
-                    yield f"data: {json.dumps({'type': 'chapter_skip', 'chapter': f'第{chapter.chapter_number}章《{chapter.title}》', 'message': f'字数不足（{word_count}字，需{MIN_CHAPTER_WORDS}字）'})}\n\n"
-                
-                for idx, chapter in enumerate(eligible_chapters):
-                    if not chapter.content or not chapter.content.strip():
-                        yield f"data: {json.dumps({'type': 'chapter_skip', 'chapter': f'第{chapter.chapter_number}章《{chapter.title}》', 'message': '章节内容为空，跳过'})}\n\n"
-                        continue
-
-                    yield f"data: {json.dumps({'type': 'chapter_progress', 'chapter': f'第{chapter.chapter_number}章《{chapter.title}》', 'status': 'generating', 'current': idx + 1, 'total': len(eligible_chapters)})}\n\n"
-                    
-                    try:
-                        accumulated_summary = ''
-                        async for chunk in ai_service.generate_summary_stream(chapter):
-                            accumulated_summary += chunk
-                        
-                        # Save summary to the chapter (auto-save)
-                        await save_chapter_summary(chapter, accumulated_summary)
-                        yield f"data: {json.dumps({'type': 'chapter_done', 'chapter': f'第{chapter.chapter_number}章《{chapter.title}》', 'status': 'done'})}\n\n"
-                    except Exception as e:
-                        logger.error(f"Error generating chapter summary: {str(e)}")
-                        yield f"data: {json.dumps({'type': 'chapter_error', 'chapter': f'第{chapter.chapter_number}章《{chapter.title}》', 'message': str(e)})}\n\n"
-
-            # Step 3: Refresh chapters to get updated summaries
-            all_chapters = await get_all_chapters_in_act(act)
-            
-            # Build chapter summaries text
-            chapter_summaries_parts = []
-            for chapter in all_chapters:
-                if chapter.summary:
-                    chapter_summaries_parts.append(f"第{chapter.chapter_number}章《{chapter.title}》：\n{chapter.summary}")
-            
-            if not chapter_summaries_parts:
-                yield f"data: {json.dumps({'type': 'error', 'message': '没有章节摘要可用于生成卷摘要'})}\n\n"
+            missing_summary_chapters = [
+                ch for ch in all_chapters
+                if not ch.summary or not ch.summary.strip()
+            ]
+            if missing_summary_chapters:
+                missing_labels = [
+                    f"第{ch.chapter_number}章《{ch.title}》"
+                    for ch in missing_summary_chapters
+                ]
+                yield f"data: {json.dumps({'type': 'error', 'message': '请先生成所有章节的摘要后再生成卷摘要：' + '、'.join(missing_labels)})}\n\n"
                 return
 
+            chapter_summaries_parts = [
+                f"第{chapter.chapter_number}章《{chapter.title}》：\n{chapter.summary}"
+                for chapter in all_chapters
+            ]
             chapter_summaries_text = "\n\n".join(chapter_summaries_parts)
 
-            # Step 4: Get lore entries for this act
             lore_entries = await get_lore_entries_for_act(act)
             lore_entries_text = ""
             if lore_entries:
@@ -793,17 +734,12 @@ async def ai_generate_act_synopsis(request):
                     lore_parts.append(f"【{entry.name}】\n{entry.description}")
                 lore_entries_text = "\n\n".join(lore_parts)
 
-            # Step 5: Generate act synopsis
-            yield f"data: {json.dumps({'type': 'synopsis_progress', 'message': '正在生成卷摘要...'})}\n\n"
-            
             accumulated_synopsis = ''
             try:
                 async for chunk in ai_service.generate_act_synopsis_stream(act, chapter_summaries_text, lore_entries_text):
                     accumulated_synopsis += chunk
                     yield f"data: {json.dumps({'type': 'chunk', 'content': chunk})}\n\n"
 
-                # Save synopsis to act
-                await save_act_synopsis(act, accumulated_synopsis)
                 yield f"data: {json.dumps({'type': 'end', 'message': '卷摘要生成完成', 'synopsis': accumulated_synopsis})}\n\n"
             except Exception as e:
                 logger.error(f"Error generating act synopsis: {str(e)}")
@@ -875,6 +811,7 @@ async def ai_auto_edit_stream(request):
     reasoning_mode = parse_reasoning_mode(body.get('reasoning_mode'))
     edit_requirement = body.get('edit_requirement', '')
     style_id = body.get('style_id', '')
+    use_nsfw_style = parse_reasoning_mode(body.get('use_nsfw_style'))
 
     if not all([work_id, chapter_id]):
         return HttpResponse(
@@ -897,7 +834,7 @@ async def ai_auto_edit_stream(request):
             # Build context
             formatted_context = await build_auto_edit_context(
                 work, chapter, user, style_id, selected_lore_ids, selected_faction_ids,
-                chapter_selection, custom_chapter_count
+                chapter_selection, custom_chapter_count, use_nsfw_style
             )
 
             # Get API key and AI settings

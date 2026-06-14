@@ -1,10 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { X, FileText, Sparkles, Zap } from 'lucide-react';
 import { chaptersApi, aiApi } from '../../services/api';
 import { Button } from '../ui/Button';
 import { Textarea } from '../ui/Input';
 import { Card, CardHeader, CardContent } from '../ui/Card';
+import { appendAnswerOnlyChunk, stripThoughtProcess } from '../../utils/stripThoughtProcess';
 import type { Chapter } from '../../types';
 
 interface SummaryModalProps {
@@ -22,6 +23,7 @@ export const SummaryModal: React.FC<SummaryModalProps> = ({
   const [isGenerating, setIsGenerating] = useState(false);
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamEventSource, setStreamEventSource] = useState<EventSource | null>(null);
+  const accumulatedRef = useRef('');
   const queryClient = useQueryClient();
   const { data: chapterDetail } = useQuery({
     queryKey: ['chapter', chapter?.work, chapter?.id, 'summary-modal'],
@@ -38,12 +40,10 @@ export const SummaryModal: React.FC<SummaryModalProps> = ({
 
   useEffect(() => {
     if (chapter && isOpen) {
-      // Refresh summary from chapter data when modal opens
       setSummary((chapterDetail?.summary ?? chapter.summary) || '');
     }
   }, [chapter, chapterDetail, isOpen]);
 
-  // Cleanup on component unmount
   useEffect(() => {
     return () => {
       if (streamEventSource) {
@@ -53,13 +53,10 @@ export const SummaryModal: React.FC<SummaryModalProps> = ({
   }, [streamEventSource]);
 
   const updateMutation = useMutation({
-    mutationFn: (summaryData: { summary: string }) => 
+    mutationFn: (summaryData: { summary: string }) =>
       chaptersApi.update(chapter!.work, chapter!.id, summaryData),
     onSuccess: () => {
-      // Invalidate queries to refresh chapter data so it's up-to-date when modal reopens
       queryClient.invalidateQueries({ queryKey: ['chapters', chapter!.work] });
-      // Don't call onSummaryUpdated here - that would close the modal
-      // onSummaryUpdated is only called when AI generation completes
     }
   });
 
@@ -75,47 +72,34 @@ export const SummaryModal: React.FC<SummaryModalProps> = ({
     try {
       setIsGenerating(true);
       setIsStreaming(true);
-      
-      // Clear current summary to show streaming progress
       setSummary('');
-      
-      let accumulatedSummary = '';
-      
+      accumulatedRef.current = '';
+
       const eventSource = aiApi.summarizeStream(
-        chapter.work, 
+        chapter.work,
         chapter.id,
-        // onChunk - called for each piece of text
         (chunk: string) => {
-          accumulatedSummary += chunk;
-          setSummary(accumulatedSummary);
+          accumulatedRef.current = appendAnswerOnlyChunk(accumulatedRef.current, chunk);
+          setSummary(accumulatedRef.current);
         },
-        // onStart
-        () => {
-          console.log('AI summary streaming started');
-        },
-        // onEnd
+        () => {},
         (finalSummary: string) => {
-          console.log('AI summary streaming completed');
+          const cleaned = stripThoughtProcess(finalSummary);
+          accumulatedRef.current = cleaned;
+          setSummary(cleaned);
           setIsStreaming(false);
           setIsGenerating(false);
           setStreamEventSource(null);
-          setSummary(finalSummary);
-          // Do not auto-save/auto-close. User must click "保存" explicitly.
         },
-        // onError
         (error: string) => {
-          console.error('AI summary streaming error:', error);
           setIsStreaming(false);
           setIsGenerating(false);
           setStreamEventSource(null);
-          // Show error in summary field
           setSummary(`摘要生成失败: ${error}`);
         }
       );
-      
-      // Store eventSource reference for cleanup
+
       setStreamEventSource(eventSource);
-      
     } catch (error) {
       console.error('AI summary error:', error);
       setIsGenerating(false);
@@ -124,7 +108,6 @@ export const SummaryModal: React.FC<SummaryModalProps> = ({
     }
   };
 
-  // Cancel streaming
   const handleCancelStreaming = () => {
     if (streamEventSource) {
       streamEventSource.close();
@@ -135,9 +118,9 @@ export const SummaryModal: React.FC<SummaryModalProps> = ({
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Escape') {
+    if (e.key === 'Escape' && !isStreaming) {
       onClose();
-    } else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+    } else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !isStreaming) {
       handleSave();
     }
   };
@@ -165,7 +148,8 @@ export const SummaryModal: React.FC<SummaryModalProps> = ({
             </div>
             <button
               onClick={onClose}
-              className="text-dark-text-muted hover:text-dark-text"
+              disabled={isStreaming}
+              className="text-dark-text-muted hover:text-dark-text disabled:opacity-50"
             >
               <X size={20} />
             </button>
@@ -184,6 +168,7 @@ export const SummaryModal: React.FC<SummaryModalProps> = ({
               rows={8}
               className="resize-none"
               autoFocus
+              disabled={isStreaming}
             />
           </div>
 
@@ -207,7 +192,7 @@ export const SummaryModal: React.FC<SummaryModalProps> = ({
                   </>
                 )}
               </Button>
-              
+
               {isStreaming && (
                 <Button
                   variant="outline"
@@ -224,12 +209,13 @@ export const SummaryModal: React.FC<SummaryModalProps> = ({
               <Button
                 variant="outline"
                 onClick={onClose}
+                disabled={isStreaming}
               >
                 关闭
               </Button>
               <Button
                 onClick={handleSave}
-                disabled={updateMutation.isPending}
+                disabled={updateMutation.isPending || isStreaming}
               >
                 {updateMutation.isPending ? '保存中...' : '保存'}
               </Button>
@@ -239,7 +225,7 @@ export const SummaryModal: React.FC<SummaryModalProps> = ({
           {!effectiveContent && (
             <div className="bg-yellow-900/20 border border-yellow-700/30 rounded-lg p-3">
               <p className="text-sm text-yellow-300">
-                💡 章节内容为空，AI无法生成摘要。请先编写章节内容。
+                章节内容为空，AI无法生成摘要。请先编写章节内容。
               </p>
             </div>
           )}
@@ -247,13 +233,13 @@ export const SummaryModal: React.FC<SummaryModalProps> = ({
           {effectiveContent && !hasEnoughWords && (
             <div className="bg-yellow-900/20 border border-yellow-700/30 rounded-lg p-3">
               <p className="text-sm text-yellow-300">
-                💡 章节字数不足，需要至少{MIN_CHAPTER_WORDS.toLocaleString()}字才能生成摘要（当前{chapterWordCount.toLocaleString()}字）
+                章节字数不足，需要至少{MIN_CHAPTER_WORDS.toLocaleString()}字才能生成摘要（当前{chapterWordCount.toLocaleString()}字）
               </p>
             </div>
           )}
 
           <div className="text-xs text-dark-text-muted border-t pt-3">
-            <p>快捷键：Ctrl/Cmd + Enter 保存手动编辑，Esc 关闭</p>
+            <p>快捷键：Ctrl/Cmd + Enter 保存，Esc 关闭（生成中不可用）</p>
             <p className="mt-1">提示：AI生成后不会自动保存，请点击“保存”后生效</p>
           </div>
         </CardContent>

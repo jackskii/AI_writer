@@ -6,6 +6,7 @@ import { useMobile } from '../../hooks/useMobile';
 import type { Work, Act, Chapter, Faction, LoreEntry, WritingStyle } from '../../types';
 import { editPrefillsApi, type EditPrefill } from '../../services/api';
 import { EditPrefillModal } from './EditPrefillModal';
+import { stripThoughtProcess } from '../../utils/stripThoughtProcess';
 
 interface AutoEditModalProps {
   isOpen: boolean;
@@ -33,6 +34,7 @@ export interface AutoEditContext {
   selectedLoreEntries: number[]; // IDs of selected lore entries
   selectedFactions?: number[]; // IDs of selected factions
   reasoningMode?: boolean;
+  useNsfwStyle?: boolean;
   editRequirement?: string; // Editing requirement/instruction
   styleId?: number; // Optional writing style ID
 }
@@ -143,7 +145,12 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
   const [selectedFactionIds, setSelectedFactionIds] = useState<number[]>([]);
   const [selectedLoreIds, setSelectedLoreIds] = useState<number[]>([]);
   const [loreCurrentPage, setLoreCurrentPage] = useState(1);
-  const [isReasoningMode, setIsReasoningMode] = useState(false);
+  const [isReasoningMode, setIsReasoningMode] = useState(() =>
+    localStorage.getItem('autoEdit_reasoningMode') === 'true'
+  );
+  const [isUseNsfwStyle, setIsUseNsfwStyle] = useState(() =>
+    localStorage.getItem('autoEdit_useNsfwStyle') === 'true'
+  );
   const LORE_PAGE_SIZE = 8; // 4x2 grid
 
   // State for editing requirement
@@ -160,6 +167,27 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
     const saved = localStorage.getItem('autoEdit_selectedStyleId');
     return saved ? parseInt(saved, 10) : null;
   });
+
+  const regularStyles = styles.filter(s => !s.is_nsfw);
+  const nsfwStyle = styles.find(s => s.is_nsfw);
+  const hasNsfwStyleContent = Boolean(nsfwStyle?.style_data?.trim());
+
+  useEffect(() => {
+    if (!hasNsfwStyleContent && isUseNsfwStyle) {
+      setIsUseNsfwStyle(false);
+      localStorage.setItem('autoEdit_useNsfwStyle', 'false');
+    }
+  }, [hasNsfwStyleContent, isUseNsfwStyle]);
+
+  const handleReasoningModeChange = (checked: boolean) => {
+    setIsReasoningMode(checked);
+    localStorage.setItem('autoEdit_reasoningMode', checked ? 'true' : 'false');
+  };
+
+  const handleUseNsfwStyleChange = (checked: boolean) => {
+    setIsUseNsfwStyle(checked);
+    localStorage.setItem('autoEdit_useNsfwStyle', checked ? 'true' : 'false');
+  };
 
   // All chapters for accurate prompt length calculation
   const [allChapters, setAllChapters] = useState<Chapter[]>([]);
@@ -232,6 +260,16 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
       loadStyles();
     }
   }, [isOpen]);
+
+  useEffect(() => {
+    if (selectedStyleId && styles.length > 0) {
+      const selected = styles.find(s => s.id === selectedStyleId);
+      if (selected?.is_nsfw) {
+        setSelectedStyleId(null);
+        localStorage.removeItem('autoEdit_selectedStyleId');
+      }
+    }
+  }, [styles, selectedStyleId]);
 
   // Load all chapters and acts when modal opens for accurate prompt length calculation
   useEffect(() => {
@@ -462,6 +500,7 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
       selectedLoreEntries: selectedLoreIds,
       selectedFactions: selectedFactionIds,
       reasoningMode: isReasoningMode,
+      useNsfwStyle: isUseNsfwStyle && hasNsfwStyleContent,
       editRequirement: effectiveRequirement,
       styleId: selectedStyleId || undefined,
     };
@@ -547,18 +586,6 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
       setCurrentVersionIndex(newIndex);
       setCurrentEditedText(editedVersions[newIndex].text);
     }
-  };
-
-  // Strip thought process from text (remove 【思考过程】 section)
-  const stripThoughtProcess = (text: string): string => {
-    // Remove everything between 【思考过程】 and 【回答】
-    const thoughtPattern = /【思考过程】[\s\S]*?(?=【回答】|$)/g;
-    let cleanedText = text.replace(thoughtPattern, '');
-
-    // Remove 【回答】 marker if present
-    cleanedText = cleanedText.replace(/【回答】\s*/g, '');
-
-    return cleanedText.trim();
   };
 
   // Handle accept
@@ -652,10 +679,14 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
 
     // Add writing style if selected (actual)
     if (selectedStyleId) {
-      const selectedStyle = styles.find(s => s.id === selectedStyleId);
+      const selectedStyle = regularStyles.find(s => s.id === selectedStyleId);
       if (selectedStyle?.style_data) {
         length += selectedStyle.style_data.length + 30; // +30 for "写作风格参考：\n\n" and "---\n\n"
       }
+    }
+
+    if (isUseNsfwStyle && hasNsfwStyleContent && nsfwStyle?.style_data) {
+      length += nsfwStyle.style_data.length + 30; // +30 for "NSFW风格参考：\n\n" and "---\n\n"
     }
 
     // Add work synopsis (actual)
@@ -818,7 +849,7 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
             className="w-full bg-dark-surface border border-dark-border rounded px-3 py-2 text-sm text-dark-text focus:outline-none focus:ring-2 focus:ring-dark-primary"
           >
             <option value="">无风格 (默认)</option>
-            {styles.map((style) => (
+            {regularStyles.map((style) => (
               <option key={style.id} value={style.id}>
                 {style.name}
               </option>
@@ -964,18 +995,29 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
                 </button>
               </div>
               <div className="flex-1 overflow-y-auto p-4">
-              {/* Reasoning Mode */}
-              <div className="mb-6">
-                <h4 className="text-sm font-medium text-dark-text mb-2">推理模式</h4>
+              <div className="mb-6 space-y-2">
                 <label className="flex items-center gap-2">
                   <input
                     type="checkbox"
                     checked={isReasoningMode}
-                    onChange={(e) => setIsReasoningMode(e.target.checked)}
+                    onChange={(e) => handleReasoningModeChange(e.target.checked)}
                     className="text-dark-primary"
                   />
                   <span className="text-sm text-dark-text">启用推理模式（自动使用当前 provider 的推理能力）</span>
                 </label>
+                <label className={`flex items-center gap-2 ${!hasNsfwStyleContent ? 'opacity-50' : ''}`}>
+                  <input
+                    type="checkbox"
+                    checked={isUseNsfwStyle && hasNsfwStyleContent}
+                    onChange={(e) => handleUseNsfwStyleChange(e.target.checked)}
+                    disabled={!hasNsfwStyleContent}
+                    className="text-dark-primary"
+                  />
+                  <span className="text-sm text-dark-text">使用NSFW风格</span>
+                </label>
+                {!hasNsfwStyleContent && (
+                  <p className="text-xs text-dark-text-muted pl-6">请先在风格管理器中配置NSFW风格</p>
+                )}
               </div>
 
               {/* Chapter Selection */}
@@ -1218,7 +1260,7 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
               className="flex-1 bg-dark-surface border border-dark-border rounded px-3 py-1.5 text-sm text-dark-text focus:outline-none focus:ring-2 focus:ring-dark-primary"
             >
               <option value="">无风格 (默认)</option>
-              {styles.map((style) => (
+              {regularStyles.map((style) => (
                 <option key={style.id} value={style.id}>
                   {style.name}
                 </option>
@@ -1234,18 +1276,29 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
             <div className="w-80 border-r border-dark-border p-4 overflow-y-auto">
               <h3 className="text-lg font-medium text-dark-text mb-4">自定义上下文</h3>
 
-              {/* Reasoning Mode */}
-              <div className="mb-6">
-                <h4 className="text-sm font-medium text-dark-text mb-2">推理模式</h4>
+              <div className="mb-6 space-y-2">
                 <label className="flex items-center gap-2">
                   <input
                     type="checkbox"
                     checked={isReasoningMode}
-                    onChange={(e) => setIsReasoningMode(e.target.checked)}
+                    onChange={(e) => handleReasoningModeChange(e.target.checked)}
                     className="text-dark-primary"
                   />
                   <span className="text-sm text-dark-text">启用推理模式（自动使用当前 provider 的推理能力）</span>
                 </label>
+                <label className={`flex items-center gap-2 ${!hasNsfwStyleContent ? 'opacity-50' : ''}`}>
+                  <input
+                    type="checkbox"
+                    checked={isUseNsfwStyle && hasNsfwStyleContent}
+                    onChange={(e) => handleUseNsfwStyleChange(e.target.checked)}
+                    disabled={!hasNsfwStyleContent}
+                    className="text-dark-primary"
+                  />
+                  <span className="text-sm text-dark-text">使用NSFW风格</span>
+                </label>
+                {!hasNsfwStyleContent && (
+                  <p className="text-xs text-dark-text-muted pl-6">请先在风格管理器中配置NSFW风格</p>
+                )}
               </div>
 
               {/* Chapter Selection */}

@@ -298,11 +298,6 @@ export const aiApi = {
     actId: number,
     callbacks: {
       onStart?: () => void;
-      onChapterProgress?: (info: { chapter: string; status: string; current: number; total: number; message?: string }) => void;
-      onChapterDone?: (chapter: string) => void;
-      onChapterSkip?: (chapter: string, message: string) => void;
-      onChapterError?: (chapter: string, message: string) => void;
-      onSynopsisProgress?: (message: string) => void;
       onChunk?: (chunk: string) => void;
       onEnd?: (synopsis: string) => void;
       onError?: (message: string) => void;
@@ -366,27 +361,6 @@ export const aiApi = {
                 case 'start':
                   callbacks.onStart?.();
                   break;
-                case 'chapter_progress':
-                  callbacks.onChapterProgress?.({
-                    chapter: data.chapter,
-                    status: data.status,
-                    current: data.current,
-                    total: data.total,
-                    message: data.message
-                  });
-                  break;
-                case 'chapter_done':
-                  callbacks.onChapterDone?.(data.chapter);
-                  break;
-                case 'chapter_skip':
-                  callbacks.onChapterSkip?.(data.chapter, data.message);
-                  break;
-                case 'chapter_error':
-                  callbacks.onChapterError?.(data.chapter, data.message);
-                  break;
-                case 'synopsis_progress':
-                  callbacks.onSynopsisProgress?.(data.message);
-                  break;
                 case 'chunk':
                   callbacks.onChunk?.(data.content);
                   break;
@@ -423,6 +397,7 @@ export const aiApi = {
       selectedLoreEntries: number[];
       selectedFactions?: number[];
       reasoningMode?: boolean;
+      useNsfwStyle?: boolean;
       editRequirement?: string;
       styleId?: number;
     },
@@ -442,6 +417,10 @@ export const aiApi = {
 
     if (context.reasoningMode) {
       requestBody.reasoning_mode = true;
+    }
+
+    if (context.useNsfwStyle) {
+      requestBody.use_nsfw_style = true;
     }
 
     if (context.customChapterCount) {
@@ -920,29 +899,13 @@ export const stylesApi = {
 
   analyze: (text: string, name: string) =>
     api.post<{
-      analysis_result: {
-        overall?: string;
-        perspectives: Array<{
-          name: string;
-          description: string;
-          examples: string[];
-        }>;
-      };
-      formatted_text: string;
+      style_text: string;
       name: string;
     }>('/styles/analyze/', { text, name }),
 
   analyzeNsfw: (text: string, name: string) =>
     api.post<{
-      analysis_result: {
-        overall?: string;
-        perspectives: Array<{
-          name: string;
-          description: string;
-          examples: string[];
-        }>;
-      };
-      formatted_text: string;
+      style_text: string;
       name: string;
     }>('/styles/analyze_nsfw/', { text, name }),
 };
