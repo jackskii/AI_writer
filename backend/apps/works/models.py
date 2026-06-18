@@ -14,6 +14,8 @@ class Work(models.Model):
     title = models.CharField('作品标题', max_length=200)
     synopsis = models.TextField('作品大纲', blank=True)
     lore_entry_template = models.TextField('条目生成模板', blank=True, null=True, help_text='自定义AI生成条目描述的模板，为空则使用默认模板')
+    auto_edit_use_nsfw_style = models.BooleanField('自动编辑使用NSFW风格', default=False)
+    auto_edit_reasoning_mode = models.BooleanField('自动编辑推理模式', default=False)
     author = models.ForeignKey(
         User,
         on_delete=models.CASCADE,

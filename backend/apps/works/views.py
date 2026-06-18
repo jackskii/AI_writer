@@ -14,6 +14,7 @@ from .serializers import (
     ActOverviewSerializer,
     ChapterSerializer,
     ChapterListSerializer,
+    ChapterListWithSummarySerializer,
     FactionSerializer,
     LoreEntrySerializer,
     WritingStyleSerializer,
@@ -94,29 +95,24 @@ class ActViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         work_id = self.kwargs.get('work_pk')
         work = get_object_or_404(Work, id=work_id, author=self.request.user)
-        
+
         act_type = serializer.validated_data.get('act_type', 'normal')
-        
+
         if act_type == 'side_chapters':
-            # Side chapters acts should have order >= 9999
             max_side_order = work.acts.filter(act_type='side_chapters').aggregate(
                 max_order=models.Max('order')
             )['max_order'] or 9998
             next_order = max(max_side_order + 1, 9999)
-            # Auto-generate name if not provided
-            if not serializer.validated_data.get('name'):
-                serializer.validated_data['name'] = '外传'
+            default_name = '外传'
         else:
-            # Normal acts: find max order of normal acts
             max_normal_order = work.acts.filter(act_type='normal').aggregate(
                 max_order=models.Max('order')
             )['max_order'] or 0
             next_order = max_normal_order + 1
-            # Auto-generate name if not provided (use order, not chapter_number)
-            if not serializer.validated_data.get('name'):
-                serializer.validated_data['name'] = f'第{next_order}卷'
-        
-        serializer.save(work=work, order=next_order)
+            default_name = f'第{next_order}卷'
+
+        name = (serializer.validated_data.get('name') or '').strip() or default_name
+        serializer.save(work=work, order=next_order, name=name)
 
     def perform_destroy(self, instance):
         """禁止删除外传卷"""
@@ -131,20 +127,28 @@ class ChapterViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
     pagination_class = None  # Show all chapters without pagination
 
+    def _include_summary(self):
+        return self.request.query_params.get('include_summary') in ('1', 'true', 'True')
+
     def get_queryset(self):
         work_id = self.kwargs.get('work_pk')
         work = get_object_or_404(Work, id=work_id, author=self.request.user)
         queryset = Chapter.objects.filter(work=work)
         if self.action == 'list':
-            return queryset.select_related('act').only(
+            list_fields = [
                 'id', 'work_id', 'title', 'order', 'act_id',
                 'chapter_number', 'created_at', 'updated_at',
-                'last_autosave', 'act__name', 'act__order'
-            )
+                'last_autosave', 'act__name', 'act__order',
+            ]
+            if self._include_summary():
+                list_fields.append('summary')
+            return queryset.select_related('act').only(*list_fields)
         return queryset
 
     def get_serializer_class(self):
         if self.action == 'list':
+            if self._include_summary():
+                return ChapterListWithSummarySerializer
             return ChapterListSerializer
         return ChapterSerializer
 

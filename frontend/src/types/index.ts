@@ -5,6 +5,8 @@ export interface Work {
   title: string;
   synopsis: string;
   lore_entry_template?: string;
+  auto_edit_use_nsfw_style?: boolean;
+  auto_edit_reasoning_mode?: boolean;
   created_at: string;
   updated_at: string;
   word_count: number;

@@ -13,7 +13,10 @@ class ActSerializer(serializers.ModelSerializer):
             'word_count', 'chapter_count',
             'created_at', 'updated_at'
         ]
-        read_only_fields = ['work', 'created_at', 'updated_at']
+        read_only_fields = ['work', 'order', 'created_at', 'updated_at']
+        extra_kwargs = {
+            'name': {'required': False, 'allow_blank': True},
+        }
 
 
 class ActOverviewSerializer(serializers.ModelSerializer):
@@ -78,6 +81,11 @@ class ChapterListSerializer(serializers.ModelSerializer):
         ]
 
 
+class ChapterListWithSummarySerializer(ChapterListSerializer):
+    class Meta(ChapterListSerializer.Meta):
+        fields = ChapterListSerializer.Meta.fields + ['summary']
+
+
 class WorkSerializer(serializers.ModelSerializer):
     word_count = serializers.ReadOnlyField()
     chapter_count = serializers.ReadOnlyField()
@@ -86,7 +94,9 @@ class WorkSerializer(serializers.ModelSerializer):
     class Meta:
         model = Work
         fields = [
-            'id', 'title', 'synopsis', 'lore_entry_template', 'author',
+            'id', 'title', 'synopsis', 'lore_entry_template',
+            'auto_edit_use_nsfw_style', 'auto_edit_reasoning_mode',
+            'author',
             'word_count', 'chapter_count', 
             'created_at', 'updated_at'
         ]

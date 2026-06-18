@@ -24,6 +24,7 @@ export const SummaryModal: React.FC<SummaryModalProps> = ({
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamEventSource, setStreamEventSource] = useState<EventSource | null>(null);
   const accumulatedRef = useRef('');
+  const loadedChapterIdRef = useRef<number | null>(null);
   const queryClient = useQueryClient();
   const { data: chapterDetail } = useQuery({
     queryKey: ['chapter', chapter?.work, chapter?.id, 'summary-modal'],
@@ -39,10 +40,17 @@ export const SummaryModal: React.FC<SummaryModalProps> = ({
   const effectiveContent = effectiveChapter?.content || '';
 
   useEffect(() => {
-    if (chapter && isOpen) {
-      setSummary((chapterDetail?.summary ?? chapter.summary) || '');
+    if (!isOpen) {
+      loadedChapterIdRef.current = null;
     }
-  }, [chapter, chapterDetail, isOpen]);
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen || !chapter || !chapterDetail) return;
+    if (loadedChapterIdRef.current === chapter.id) return;
+    loadedChapterIdRef.current = chapter.id;
+    setSummary(chapterDetail.summary || '');
+  }, [isOpen, chapter?.id, chapterDetail]);
 
   useEffect(() => {
     return () => {
@@ -55,7 +63,12 @@ export const SummaryModal: React.FC<SummaryModalProps> = ({
   const updateMutation = useMutation({
     mutationFn: (summaryData: { summary: string }) =>
       chaptersApi.update(chapter!.work, chapter!.id, summaryData),
-    onSuccess: () => {
+    onSuccess: (_data, variables) => {
+      queryClient.setQueryData(
+        ['chapter', chapter!.work, chapter!.id, 'summary-modal'],
+        (old: Chapter | null | undefined) =>
+          old ? { ...old, summary: variables.summary } : old
+      );
       queryClient.invalidateQueries({ queryKey: ['chapters', chapter!.work] });
     }
   });

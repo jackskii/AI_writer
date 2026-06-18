@@ -388,9 +388,7 @@ export const WorkDetailPage: React.FC = () => {
   const handleActSynopsis = (act: Act) => setActSynopsisModalAct(act);
   const handleActSynopsisUpdated = (synopsis: string) => { queryClient.invalidateQueries({ queryKey: ['acts', workIdNum] }); };
   const handleCreateAct = () => {
-    const currentOrders = (actsData && Array.isArray(actsData)) ? actsData.map(act => act.order) : [0];
-    const nextOrder = Math.max(...currentOrders, 0) + 1;
-    createActMutation.mutate({ name: `第${nextOrder}卷`, order: nextOrder });
+    createActMutation.mutate({ act_type: 'normal' });
   };
   const handleReorderChapters = (actId: number, chapterIds: number[]) => reorderChaptersMutation.mutate({ actId, chapterIds });
   const effectiveLoreViewMode: 'faction' | 'compact' = isMobile ? 'compact' : loreViewMode;

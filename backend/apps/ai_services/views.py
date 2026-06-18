@@ -153,9 +153,10 @@ def get_lore_entries_for_act(act):
 def build_auto_edit_context(work, chapter, user, style_id, selected_lore_ids, selected_faction_ids, chapter_selection, custom_chapter_count, use_nsfw_style=False):
     """Build context for auto-edit (async version)
     
-    New logic:
-    - ALWAYS includes: all previous act synopses + all previous chapter synopses in current act
-    - If chapter_selection is not 'none', replaces the last x chapter synopses with full text
+    Context includes previous act synopses and current-act chapter summaries.
+    Full-text chapters (chapter_selection custom/all) are selected globally across
+    normal acts; overflow at arc start pulls from the previous arc. Cross-act full
+    text is rendered under 前卷章节全文; in-act full text under 本卷前文章节.
     
     For side chapters: only includes work synopsis, normal act synopses, and selected lore entries.
     """
@@ -237,47 +238,65 @@ def build_auto_edit_context(work, chapter, user, style_id, selected_lore_ids, se
                 formatted_context += f"【{act.name}】\n{act.synopsis}\n\n"
             formatted_context += "---\n\n"
         
-        # Get all previous chapters in current act (in order)
+        # Get all previous chapters in current act (in order) — used for summary section
         all_previous_chapters = list(current_act.chapters.filter(
             order__lt=chapter.order
         ).order_by('order')) if current_act else []
-        
-        # Determine which chapters to replace with full text
+
+        # Global prior pool (cross-act, excludes side chapters)
+        all_prior_global = list(
+            Chapter.objects.filter(work=work, order__lt=chapter.order)
+            .exclude(act__act_type='side_chapters')
+            .order_by('order')
+        )
+
+        # Determine which chapters to include as full text
         chapters_to_replace_with_full_text = []
         if chapter_selection == 'none':
-            # No replacement, use all summaries
             chapters_to_replace_with_full_text = []
         elif chapter_selection == 'all':
-            # Replace all chapter synopses with full text
-            chapters_to_replace_with_full_text = all_previous_chapters
+            chapters_to_replace_with_full_text = list(all_previous_chapters)
+            if not chapters_to_replace_with_full_text and current_act:
+                prev_act = Act.objects.filter(
+                    work=work,
+                    act_type='normal',
+                    order__lt=current_act.order
+                ).order_by('-order').first()
+                if prev_act:
+                    chapters_to_replace_with_full_text = list(
+                        prev_act.chapters.order_by('order')
+                    )
         elif chapter_selection == 'custom':
-            # Replace last x chapters with full text
             try:
                 count = int(custom_chapter_count)
-                available_previous_count = len(all_previous_chapters)
-                count = min(max(0, count), available_previous_count)
+                count = min(max(0, count), len(all_prior_global))
                 if count > 0:
-                    # Get last x chapters (most recent)
-                    chapters_to_replace_with_full_text = all_previous_chapters[-count:]
-            except:
+                    chapters_to_replace_with_full_text = all_prior_global[-count:]
+            except (TypeError, ValueError):
                 chapters_to_replace_with_full_text = []
-        
-        # Build list of chapter IDs to replace
+
         replace_ids = {ch.id for ch in chapters_to_replace_with_full_text}
-        
-        # Add chapter summaries (or full text for replaced chapters)
+
+        cross_act_full = [
+            ch for ch in chapters_to_replace_with_full_text
+            if not current_act or ch.act_id != current_act.id
+        ]
+        if cross_act_full:
+            formatted_context += "前卷章节全文：\n\n"
+            for ch in cross_act_full:
+                formatted_context += f"第{ch.chapter_number}章《{ch.title}》\n\n{ch.content or '(空章节)'}\n\n---\n\n"
+            formatted_context += "---\n\n"
+
+        # Add chapter summaries (or full text for replaced in-act chapters)
         if all_previous_chapters:
             formatted_context += "本卷前文章节：\n\n"
-            
+
             for ch in all_previous_chapters:
                 if ch.id in replace_ids:
-                    # Use full text for replaced chapters
                     formatted_context += f"第{ch.chapter_number}章《{ch.title}》\n\n{ch.content or '(空章节)'}\n\n---\n\n"
                 elif ch.summary:
-                    # Use summary for non-replaced chapters (if summary exists)
                     formatted_context += f"第{ch.chapter_number}章《{ch.title}》摘要：{ch.summary}\n\n"
-                # If no summary and not replaced, skip (don't include)
-            
+
             formatted_context += "---\n\n"
 
     # Add current chapter content at the end

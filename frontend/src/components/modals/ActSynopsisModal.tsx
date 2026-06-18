@@ -27,6 +27,7 @@ export const ActSynopsisModal: React.FC<ActSynopsisModalProps> = ({
   const [isGenerating, setIsGenerating] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const accumulatedRef = useRef('');
+  const loadedActIdRef = useRef<number | null>(null);
   const queryClient = useQueryClient();
 
   const { data: actDetail } = useQuery({
@@ -42,7 +43,7 @@ export const ActSynopsisModal: React.FC<ActSynopsisModalProps> = ({
   const { data: workChapters } = useQuery({
     queryKey: ['chapters', workId, 'act-synopsis-modal'],
     queryFn: async () => {
-      const response = await chaptersApi.list(workId);
+      const response = await chaptersApi.list(workId, { includeSummary: true });
       return response.data;
     },
     enabled: isOpen && !!act,
@@ -58,22 +59,29 @@ export const ActSynopsisModal: React.FC<ActSynopsisModalProps> = ({
   const canGenerate = hasEnoughChapters && allChaptersHaveSummary && !isGenerating;
 
   useEffect(() => {
-    if (act) {
-      setSynopsis((actDetail?.synopsis ?? act.synopsis) || '');
-    }
-  }, [act, actDetail]);
-
-  useEffect(() => {
     if (!isOpen) {
+      loadedActIdRef.current = null;
       setErrorMessage('');
       setIsGenerating(false);
     }
   }, [isOpen]);
 
+  useEffect(() => {
+    if (!isOpen || !act || !actDetail) return;
+    if (loadedActIdRef.current === act.id) return;
+    loadedActIdRef.current = act.id;
+    setSynopsis(actDetail.synopsis || '');
+  }, [isOpen, act?.id, actDetail]);
+
   const updateMutation = useMutation({
     mutationFn: (synopsisData: { synopsis: string }) =>
       actsApi.update(workId, act!.id, synopsisData),
     onSuccess: (_data, variables) => {
+      queryClient.setQueryData(
+        ['act', workId, act!.id, 'synopsis-modal'],
+        (old: Act | null | undefined) =>
+          old ? { ...old, synopsis: variables.synopsis } : old
+      );
       queryClient.invalidateQueries({ queryKey: ['acts', workId] });
       onSynopsisUpdated(variables.synopsis);
     }

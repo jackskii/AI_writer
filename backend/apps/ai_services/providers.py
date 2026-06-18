@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 # OpenRouter models are centrally configured here for easy future updates.
 OPENROUTER_MODELS = [
-    {"id": "z-ai/glm-5.1", "name": "glm-5.1"},
+    {"id": "z-ai/glm-5.2", "name": "glm-5.2"},
     {"id": "x-ai/grok-4.1-fast", "name": "grok-4.1"},
     {"id": "google/gemini-3-flash-preview", "name": "gemini"},
     {"id": "anthropic/claude-sonnet-4.6", "name": "claude"},

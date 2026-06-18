@@ -1,10 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { X, ChevronLeft, ChevronRight, Square, Wand2, Check, RotateCcw, Settings } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { Textarea } from '../ui/Input';
 import { useMobile } from '../../hooks/useMobile';
 import type { Work, Act, Chapter, Faction, LoreEntry, WritingStyle } from '../../types';
-import { editPrefillsApi, type EditPrefill } from '../../services/api';
+import { editPrefillsApi, worksApi, type EditPrefill } from '../../services/api';
+import { useWorkStore } from '../../stores/useWorkStore';
 import { EditPrefillModal } from './EditPrefillModal';
 import { stripThoughtProcess } from '../../utils/stripThoughtProcess';
 
@@ -61,6 +63,8 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
   // Mobile detection - use prop if provided, otherwise detect
   const isMobileHook = useMobile();
   const isMobile = isMobileProp !== undefined ? isMobileProp : isMobileHook;
+  const queryClient = useQueryClient();
+  const setCurrentWork = useWorkStore((state) => state.setCurrentWork);
   const selectedPrefillStorageKey = 'autoEdit_selectedPrefillId';
   const titleText = initialOriginalText ? '自动编辑' : 'AI 生成文本';
   const originalTextLabel = initialOriginalText ? '原始文本' : '提示词（可选）';
@@ -82,6 +86,7 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
   const accumulatedTextRef = useRef<string>('');
   const streamInactivityTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const streamMaxDurationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const wasOpenRef = useRef(false);
 
   const clearStreamTimers = () => {
     if (streamInactivityTimerRef.current) {
@@ -145,12 +150,8 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
   const [selectedFactionIds, setSelectedFactionIds] = useState<number[]>([]);
   const [selectedLoreIds, setSelectedLoreIds] = useState<number[]>([]);
   const [loreCurrentPage, setLoreCurrentPage] = useState(1);
-  const [isReasoningMode, setIsReasoningMode] = useState(() =>
-    localStorage.getItem('autoEdit_reasoningMode') === 'true'
-  );
-  const [isUseNsfwStyle, setIsUseNsfwStyle] = useState(() =>
-    localStorage.getItem('autoEdit_useNsfwStyle') === 'true'
-  );
+  const [isReasoningMode, setIsReasoningMode] = useState(false);
+  const [isUseNsfwStyle, setIsUseNsfwStyle] = useState(false);
   const LORE_PAGE_SIZE = 8; // 4x2 grid
 
   // State for editing requirement
@@ -163,6 +164,7 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
 
   // Writing styles
   const [styles, setStyles] = useState<WritingStyle[]>([]);
+  const [stylesLoaded, setStylesLoaded] = useState(false);
   const [selectedStyleId, setSelectedStyleId] = useState<number | null>(() => {
     const saved = localStorage.getItem('autoEdit_selectedStyleId');
     return saved ? parseInt(saved, 10) : null;
@@ -173,20 +175,35 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
   const hasNsfwStyleContent = Boolean(nsfwStyle?.style_data?.trim());
 
   useEffect(() => {
-    if (!hasNsfwStyleContent && isUseNsfwStyle) {
+    setIsReasoningMode(Boolean(work.auto_edit_reasoning_mode));
+    setIsUseNsfwStyle(Boolean(work.auto_edit_use_nsfw_style));
+  }, [work.id, work.auto_edit_reasoning_mode, work.auto_edit_use_nsfw_style]);
+
+  const updateWorkPrefsMutation = useMutation({
+    mutationFn: (data: Partial<Work>) => worksApi.update(work.id, data),
+    onSuccess: (response) => {
+      queryClient.setQueryData(['work', work.id], response.data);
+      setCurrentWork(response.data);
+    },
+  });
+
+  useEffect(() => {
+    if (!stylesLoaded) return;
+    if (!hasNsfwStyleContent && work.auto_edit_use_nsfw_style) {
       setIsUseNsfwStyle(false);
-      localStorage.setItem('autoEdit_useNsfwStyle', 'false');
+      updateWorkPrefsMutation.mutate({ auto_edit_use_nsfw_style: false });
     }
-  }, [hasNsfwStyleContent, isUseNsfwStyle]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mutate when styles finish loading only
+  }, [stylesLoaded, hasNsfwStyleContent, work.auto_edit_use_nsfw_style]);
 
   const handleReasoningModeChange = (checked: boolean) => {
     setIsReasoningMode(checked);
-    localStorage.setItem('autoEdit_reasoningMode', checked ? 'true' : 'false');
+    updateWorkPrefsMutation.mutate({ auto_edit_reasoning_mode: checked });
   };
 
   const handleUseNsfwStyleChange = (checked: boolean) => {
     setIsUseNsfwStyle(checked);
-    localStorage.setItem('autoEdit_useNsfwStyle', checked ? 'true' : 'false');
+    updateWorkPrefsMutation.mutate({ auto_edit_use_nsfw_style: checked });
   };
 
   // All chapters for accurate prompt length calculation
@@ -245,6 +262,7 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
   // Load writing styles when modal opens
   useEffect(() => {
     if (isOpen) {
+      setStylesLoaded(false);
       const loadStyles = async () => {
         try {
           const { stylesApi } = await import('../../services/api');
@@ -255,9 +273,13 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
         } catch (error) {
           console.error('Failed to load styles:', error);
           setStyles([]);
+        } finally {
+          setStylesLoaded(true);
         }
       };
       loadStyles();
+    } else {
+      setStylesLoaded(false);
     }
   }, [isOpen]);
 
@@ -300,38 +322,44 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
     }
   }, [isOpen, work?.id]);
 
-  // Reset state when modal opens
+  // Initialize state only when modal opens (not on prefill load/change)
   useEffect(() => {
-    if (isOpen && !isLoadingPrefills) {
-      setOriginalText(initialOriginalText);
-      setEditedVersions([]);
-      setCurrentVersionIndex(-1);
-      setCurrentEditedText('');
-      setIsGenerating(false);
-      setMobileView('input');
-      clearStreamTimers();
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort();
-        abortControllerRef.current = null;
-      }
+    const justOpened = isOpen && !wasOpenRef.current;
+    wasOpenRef.current = isOpen;
+
+    if (!justOpened) return;
+
+    setOriginalText(initialOriginalText);
+    setEditedVersions([]);
+    setCurrentVersionIndex(-1);
+    setCurrentEditedText('');
+    setIsGenerating(false);
+    setMobileView('input');
+    clearStreamTimers();
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    if (prefills.length > 0) {
       const selectedPrefill = prefills.find(p => p.id === selectedPrefillId) ||
                               prefills.find(p => p.is_default) ||
                               prefills[0];
       if (selectedPrefill) {
         setEditRequirement(selectedPrefill.prompt_text);
       } else if (defaultEditRequirement) {
-        // Only use defaultEditRequirement as fallback if no prefill is available
         setEditRequirement(defaultEditRequirement);
       }
-      // Default customize context to previous 1 chapter.
-      setChapterSelection('custom');
-      setCustomChapterCount(1);
-      setSelectedFactionFilter('all'); // Reset faction filter
-      setSelectedFactionIds([]);
-      loadLoreEntries();
-      preselectTriggeredContextEntries(initialOriginalText);
+    } else if (defaultEditRequirement) {
+      setEditRequirement(defaultEditRequirement);
     }
-  }, [isOpen, initialOriginalText, isLoadingPrefills, prefills, defaultEditRequirement, selectedPrefillId]);
+    setChapterSelection('custom');
+    setCustomChapterCount(1);
+    setSelectedFactionFilter('all');
+    setSelectedFactionIds([]);
+    loadLoreEntries();
+    preselectTriggeredContextEntries(initialOriginalText);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- open-only init; must not re-run on prefill changes
+  }, [isOpen, initialOriginalText]);
 
   // Lock background editor scroll when mobile auto-edit is open.
   useEffect(() => {
@@ -750,41 +778,68 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
         }
       }
 
-      // Calculate previous chapters from current act only (sorted by chapter_number ascending)
+      // Global previous chapters (cross-act, excludes side chapters)
+      const isNormalChapter = (ch: Chapter) => {
+        const act = safeActs.find(a => a.id === ch.act);
+        return act?.act_type !== 'side_chapters';
+      };
+      const globalPreviousChapters = allChapters
+        .filter(ch => ch.chapter_number < chapter.chapter_number && isNormalChapter(ch))
+        .sort((a, b) => a.chapter_number - b.chapter_number);
+
+      // Previous chapters in current act only (for summary section)
       const previousChapters = allChapters
         .filter(ch => ch.act === chapter.act && ch.chapter_number < chapter.chapter_number)
         .sort((a, b) => a.chapter_number - b.chapter_number);
 
-      // Always include all previous act synopses and chapter synopses
-      // If chapterSelection is not 'none', replace last x chapters with full text
       let chaptersToReplaceWithFullText: Chapter[] = [];
       if (chapterSelection === 'none') {
         chaptersToReplaceWithFullText = [];
       } else if (chapterSelection === 'all') {
         chaptersToReplaceWithFullText = previousChapters;
+        if (chaptersToReplaceWithFullText.length === 0 && currentAct) {
+          const prevAct = safeActs
+            .filter(a => a.act_type === 'normal' && a.order < currentAct.order)
+            .sort((a, b) => b.order - a.order)[0];
+          if (prevAct) {
+            chaptersToReplaceWithFullText = globalPreviousChapters.filter(ch => ch.act === prevAct.id);
+          }
+        }
       } else if (chapterSelection === 'custom') {
-        // Get last x chapters (most recent, highest chapter numbers)
-        chaptersToReplaceWithFullText = previousChapters.slice(-customChapterCount);
+        const count = Math.min(
+          Math.max(0, customChapterCount),
+          globalPreviousChapters.length
+        );
+        chaptersToReplaceWithFullText = globalPreviousChapters.slice(-count);
       }
 
-      // Add chapter summaries (or full text for replaced chapters)
+      const replaceIds = new Set(chaptersToReplaceWithFullText.map(ch => ch.id));
+      const crossActFull = chaptersToReplaceWithFullText.filter(ch => ch.act !== chapter.act);
+
+      if (crossActFull.length > 0) {
+        length += 20; // "前卷章节全文：\n\n"
+        crossActFull.forEach(ch => {
+          const chapterTitle = `第${ch.chapter_number}章《${ch.title}》\n\n`;
+          const contentLength = ch.content?.length || ch.word_count || 0;
+          length += chapterTitle.length + contentLength + 10;
+        });
+        length += 10; // "---\n\n"
+      }
+
       if (previousChapters.length > 0) {
         length += 20; // "本卷前文章节：\n\n"
-        
+
         previousChapters.forEach(ch => {
-          if (chaptersToReplaceWithFullText.includes(ch)) {
-            // Full text length - use content if available, otherwise word_count (for Chinese, word_count ≈ char count)
+          if (replaceIds.has(ch.id)) {
             const chapterTitle = `第${ch.chapter_number}章《${ch.title}》\n\n`;
             const contentLength = ch.content?.length || ch.word_count || 0;
-            length += chapterTitle.length + contentLength + 10; // +10 for "\n\n---\n\n"
+            length += chapterTitle.length + contentLength + 10;
           } else if (ch.summary) {
-            // Summary length
             const chapterTitle = `第${ch.chapter_number}章《${ch.title}》摘要：`;
-            length += chapterTitle.length + ch.summary.length + 5; // +5 for "\n\n"
+            length += chapterTitle.length + ch.summary.length + 5;
           }
-          // If no summary and not replaced, skip (don't include)
         });
-        
+
         length += 10; // "---\n\n"
       }
     }
@@ -809,9 +864,10 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
 
   const promptCharCount = calculatePromptLength();
 
-  // Calculate actual number of previous chapters in current act for display/validation
+  // Global previous chapters (cross-act) for full-text selection UI
   const availablePreviousChapters = allChapters.filter(
-    ch => ch.act === chapter.act && ch.chapter_number < chapter.chapter_number
+    ch => ch.chapter_number < chapter.chapter_number
+      && allActs.find(a => a.id === ch.act)?.act_type !== 'side_chapters'
   ).length;
 
   if (!isOpen) return null;
