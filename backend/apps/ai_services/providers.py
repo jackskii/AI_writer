@@ -18,9 +18,14 @@ logger = logging.getLogger(__name__)
 OPENROUTER_MODELS = [
     {"id": "z-ai/glm-5.2", "name": "glm-5.2"},
     {"id": "x-ai/grok-4.1-fast", "name": "grok-4.1"},
-    {"id": "google/gemini-3-flash-preview", "name": "gemini"},
-    {"id": "anthropic/claude-sonnet-4.6", "name": "claude"},
+    {"id": "qwen/qwen3.8-2.4t-a95b", "name": "qwen3.8"},
+    {"id": "moonshotai/kimi-k3", "name": "kimi-k3"},
 ]
+
+OPENROUTER_PROVIDER_ROUTING = {
+    "order": ["z-ai", "parasail", "novita"],
+    "quantizations": ["fp16", "fp8"],
+}
 
 
 # Provider configuration
@@ -57,6 +62,7 @@ class LLMProvider(ABC):
         self.api_key = api_key
         self.base_url = base_url
         self.default_model_override = default_model_override
+        self.reasoning_effort = 'medium'
         self.client = None
         self._initialize_client()
 
@@ -345,12 +351,18 @@ class DeepSeekProvider(LLMProvider):
         return self._config['reasoning_model']
 
     def _build_thinking_payload(self) -> Dict:
-        return {"thinking": {"type": "enabled"}}
+        effort = getattr(self, 'reasoning_effort', None) or 'medium'
+        return {"reasoning_effort": effort}
 
     @staticmethod
     def _should_retry_without_thinking(error: Exception) -> bool:
         message = str(error).lower()
-        return "thinking" in message or "unsupported" in message or "invalid" in message
+        return (
+            "thinking" in message
+            or "reasoning_effort" in message
+            or "unsupported" in message
+            or "invalid" in message
+        )
 
     async def chat_completion_stream(
         self,
@@ -545,17 +557,72 @@ class OpenRouterProvider(LLMProvider):
         return self._config['reasoning_model']
 
     def _build_reasoning_payload(self) -> Dict:
-        # Keep this simple for now per requirement.
+        effort = getattr(self, 'reasoning_effort', None) or 'medium'
+        return {"effort": effort}
+
+    def _build_provider_routing_payload(self) -> Dict:
+        return {"provider": OPENROUTER_PROVIDER_ROUTING}
+
+    def _build_extra_body(self, reasoning_mode: bool = False) -> Dict:
+        # OpenRouter always uses reasoning; ignore the UI reasoning_mode toggle.
         return {
-            "effort": "high",
-            "exclude": False,
-            "enabled": True,
+            **self._build_provider_routing_payload(),
+            "reasoning": self._build_reasoning_payload(),
         }
 
     @staticmethod
-    def _should_retry_without_reasoning(error: Exception) -> bool:
+    def _is_provider_routing_error(error: Exception) -> bool:
         message = str(error).lower()
-        return "reasoning" in message or "unsupported" in message or "invalid" in message
+        return (
+            "provider" in message
+            or "quantization" in message
+            or "no endpoints" in message
+        )
+
+    @staticmethod
+    def _is_reasoning_error(error: Exception) -> bool:
+        message = str(error).lower()
+        return (
+            "reasoning" in message
+            or "effort" in message
+            or "unsupported" in message
+            or "invalid" in message
+        )
+
+    async def _create_with_extra_body_fallback(self, reasoning_mode: bool = False, **params):
+        extra_body = self._build_extra_body()
+        logger.debug(
+            f"[{self.provider_name}] Request model={params.get('model')} extra_body={extra_body}"
+        )
+        try:
+            return await self.client.chat.completions.create(**params, extra_body=extra_body)
+        except Exception as e:
+            # Prefer dropping provider routing first; keep reasoning.effort.
+            if self._is_provider_routing_error(e):
+                logger.warning(
+                    f"[{self.provider_name}] provider routing rejected for model {params.get('model')}, "
+                    f"retrying with reasoning only: {e}"
+                )
+                try:
+                    return await self.client.chat.completions.create(
+                        **params,
+                        extra_body={"reasoning": self._build_reasoning_payload()},
+                    )
+                except Exception as e2:
+                    if not self._is_reasoning_error(e2):
+                        raise
+                    logger.warning(
+                        f"[{self.provider_name}] reasoning payload also rejected, retrying plain: {e2}"
+                    )
+                    return await self.client.chat.completions.create(**params)
+
+            if not self._is_reasoning_error(e):
+                raise
+            logger.warning(
+                f"[{self.provider_name}] reasoning/extra_body rejected for model {params.get('model')}, "
+                f"retrying plain: {e}"
+            )
+            return await self.client.chat.completions.create(**params)
 
     async def chat_completion_stream(
         self,
@@ -589,21 +656,7 @@ class OpenRouterProvider(LLMProvider):
         logger.debug(f"[{self.provider_name}] Streaming request with model: {model}")
 
         try:
-            if reasoning_mode:
-                try:
-                    response = await self.client.chat.completions.create(
-                        **params,
-                        extra_body={"reasoning": self._build_reasoning_payload()}
-                    )
-                except Exception as e:
-                    if not self._should_retry_without_reasoning(e):
-                        raise
-                    logger.warning(
-                        f"[{self.provider_name}] Reasoning payload rejected for model {model}, retrying without reasoning: {e}"
-                    )
-                    response = await self.client.chat.completions.create(**params)
-            else:
-                response = await self.client.chat.completions.create(**params)
+            response = await self._create_with_extra_body_fallback(reasoning_mode, **params)
             reasoning_started = False
             answer_started = False
             async for chunk in response:
@@ -660,21 +713,7 @@ class OpenRouterProvider(LLMProvider):
         logger.debug(f"[{self.provider_name}] Non-streaming request with model: {model}")
 
         try:
-            if reasoning_mode:
-                try:
-                    response = await self.client.chat.completions.create(
-                        **params,
-                        extra_body={"reasoning": self._build_reasoning_payload()}
-                    )
-                except Exception as e:
-                    if not self._should_retry_without_reasoning(e):
-                        raise
-                    logger.warning(
-                        f"[{self.provider_name}] Reasoning payload rejected for model {model}, retrying without reasoning: {e}"
-                    )
-                    response = await self.client.chat.completions.create(**params)
-            else:
-                response = await self.client.chat.completions.create(**params)
+            response = await self._create_with_extra_body_fallback(reasoning_mode, **params)
             result = ""
             if response.choices and len(response.choices) > 0:
                 message = response.choices[0].message

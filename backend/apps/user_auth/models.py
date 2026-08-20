@@ -45,6 +45,7 @@ class UserSettings(models.Model):
     max_tokens = models.IntegerField('Max Tokens', default=2000)
     frequency_penalty = models.FloatField('Frequency Penalty', default=0.0)
     presence_penalty = models.FloatField('Presence Penalty', default=0.0)
+    reasoning_effort = models.CharField('Reasoning Effort', max_length=50, default='medium', blank=True)
 
     # Visual Settings
     THEME_CHOICES = [('dark', 'Dark'), ('light', 'Light')]

@@ -9,6 +9,18 @@ import { editPrefillsApi, worksApi, type EditPrefill } from '../../services/api'
 import { useWorkStore } from '../../stores/useWorkStore';
 import { EditPrefillModal } from './EditPrefillModal';
 import { stripThoughtProcess } from '../../utils/stripThoughtProcess';
+import { getLoreEntriesTriggeredByText, getTriggeredLoreIds } from '../../utils/loreTriggers';
+
+const FACTION_FILTER_RECENT = '__recent__' as const;
+const FACTION_FILTER_GROUP = '__factions__' as const;
+const FACTION_FILTER_WORLD = '__world__' as const;
+
+type FactionContextFilter =
+  | typeof FACTION_FILTER_RECENT
+  | 'all'
+  | typeof FACTION_FILTER_GROUP
+  | typeof FACTION_FILTER_WORLD
+  | number;
 
 interface AutoEditModalProps {
   isOpen: boolean;
@@ -46,6 +58,54 @@ interface AutoEditVersion {
   timestamp: Date;
 }
 
+interface FactionContextFilterSelectProps {
+  value: FactionContextFilter;
+  onChange: (value: FactionContextFilter) => void;
+  sortedFactions: Faction[];
+  className?: string;
+}
+
+const FactionContextFilterSelect: React.FC<FactionContextFilterSelectProps> = ({
+  value,
+  onChange,
+  sortedFactions,
+  className = '',
+}) => {
+  const normalAndNoFaction = sortedFactions.filter((f) => f.faction_type !== 'worldbuilding');
+
+  const handleChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const next = e.target.value;
+    if (
+      next === FACTION_FILTER_RECENT ||
+      next === 'all' ||
+      next === FACTION_FILTER_GROUP ||
+      next === FACTION_FILTER_WORLD
+    ) {
+      onChange(next);
+      return;
+    }
+    onChange(parseInt(next, 10));
+  };
+
+  return (
+    <select
+      value={String(value)}
+      onChange={handleChange}
+      className={`w-full mb-3 bg-dark-surface border border-dark-border rounded px-3 py-2 text-sm text-dark-text focus:outline-none focus:ring-2 focus:ring-dark-primary ${className}`}
+    >
+      <option value={FACTION_FILTER_RECENT}>最近（上一章）</option>
+      <option value="all">全部</option>
+      {normalAndNoFaction.map((faction) => (
+        <option key={faction.id} value={faction.id}>
+          {'　'}{faction.name}
+        </option>
+      ))}
+      <option value={FACTION_FILTER_GROUP}>阵营</option>
+      <option value={FACTION_FILTER_WORLD}>世界观</option>
+    </select>
+  );
+};
+
 export const AutoEditModal: React.FC<AutoEditModalProps> = ({
   isOpen,
   onClose,
@@ -58,8 +118,6 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
   isMobile: isMobileProp,
   defaultEditRequirement,
 }) => {
-  const FACTION_FILTER_GROUP = '__factions__' as const;
-
   // Mobile detection - use prop if provided, otherwise detect
   const isMobileHook = useMobile();
   const isMobile = isMobileProp !== undefined ? isMobileProp : isMobileHook;
@@ -146,9 +204,10 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
     [sortedFactions]
   );
   
-  const [selectedFactionFilter, setSelectedFactionFilter] = useState<number | 'all' | typeof FACTION_FILTER_GROUP>('all');
+  const [selectedFactionFilter, setSelectedFactionFilter] = useState<FactionContextFilter>(FACTION_FILTER_RECENT);
   const [selectedFactionIds, setSelectedFactionIds] = useState<number[]>([]);
   const [selectedLoreIds, setSelectedLoreIds] = useState<number[]>([]);
+  const [previousChapterContent, setPreviousChapterContent] = useState('');
   const [loreCurrentPage, setLoreCurrentPage] = useState(1);
   const [isReasoningMode, setIsReasoningMode] = useState(false);
   const [isUseNsfwStyle, setIsUseNsfwStyle] = useState(false);
@@ -210,6 +269,18 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
   const [allChapters, setAllChapters] = useState<Chapter[]>([]);
   // All acts for accurate prompt length calculation
   const [allActs, setAllActs] = useState<Act[]>([]);
+
+  const previousChapter = React.useMemo(() => {
+    const safeActs = Array.isArray(allActs) ? allActs : [];
+    const priorChapters = allChapters
+      .filter((ch) => {
+        if (ch.chapter_number >= chapter.chapter_number) return false;
+        const act = safeActs.find((a) => a.id === ch.act);
+        return act?.act_type !== 'side_chapters';
+      })
+      .sort((a, b) => a.chapter_number - b.chapter_number);
+    return priorChapters[priorChapters.length - 1] ?? null;
+  }, [allChapters, allActs, chapter.chapter_number]);
 
   const [selectedPrefillId, setSelectedPrefillId] = useState<number | null>(() => {
     const saved = localStorage.getItem(selectedPrefillStorageKey);
@@ -322,6 +393,34 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
     }
   }, [isOpen, work?.id]);
 
+  useEffect(() => {
+    if (!isOpen || !previousChapter) {
+      setPreviousChapterContent('');
+      return;
+    }
+
+    let cancelled = false;
+    const loadPreviousChapterContent = async () => {
+      try {
+        const { chaptersApi } = await import('../../services/api');
+        const response = await chaptersApi.get(work.id, previousChapter.id);
+        if (!cancelled) {
+          setPreviousChapterContent(response.data.content || '');
+        }
+      } catch (error) {
+        console.error('Failed to load previous chapter content:', error);
+        if (!cancelled) {
+          setPreviousChapterContent('');
+        }
+      }
+    };
+
+    loadPreviousChapterContent();
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, work.id, previousChapter?.id]);
+
   // Initialize state only when modal opens (not on prefill load/change)
   useEffect(() => {
     const justOpened = isOpen && !wasOpenRef.current;
@@ -354,7 +453,7 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
     }
     setChapterSelection('custom');
     setCustomChapterCount(1);
-    setSelectedFactionFilter('all');
+    setSelectedFactionFilter(FACTION_FILTER_RECENT);
     setSelectedFactionIds([]);
     loadLoreEntries();
     preselectTriggeredContextEntries(initialOriginalText);
@@ -437,23 +536,10 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
   // Lore keys include name + triggers; faction keys include faction name.
   const preselectTriggeredContextEntries = (sourceText: string) => {
     const text = sourceText || '';
-    const triggeredLoreIds: number[] = [];
-    const triggeredFactionIds: number[] = [];
-
-    loreEntries.forEach(entry => {
-      const allTriggers = [entry.name, ...(entry.triggers || []), ...(entry.extra_triggers || [])]
-        .filter(Boolean);
-      const isTriggered = allTriggers.some(trigger => text.includes(trigger));
-      if (isTriggered) {
-        triggeredLoreIds.push(entry.id);
-      }
-    });
-
-    selectableContextFactions.forEach(faction => {
-      if (faction.name && text.includes(faction.name)) {
-        triggeredFactionIds.push(faction.id);
-      }
-    });
+    const triggeredLoreIds = getTriggeredLoreIds(loreEntries, text);
+    const triggeredFactionIds = selectableContextFactions
+      .filter((faction) => faction.name && text.includes(faction.name))
+      .map((faction) => faction.id);
 
     setSelectedLoreIds(triggeredLoreIds);
     setSelectedFactionIds(triggeredFactionIds);
@@ -469,22 +555,10 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
   useEffect(() => {
     if (loreEntries.length === 0) return;
 
-    const newTriggeredIds: number[] = [];
-    loreEntries.forEach(entry => {
-      const allTriggers = [entry.name, ...(entry.triggers || []), ...(entry.extra_triggers || [])].filter(Boolean);
-      const isTriggered = allTriggers.some(trigger =>
-        originalText.includes(trigger)
-      );
-      if (isTriggered) {
-        newTriggeredIds.push(entry.id);
-      }
-    });
-
-    // Find newly triggered entries (not already selected)
+    const newTriggeredIds = getTriggeredLoreIds(loreEntries, originalText);
     const newlyTriggered = newTriggeredIds.filter(id => !selectedLoreIds.includes(id));
 
     if (newlyTriggered.length > 0) {
-      // Auto-select newly triggered entries (silently, without opening panel)
       setSelectedLoreIds(prev => [...new Set([...prev, ...newlyTriggered])]);
     }
   }, [originalText, loreEntries]);
@@ -600,29 +674,38 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
   };
 
   // Handle version navigation
+  const syncCurrentVersionText = (
+    versions: AutoEditVersion[],
+    index: number,
+    text: string
+  ): AutoEditVersion[] => {
+    if (index < 0 || index >= versions.length) return versions;
+    const updated = [...versions];
+    updated[index] = { ...updated[index], text };
+    return updated;
+  };
+
   const handlePreviousVersion = () => {
-    if (currentVersionIndex > 0) {
-      const newIndex = currentVersionIndex - 1;
-      setCurrentVersionIndex(newIndex);
-      setCurrentEditedText(editedVersions[newIndex].text);
-    }
+    if (currentVersionIndex <= 0) return;
+    const newIndex = currentVersionIndex - 1;
+    const synced = syncCurrentVersionText(editedVersions, currentVersionIndex, currentEditedText);
+    setEditedVersions(synced);
+    setCurrentVersionIndex(newIndex);
+    setCurrentEditedText(synced[newIndex].text);
   };
 
   const handleNextVersion = () => {
-    if (currentVersionIndex < editedVersions.length - 1) {
-      const newIndex = currentVersionIndex + 1;
-      setCurrentVersionIndex(newIndex);
-      setCurrentEditedText(editedVersions[newIndex].text);
-    }
+    if (currentVersionIndex >= editedVersions.length - 1) return;
+    const newIndex = currentVersionIndex + 1;
+    const synced = syncCurrentVersionText(editedVersions, currentVersionIndex, currentEditedText);
+    setEditedVersions(synced);
+    setCurrentVersionIndex(newIndex);
+    setCurrentEditedText(synced[newIndex].text);
   };
 
   // Handle accept
   const handleAccept = () => {
-    const fullText =
-      currentVersionIndex >= 0
-        ? editedVersions[currentVersionIndex]?.text ?? currentEditedText
-        : currentEditedText;
-    const cleanedText = stripThoughtProcess(fullText);
+    const cleanedText = stripThoughtProcess(currentEditedText);
     if (!cleanedText.trim()) return;
     onAccept(cleanedText);
     onClose();
@@ -674,8 +757,26 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
   // Filter and paginate lore entries by faction
   const safeLoreeEntries = Array.isArray(loreEntries) ? loreEntries : [];
   const isFactionAsEntriesMode = selectedFactionFilter === FACTION_FILTER_GROUP;
-  const filteredLoreEntries = selectedFactionFilter === 'all' || isFactionAsEntriesMode
+  const isRecentMode = selectedFactionFilter === FACTION_FILTER_RECENT;
+  const isWorldMode = selectedFactionFilter === FACTION_FILTER_WORLD;
+  const worldbuildingFactionIds = React.useMemo(
+    () => sortedFactions.filter((f) => f.faction_type === 'worldbuilding').map((f) => f.id),
+    [sortedFactions]
+  );
+  const recentLoreEntries = React.useMemo(
+    () => getLoreEntriesTriggeredByText(safeLoreeEntries, previousChapterContent),
+    [safeLoreeEntries, previousChapterContent]
+  );
+  const filteredLoreEntries = isFactionAsEntriesMode
     ? safeLoreeEntries
+    : isRecentMode
+    ? recentLoreEntries
+    : selectedFactionFilter === 'all'
+    ? safeLoreeEntries
+    : isWorldMode
+    ? safeLoreeEntries.filter((entry) =>
+        entry.factions?.some((factionId) => worldbuildingFactionIds.includes(factionId))
+      )
     : safeLoreeEntries.filter(entry => entry.factions?.includes(selectedFactionFilter as number));
   const contextItems = isFactionAsEntriesMode
     ? selectableContextFactions.map(faction => ({
@@ -695,6 +796,13 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
     (loreCurrentPage - 1) * LORE_PAGE_SIZE,
     loreCurrentPage * LORE_PAGE_SIZE
   );
+  const contextEmptyMessage = isFactionAsEntriesMode
+    ? '该阵营暂无条目'
+    : isRecentMode
+    ? !previousChapter
+      ? '暂无前文章节'
+      : '上一章未检测到角色'
+    : '该阵营暂无条目';
 
   // Reset page when faction filter changes
   useEffect(() => {
@@ -1140,30 +1248,11 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
               {/* Lore/Faction Context Entries */}
               <div>
                 <h4 className="text-sm font-medium text-dark-text mb-2">世界观条目</h4>
-                {/* Faction Filter Dropdown */}
-                {sortedFactions.length > 0 && (
-                  <select
-                    value={selectedFactionFilter}
-                    onChange={(e) => {
-                      const value = e.target.value;
-                      if (value === 'all' || value === FACTION_FILTER_GROUP) {
-                        setSelectedFactionFilter(value);
-                      } else {
-                        setSelectedFactionFilter(parseInt(value));
-                      }
-                    }}
-                    className="w-full mb-3 bg-dark-surface border border-dark-border rounded px-3 py-2 text-sm text-dark-text focus:outline-none focus:ring-2 focus:ring-dark-primary"
-                  >
-                    <option value="all">全部阵营</option>
-                    {sortedFactions.filter((f) => f.faction_type !== 'worldbuilding').map((faction) => (
-                      <option key={faction.id} value={faction.id}>{faction.name}</option>
-                    ))}
-                    <option value={FACTION_FILTER_GROUP}>阵营</option>
-                    {sortedFactions.filter((f) => f.faction_type === 'worldbuilding').map((faction) => (
-                      <option key={faction.id} value={faction.id}>{faction.name}</option>
-                    ))}
-                  </select>
-                )}
+                <FactionContextFilterSelect
+                  value={selectedFactionFilter}
+                  onChange={setSelectedFactionFilter}
+                  sortedFactions={sortedFactions}
+                />
                 <div className="grid grid-cols-2 gap-2 mb-3">
                   {paginatedContextItems.map(item => (
                     <label
@@ -1184,7 +1273,7 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
                   ))}
                 </div>
                 {contextItems.length === 0 && (
-                  <p className="text-xs text-dark-text-muted text-center py-2">该阵营暂无条目</p>
+                  <p className="text-xs text-dark-text-muted text-center py-2">{contextEmptyMessage}</p>
                 )}
                 {totalLorePages > 1 && (
                   <div className="flex items-center justify-center gap-2">
@@ -1421,30 +1510,12 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
               {/* Lore Entries Selection */}
               <div>
                 <h4 className="text-sm font-medium text-dark-text mb-2">世界观条目</h4>
-                {/* Faction Filter Dropdown */}
-                {sortedFactions.length > 0 && (
-                  <select
-                    value={selectedFactionFilter}
-                    onChange={(e) => {
-                      const value = e.target.value;
-                      if (value === 'all' || value === FACTION_FILTER_GROUP) {
-                        setSelectedFactionFilter(value);
-                      } else {
-                        setSelectedFactionFilter(parseInt(value));
-                      }
-                    }}
-                    className="w-full mb-3 bg-dark-surface border border-dark-border rounded px-3 py-1.5 text-sm text-dark-text focus:outline-none focus:ring-2 focus:ring-dark-primary"
-                  >
-                    <option value="all">全部阵营</option>
-                    {sortedFactions.filter((f) => f.faction_type !== 'worldbuilding').map((faction) => (
-                      <option key={faction.id} value={faction.id}>{faction.name}</option>
-                    ))}
-                    <option value={FACTION_FILTER_GROUP}>阵营</option>
-                    {sortedFactions.filter((f) => f.faction_type === 'worldbuilding').map((faction) => (
-                      <option key={faction.id} value={faction.id}>{faction.name}</option>
-                    ))}
-                  </select>
-                )}
+                <FactionContextFilterSelect
+                  value={selectedFactionFilter}
+                  onChange={setSelectedFactionFilter}
+                  sortedFactions={sortedFactions}
+                  className="py-1.5"
+                />
                 <div className="grid grid-cols-2 gap-2 mb-3">
                   {paginatedContextItems.map(item => (
                     <label
@@ -1466,7 +1537,7 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
                 </div>
 
                 {contextItems.length === 0 && (
-                  <p className="text-xs text-dark-text-muted text-center py-2">该阵营暂无条目</p>
+                  <p className="text-xs text-dark-text-muted text-center py-2">{contextEmptyMessage}</p>
                 )}
 
                 {/* Pagination */}

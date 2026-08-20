@@ -51,6 +51,7 @@ def get_user_ai_settings(user):
             'max_tokens': settings.max_tokens,
             'frequency_penalty': settings.frequency_penalty,
             'presence_penalty': settings.presence_penalty,
+            'reasoning_effort': settings.reasoning_effort or 'medium',
             'provider': settings.api_provider,
             'default_model': settings.get_default_model(),
         }
@@ -62,6 +63,7 @@ def get_user_ai_settings(user):
             'max_tokens': 2000,
             'frequency_penalty': 0.0,
             'presence_penalty': 0.0,
+            'reasoning_effort': 'medium',
             'provider': 'deepseek',
             'default_model': 'deepseek-v4-pro',
         }
@@ -426,7 +428,12 @@ async def ai_chat_stream(request):
             # Get API key and AI settings
             api_key, provider, default_model = await get_user_api_key_async(user)
             ai_settings = await get_user_ai_settings(user)
-            ai_service = AIService(api_key=api_key, provider_name=provider, default_model=default_model)
+            ai_service = AIService(
+                api_key=api_key,
+                provider_name=provider,
+                default_model=default_model,
+                reasoning_effort=ai_settings.get('reasoning_effort', 'medium'),
+            )
 
             # Send start event
             yield f'data: {json.dumps({"type": "start", "message": "AI聊天开始"})}\n\n'
@@ -524,7 +531,12 @@ async def ai_work_chat_stream(request):
 
             api_key, provider, default_model = await get_user_api_key_async(user)
             ai_settings = await get_user_ai_settings(user)
-            ai_service = AIService(api_key=api_key, provider_name=provider, default_model=default_model)
+            ai_service = AIService(
+                api_key=api_key,
+                provider_name=provider,
+                default_model=default_model,
+                reasoning_effort=ai_settings.get('reasoning_effort', 'medium'),
+            )
 
             yield f'data: {json.dumps({"type": "start", "message": "AI作品聊天开始"})}\n\n'
 
@@ -621,7 +633,13 @@ async def ai_summarize_stream(request):
         """生成SSE数据流 (async generator)"""
         try:
             api_key, provider, default_model = await get_user_api_key_async(user)
-            ai_service = AIService(api_key=api_key, provider_name=provider, default_model=default_model)
+            ai_settings = await get_user_ai_settings(user)
+            ai_service = AIService(
+                api_key=api_key,
+                provider_name=provider,
+                default_model=default_model,
+                reasoning_effort=ai_settings.get('reasoning_effort', 'medium'),
+            )
 
             yield f"data: {json.dumps({'type': 'start', 'message': 'AI摘要生成开始'})}\n\n"
 
@@ -713,7 +731,13 @@ async def ai_generate_act_synopsis(request):
         """生成SSE数据流"""
         try:
             api_key, provider, default_model = await get_user_api_key_async(user)
-            ai_service = AIService(api_key=api_key, provider_name=provider, default_model=default_model)
+            ai_settings = await get_user_ai_settings(user)
+            ai_service = AIService(
+                api_key=api_key,
+                provider_name=provider,
+                default_model=default_model,
+                reasoning_effort=ai_settings.get('reasoning_effort', 'medium'),
+            )
 
             yield f"data: {json.dumps({'type': 'start', 'message': '开始生成卷摘要'})}\n\n"
 
@@ -859,7 +883,12 @@ async def ai_auto_edit_stream(request):
             # Get API key and AI settings
             api_key, provider, default_model = await get_user_api_key_async(user)
             ai_settings = await get_user_ai_settings(user)
-            ai_service = AIService(api_key=api_key, provider_name=provider, default_model=default_model)
+            ai_service = AIService(
+                api_key=api_key,
+                provider_name=provider,
+                default_model=default_model,
+                reasoning_effort=ai_settings.get('reasoning_effort', 'medium'),
+            )
 
             yield f'data: {json.dumps({"type": "start", "message": "AI自动编辑开始"})}\n\n'
 
@@ -1076,9 +1105,15 @@ async def ai_auto_describe_entry(request):
                 yield f'data: {json.dumps({"type": "end", "message": "生成完成", "description": not_found_msg, "used_chapters": []})}\n\n'
                 return
 
-            # Get API key
+            # Get API key and AI settings
             api_key, provider, default_model = await get_user_api_key_async(user)
-            ai_service = AIService(api_key=api_key, provider_name=provider, default_model=default_model)
+            ai_settings = await get_user_ai_settings(user)
+            ai_service = AIService(
+                api_key=api_key,
+                provider_name=provider,
+                default_model=default_model,
+                reasoning_effort=ai_settings.get('reasoning_effort', 'medium'),
+            )
 
             yield f'data: {json.dumps({"type": "start", "message": "AI描述生成开始", "used_chapters": used_chapters_info})}\n\n'
 

@@ -402,7 +402,7 @@ class ContextBuilder:
 class AIService:
     """AI Service Manager"""
 
-    def __init__(self, api_key: str = None, provider_name: str = 'deepseek', default_model: str = None):
+    def __init__(self, api_key: str = None, provider_name: str = 'deepseek', default_model: str = None, reasoning_effort: str = 'medium'):
         self.provider_name = provider_name
         # Use provider abstraction for supported providers
         if provider_name in PROVIDER_CONFIG:
@@ -410,6 +410,7 @@ class AIService:
         else:
             # Fallback to DeepSeek for backward compatibility
             self.provider = get_provider('deepseek', api_key, default_model=default_model)
+        self.provider.reasoning_effort = reasoning_effort or 'medium'
 
     def _format_context_for_user(self, context: Dict) -> str:
         """Format context information for user message"""

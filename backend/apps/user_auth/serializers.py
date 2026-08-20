@@ -104,9 +104,10 @@ class UserSettingsSerializer(serializers.ModelSerializer):
     # AI Settings with validation
     temperature = serializers.FloatField(min_value=0.0, max_value=2.0, required=False)
     top_p = serializers.FloatField(min_value=0.0, max_value=1.0, required=False)
-    max_tokens = serializers.IntegerField(min_value=100, max_value=8000, required=False)
+    max_tokens = serializers.IntegerField(min_value=100, max_value=20000, required=False)
     frequency_penalty = serializers.FloatField(min_value=-2.0, max_value=2.0, required=False)
     presence_penalty = serializers.FloatField(min_value=-2.0, max_value=2.0, required=False)
+    reasoning_effort = serializers.CharField(max_length=50, required=False, allow_blank=True)
 
     class Meta:
         model = UserSettings
@@ -121,6 +122,7 @@ class UserSettingsSerializer(serializers.ModelSerializer):
             'masked_api_key', 'has_api_key',
             # AI Settings
             'temperature', 'top_p', 'max_tokens', 'frequency_penalty', 'presence_penalty',
+            'reasoning_effort',
             # Visual Settings
             'theme',
             # Meta

@@ -57,6 +57,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [maxTokens, setMaxTokens] = useState(2000);
   const [frequencyPenalty, setFrequencyPenalty] = useState(0.0);
   const [presencePenalty, setPresencePenalty] = useState(0.0);
+  const [reasoningEffort, setReasoningEffort] = useState('medium');
 
   // Loading states
   const [isLoadingSettings, setIsLoadingSettings] = useState(false);
@@ -102,6 +103,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       setMaxTokens(settings.max_tokens);
       setFrequencyPenalty(settings.frequency_penalty);
       setPresencePenalty(settings.presence_penalty);
+      setReasoningEffort(settings.reasoning_effort || 'medium');
 
       // Sync theme from backend
       if (settings.theme && settings.theme !== theme) {
@@ -117,6 +119,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         max_tokens: settings.max_tokens,
         frequency_penalty: settings.frequency_penalty,
         presence_penalty: settings.presence_penalty,
+        reasoning_effort: settings.reasoning_effort || 'medium',
         theme: settings.theme
       });
     } catch (error) {
@@ -192,6 +195,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       if (presencePenalty !== originalSettings.presence_penalty) {
         updateData.presence_penalty = presencePenalty;
       }
+      if (reasoningEffort !== originalSettings.reasoning_effort) {
+        updateData.reasoning_effort = reasoningEffort;
+      }
       if (theme !== originalSettings.theme) {
         updateData.theme = theme;
       }
@@ -228,8 +234,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         max_tokens: response.data.max_tokens,
         frequency_penalty: response.data.frequency_penalty,
         presence_penalty: response.data.presence_penalty,
+        reasoning_effort: response.data.reasoning_effort || 'medium',
         theme: response.data.theme
       });
+      setReasoningEffort(response.data.reasoning_effort || 'medium');
 
       setSaveMessage({ type: 'success', text: '设置已应用' });
 
@@ -817,12 +825,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         <input
                           type="number"
                           min="100"
-                          max="8000"
+                          max="20000"
                           step="100"
                           value={maxTokens}
                           onChange={(e) => {
                             const val = parseInt(e.target.value);
-                            if (!isNaN(val)) setMaxTokens(Math.min(8000, Math.max(100, val)));
+                            if (!isNaN(val)) setMaxTokens(Math.min(20000, Math.max(100, val)));
                           }}
                           className="w-20 px-2 py-1 text-sm text-center font-mono bg-transparent rounded text-dark-primary transition-all duration-200 outline-none hover:bg-white/5 hover:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.1)] focus:bg-white/10 focus:shadow-[inset_0_0_0_1px_rgba(59,130,246,0.5)]"
                         />
@@ -830,13 +838,28 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       <input
                         type="range"
                         min="100"
-                        max="8000"
+                        max="20000"
                         step="100"
                         value={maxTokens}
                         onChange={(e) => setMaxTokens(parseInt(e.target.value))}
                         className="w-full h-2 bg-dark-border rounded-lg appearance-none cursor-pointer slider"
                       />
                       <p className="text-xs text-dark-text-muted">AI回复的最大长度限制。</p>
+                    </div>
+
+                    {/* Reasoning Effort */}
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between gap-3">
+                        <label className="text-sm text-dark-text">Reasoning Effort</label>
+                        <input
+                          type="text"
+                          value={reasoningEffort}
+                          onChange={(e) => setReasoningEffort(e.target.value)}
+                          placeholder="medium"
+                          className="w-40 px-2 py-1 text-sm font-mono bg-transparent rounded text-dark-primary transition-all duration-200 outline-none hover:bg-white/5 hover:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.1)] focus:bg-white/10 focus:shadow-[inset_0_0_0_1px_rgba(59,130,246,0.5)]"
+                        />
+                      </div>
+                      <p className="text-xs text-dark-text-muted">传给推理模型的 reasoning_effort（如 medium / high / max）。</p>
                     </div>
 
                     {/* Frequency Penalty */}

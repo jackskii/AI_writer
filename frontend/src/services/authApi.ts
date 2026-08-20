@@ -119,6 +119,7 @@ export interface UserSettings {
   max_tokens: number;
   frequency_penalty: number;
   presence_penalty: number;
+  reasoning_effort: string;
 
   // Visual Settings
   theme: 'dark' | 'light';
@@ -142,6 +143,7 @@ export interface UserSettingsUpdate {
   max_tokens?: number;
   frequency_penalty?: number;
   presence_penalty?: number;
+  reasoning_effort?: string;
 
   // Visual Settings
   theme?: 'dark' | 'light';
