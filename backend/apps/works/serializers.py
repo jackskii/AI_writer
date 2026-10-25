@@ -9,11 +9,11 @@ class ActSerializer(serializers.ModelSerializer):
     class Meta:
         model = Act
         fields = [
-            'id', 'work', 'name', 'order', 'synopsis', 'act_type',
+            'id', 'work', 'name', 'order', 'synopsis', 'outline', 'outline_autosave', 'act_type',
             'word_count', 'chapter_count',
             'created_at', 'updated_at'
         ]
-        read_only_fields = ['work', 'order', 'created_at', 'updated_at']
+        read_only_fields = ['work', 'order', 'outline_autosave', 'created_at', 'updated_at']
         extra_kwargs = {
             'name': {'required': False, 'allow_blank': True},
         }
@@ -22,15 +22,16 @@ class ActSerializer(serializers.ModelSerializer):
 class ActOverviewSerializer(serializers.ModelSerializer):
     word_count = serializers.ReadOnlyField()
     chapter_count = serializers.ReadOnlyField()
+    has_outline = serializers.BooleanField(read_only=True)
 
     class Meta:
         model = Act
         fields = [
-            'id', 'work', 'name', 'order', 'act_type',
+            'id', 'work', 'name', 'order', 'act_type', 'has_outline',
             'word_count', 'chapter_count',
             'created_at', 'updated_at'
         ]
-        read_only_fields = ['work', 'created_at', 'updated_at']
+        read_only_fields = ['work', 'has_outline', 'created_at', 'updated_at']
 
 
 class ChapterSerializer(serializers.ModelSerializer):

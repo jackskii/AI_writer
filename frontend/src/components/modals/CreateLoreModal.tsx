@@ -31,7 +31,7 @@ export const CreateLoreModal: React.FC<CreateLoreModalProps> = ({
   const [description, setDescription] = useState('');
   const [triggers, setTriggers] = useState<string[]>(['']);
   const [selectedFactions, setSelectedFactions] = useState<number[]>([]);
-  const [usedChapters, setUsedChapters] = useState<Array<{chapter_number: number, title: string}>>([]);
+  const [usedChapters, setUsedChapters] = useState<Array<{chapter_number: number, title: string, act_order?: number, act_type?: string}>>([]);
   const [isFactionDropdownOpen, setIsFactionDropdownOpen] = useState(false);
   const [isAutoDescribeModalOpen, setIsAutoDescribeModalOpen] = useState(false);
 
@@ -172,7 +172,7 @@ export const CreateLoreModal: React.FC<CreateLoreModalProps> = ({
     setIsAutoDescribeModalOpen(true);
   };
 
-  const handleDescriptionGenerated = (newDescription: string, chapters: Array<{chapter_number: number, title: string}>) => {
+  const handleDescriptionGenerated = (newDescription: string, chapters: Array<{chapter_number: number, title: string, act_order?: number, act_type?: string}>) => {
     setDescription(newDescription);
     setUsedChapters(chapters);
   };
@@ -230,12 +230,17 @@ export const CreateLoreModal: React.FC<CreateLoreModalProps> = ({
                   <p className="text-xs text-dark-text-muted">
                     已使用章节: {' '}
                     <span className="text-dark-text">
-                      {usedChapters.map((ch, idx) => (
-                        <span key={idx}>
-                          第{ch.chapter_number}章《{ch.title}》
-                          {idx < usedChapters.length - 1 ? ', ' : ''}
-                        </span>
-                      ))}
+                      {usedChapters.map((ch, idx) => {
+                        const label = ch.act_type === 'side_chapters'
+                          ? `外传 第${ch.chapter_number}章`
+                          : `第${ch.act_order ?? 0}卷 第${ch.chapter_number}章`;
+                        return (
+                          <span key={idx}>
+                            {label}《{ch.title}》
+                            {idx < usedChapters.length - 1 ? ', ' : ''}
+                          </span>
+                        );
+                      })}
                     </span>
                   </p>
                 </div>
@@ -405,6 +410,7 @@ export const CreateLoreModal: React.FC<CreateLoreModalProps> = ({
         isOpen={isAutoDescribeModalOpen}
         onClose={() => setIsAutoDescribeModalOpen(false)}
         onDescriptionGenerated={handleDescriptionGenerated}
+        isWorldbuilding={isWorldbuildingEntry}
       />
     </div>
   );

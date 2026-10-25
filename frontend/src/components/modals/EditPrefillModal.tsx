@@ -69,13 +69,6 @@ export const EditPrefillModal: React.FC<EditPrefillModalProps> = ({
     if (!text || !text.trim()) {
       return '提示文本不能为空';
     }
-    const words = text.trim().split(/\s+/);
-    if (words.length > 200) {
-      return '提示文本最多200字';
-    }
-    if (text.length > 1000) {
-      return '提示文本过长';
-    }
     return null;
   };
 
@@ -254,7 +247,7 @@ export const EditPrefillModal: React.FC<EditPrefillModalProps> = ({
                   </div>
                   <div className="mb-3">
                     <label className="block text-sm font-medium text-dark-text mb-1">
-                      提示文本 (最多200字)
+                      提示文本
                     </label>
                     <Textarea
                       value={newPromptText}
@@ -262,7 +255,6 @@ export const EditPrefillModal: React.FC<EditPrefillModalProps> = ({
                       placeholder="输入提示文本"
                       className="bg-dark-bg border-dark-border font-mono text-sm"
                       rows={6}
-                      maxLength={1000}
                     />
                   </div>
                   <div className="flex gap-2">
@@ -308,14 +300,13 @@ export const EditPrefillModal: React.FC<EditPrefillModalProps> = ({
                         </div>
                         <div className="mb-3">
                           <label className="block text-sm font-medium text-dark-text mb-1">
-                            提示文本 (最多200字)
+                            提示文本
                           </label>
                           <Textarea
                             value={editingPromptText}
                             onChange={(e) => setEditingPromptText(e.target.value)}
                             className="bg-dark-bg border-dark-border font-mono text-sm"
                             rows={6}
-                            maxLength={1000}
                           />
                         </div>
                         <div className="flex gap-2">

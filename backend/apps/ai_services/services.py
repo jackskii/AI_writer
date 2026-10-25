@@ -72,12 +72,15 @@ class ContextBuilder:
         - Full text of current chapter
         """
         work = chapter.work
+        current_act = chapter.act
 
         # Basic context
         context = {
             "synopsis": work.synopsis,
             "work_title": work.title,
-            "chapter_title": chapter.title,
+            "chapter_title": prompts.format_chapter_label(
+                current_act.act_type, current_act.order, chapter.chapter_number, chapter.title
+            ) if current_act else chapter.title,
             "current_chapter_content": chapter.content if include_current_content else "",
         }
 
@@ -151,11 +154,11 @@ class ContextBuilder:
         # For normal chapters, exclude chapters from side chapters acts
         chapters = chapter.work.chapters.filter(
             order__lt=chapter.order
-        ).exclude(act__act_type='side_chapters').order_by('order')
+        ).exclude(act__act_type='side_chapters').select_related('act').order_by('order')
 
         previous_chapters = []
         for ch in chapters:
-            chapter_text = f"第{ch.chapter_number}章《{ch.title}》\n\n{ch.content or '(空章节)'}"
+            chapter_text = f"{prompts.format_chapter_label(ch.act.act_type, ch.act.order, ch.chapter_number, ch.title)}\n\n{ch.content or '(空章节)'}"
             previous_chapters.append(chapter_text)
 
         return previous_chapters
@@ -182,11 +185,11 @@ class ContextBuilder:
         # For normal chapters, exclude chapters from side chapters acts
         chapters = chapter.work.chapters.filter(
             order__lt=chapter.order
-        ).exclude(act__act_type='side_chapters').order_by('-order')[:count]
+        ).exclude(act__act_type='side_chapters').select_related('act').order_by('-order')[:count]
 
         recent_chapters = []
         for ch in reversed(list(chapters)):
-            chapter_text = f"第{ch.chapter_number}章《{ch.title}》\n\n{ch.content or '(空章节)'}"
+            chapter_text = f"{prompts.format_chapter_label(ch.act.act_type, ch.act.order, ch.chapter_number, ch.title)}\n\n{ch.content or '(空章节)'}"
             recent_chapters.append(chapter_text)
 
         return recent_chapters
@@ -209,11 +212,11 @@ class ContextBuilder:
         # For normal chapters, exclude chapters from side chapters acts
         chapters = chapter.work.chapters.filter(
             order__lt=chapter.order
-        ).exclude(act__act_type='side_chapters').exclude(summary__isnull=True).exclude(summary='').order_by('-order')[:count]
+        ).exclude(act__act_type='side_chapters').exclude(summary__isnull=True).exclude(summary='').select_related('act').order_by('-order')[:count]
 
         summaries = []
         for ch in reversed(list(chapters)):
-            summaries.append(f"第{ch.chapter_number}章《{ch.title}》：\n{ch.summary}")
+            summaries.append(f"{prompts.format_chapter_label(ch.act.act_type, ch.act.order, ch.chapter_number, ch.title)}：\n{ch.summary}")
 
         return summaries
 
@@ -269,11 +272,11 @@ class ContextBuilder:
         # Get chapters in current act before current chapter
         chapters = current_act.chapters.filter(
             order__lt=chapter.order
-        ).exclude(summary__isnull=True).exclude(summary='').order_by('order')
+        ).exclude(summary__isnull=True).exclude(summary='').select_related('act').order_by('order')
 
         summaries = []
         for ch in chapters:
-            summaries.append(f"第{ch.chapter_number}章《{ch.title}》：\n{ch.summary}")
+            summaries.append(f"{prompts.format_chapter_label(ch.act.act_type, ch.act.order, ch.chapter_number, ch.title)}：\n{ch.summary}")
 
         return summaries
 
@@ -320,7 +323,9 @@ class ContextBuilder:
         context = {
             "synopsis": work.synopsis,
             "work_title": work.title,
-            "chapter_title": chapter.title,
+            "chapter_title": prompts.format_chapter_label(
+                current_act.act_type, current_act.order, chapter.chapter_number, chapter.title
+            ) if current_act else chapter.title,
             "current_chapter_content": chapter.content,
         }
 
@@ -365,7 +370,9 @@ class ContextBuilder:
         context = {
             "synopsis": work.synopsis,
             "work_title": work.title,
-            "chapter_title": chapter.title,
+            "chapter_title": prompts.format_chapter_label(
+                chapter.act.act_type, chapter.act.order, chapter.chapter_number, chapter.title
+            ) if chapter.act else chapter.title,
             "current_chapter_content": chapter.content,
         }
 
@@ -565,7 +572,10 @@ class AIService:
         from asgiref.sync import sync_to_async
         summary_context = await sync_to_async(ContextBuilder.build_summary_context)(chapter)
 
-        user_content = prompts.format_summary_request(chapter.title, chapter.content, summary_context)
+        label = prompts.format_chapter_label(
+            chapter.act.act_type, chapter.act.order, chapter.chapter_number, chapter.title
+        ) if chapter.act else chapter.title
+        user_content = prompts.format_summary_request(label, chapter.content, summary_context)
         messages = [
             {"role": "user", "content": user_content}
         ]
@@ -635,7 +645,7 @@ class AIService:
             messages = []
 
             # Add system instruction and context
-            system_content = f"{prompts.CHAT_STREAM_SYSTEM_PROMPT}\n\n{formatted_context}"
+            system_content = f"{prompts.FICTION_PREAMBLE}\n\n{prompts.CHAT_STREAM_SYSTEM_PROMPT}\n\n{formatted_context}"
             messages.append({"role": "system", "content": system_content})
 
             # Add chat history (if provided)
@@ -698,7 +708,7 @@ class AIService:
 
             # Build message with system prompt and context + selected text
             messages = [
-                {"role": "system", "content": prompts.AUTO_EDIT_SYSTEM_PROMPT},
+                {"role": "system", "content": f"{prompts.FICTION_PREAMBLE}\n\n{prompts.AUTO_EDIT_SYSTEM_PROMPT}"},
                 {"role": "user", "content": user_message}
             ]
 
@@ -730,7 +740,8 @@ class AIService:
         additional_context: str = "",
         is_update: bool = False,
         original_description: str = "",
-        custom_template: str = ""
+        custom_template: str = "",
+        is_worldbuilding: bool = False
     ) -> AsyncGenerator[str, None]:
         """AI auto-describe entry function - streaming version
         
@@ -741,8 +752,9 @@ class AIService:
             is_update: Whether this is updating an existing description
             original_description: The original description (for update mode)
             custom_template: Optional custom template for the work
+            is_worldbuilding: Whether this is a worldbuilding entry (uses generic prompt, ignores custom template)
         """
-        logger.debug(f"Starting AI auto-describe stream for entry: {entry_name} (update={is_update})")
+        logger.debug(f"Starting AI auto-describe stream for entry: {entry_name} (update={is_update}, worldbuilding={is_worldbuilding})")
 
         try:
             # Format the request using prompts.py
@@ -752,11 +764,14 @@ class AIService:
                 additional_context=additional_context,
                 is_update=is_update,
                 original_description=original_description,
-                custom_template=custom_template
+                custom_template=custom_template,
+                is_worldbuilding=is_worldbuilding
             )
 
+            system_content = prompts.build_auto_describe_system_prompt()
             messages = [
-                {"role": "user", "content": user_message}
+                {"role": "system", "content": system_content},
+                {"role": "user", "content": user_message},
             ]
 
             logger.debug(f"Sending streaming auto-describe request to {self.provider.provider_name} API")

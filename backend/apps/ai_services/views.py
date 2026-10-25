@@ -11,6 +11,7 @@ from .services import AIService, run_async_ai_task
 from . import prompts
 import logging
 import json
+import re
 import asyncio
 import uuid
 
@@ -40,6 +41,35 @@ def get_user_api_key_async(user):
 
 
 @sync_to_async
+def get_deepseek_api_key_async(user):
+    """获取用户的DeepSeek API密钥 (async version)
+
+    轻量任务（摘要、卷摘要）强制使用 DeepSeek + deepseek-v4-pro，
+    不论用户当前选用的 provider。需要用户已配置 DeepSeek API 密钥。
+    """
+    from apps.user_auth.models import UserSettings
+    settings = UserSettings.objects.get(user=user)
+    api_key = settings.get_api_key_for_provider('deepseek')
+    if not api_key or not api_key.strip():
+        raise ValueError("此功能需要配置 DeepSeek API 密钥")
+    return api_key
+
+
+@sync_to_async
+def get_auto_describe_provider_async(user):
+    """Resolve provider for auto-describe: OpenRouter glm-5.3, else DeepSeek."""
+    from apps.user_auth.models import UserSettings
+    settings = UserSettings.objects.get(user=user)
+    openrouter_key = settings.get_api_key_for_provider('openrouter')
+    if openrouter_key and openrouter_key.strip():
+        return openrouter_key, 'openrouter', 'z-ai/glm-5.3', 'high'
+    deepseek_key = settings.get_api_key_for_provider('deepseek')
+    if deepseek_key and deepseek_key.strip():
+        return deepseek_key, 'deepseek', 'deepseek-v4-pro', 'medium'
+    raise ValueError("没有可用的自动描述 API 密钥")
+
+
+@sync_to_async
 def get_user_ai_settings(user):
     """获取用户的AI设置 (async version)"""
     from apps.user_auth.models import UserSettings
@@ -48,7 +78,7 @@ def get_user_ai_settings(user):
         return {
             'temperature': settings.temperature,
             'top_p': settings.top_p,
-            'max_tokens': settings.max_tokens,
+            'max_tokens': settings.max_tokens if settings.max_tokens != 0 else None,
             'frequency_penalty': settings.frequency_penalty,
             'presence_penalty': settings.presence_penalty,
             'reasoning_effort': settings.reasoning_effort or 'medium',
@@ -121,7 +151,7 @@ def get_act_by_id(work_id, act_id, user):
 @sync_to_async
 def get_all_chapters_in_act(act):
     """Get all chapters in an act"""
-    return list(act.chapters.order_by('order'))
+    return list(act.chapters.select_related('act').order_by('order'))
 
 
 @sync_to_async
@@ -156,9 +186,10 @@ def build_auto_edit_context(work, chapter, user, style_id, selected_lore_ids, se
     """Build context for auto-edit (async version)
     
     Context includes previous act synopses and current-act chapter summaries.
-    Full-text chapters (chapter_selection custom/all) are selected globally across
-    normal acts; overflow at arc start pulls from the previous arc. Cross-act full
-    text is rendered under 前卷章节全文; in-act full text under 本卷前文章节.
+    Full-text chapters (chapter_selection custom/all) are selected from the
+    current arc first; overflow at arc start pulls from the previous normal arc
+    only. Cross-act full text is rendered under 前卷章节全文; in-act full text
+    under 本卷前文章节.
     
     For side chapters: only includes work synopsis, normal act synopses, and selected lore entries.
     """
@@ -189,6 +220,10 @@ def build_auto_edit_context(work, chapter, user, style_id, selected_lore_ids, se
     # Add synopsis
     if work.synopsis:
         formatted_context += f"作品大纲：{work.synopsis}\n\n"
+
+    act_outline = (current_act.outline or '').strip() if current_act else ''
+    if act_outline and act_outline != prompts.OUTLINE_PLANNER_TEMPLATE.strip():
+        formatted_context += f"本章大纲：\n{act_outline}\n\n"
 
     # Add selected lore entries
     if selected_lore_ids:
@@ -243,14 +278,16 @@ def build_auto_edit_context(work, chapter, user, style_id, selected_lore_ids, se
         # Get all previous chapters in current act (in order) — used for summary section
         all_previous_chapters = list(current_act.chapters.filter(
             order__lt=chapter.order
-        ).order_by('order')) if current_act else []
+        ).select_related('act').order_by('order')) if current_act else []
 
-        # Global prior pool (cross-act, excludes side chapters)
-        all_prior_global = list(
-            Chapter.objects.filter(work=work, order__lt=chapter.order)
-            .exclude(act__act_type='side_chapters')
-            .order_by('order')
-        )
+        # Previous normal act (for overflow at the start of an arc)
+        prev_normal_act = None
+        if current_act and current_act.act_type == 'normal':
+            prev_normal_act = Act.objects.filter(
+                work=work,
+                act_type='normal',
+                order__lt=current_act.order
+            ).order_by('-order').first()
 
         # Determine which chapters to include as full text
         chapters_to_replace_with_full_text = []
@@ -258,22 +295,28 @@ def build_auto_edit_context(work, chapter, user, style_id, selected_lore_ids, se
             chapters_to_replace_with_full_text = []
         elif chapter_selection == 'all':
             chapters_to_replace_with_full_text = list(all_previous_chapters)
-            if not chapters_to_replace_with_full_text and current_act:
-                prev_act = Act.objects.filter(
-                    work=work,
-                    act_type='normal',
-                    order__lt=current_act.order
-                ).order_by('-order').first()
-                if prev_act:
-                    chapters_to_replace_with_full_text = list(
-                        prev_act.chapters.order_by('order')
-                    )
+            if not chapters_to_replace_with_full_text and prev_normal_act:
+                chapters_to_replace_with_full_text = list(
+                    prev_normal_act.chapters.select_related('act').order_by('order')
+                )
         elif chapter_selection == 'custom':
             try:
                 count = int(custom_chapter_count)
-                count = min(max(0, count), len(all_prior_global))
+                count = max(0, count)
                 if count > 0:
-                    chapters_to_replace_with_full_text = all_prior_global[-count:]
+                    # In-arc previous chapters first, then overflow to the
+                    # end of the previous normal act only.
+                    in_act = list(all_previous_chapters)
+                    if len(in_act) >= count:
+                        chapters_to_replace_with_full_text = in_act[-count:]
+                    else:
+                        chapters_to_replace_with_full_text = in_act
+                        remaining = count - len(in_act)
+                        if remaining > 0 and prev_normal_act:
+                            prev_act_chapters = list(
+                                prev_normal_act.chapters.select_related('act').order_by('order')
+                            )
+                            chapters_to_replace_with_full_text += prev_act_chapters[-remaining:]
             except (TypeError, ValueError):
                 chapters_to_replace_with_full_text = []
 
@@ -286,7 +329,7 @@ def build_auto_edit_context(work, chapter, user, style_id, selected_lore_ids, se
         if cross_act_full:
             formatted_context += "前卷章节全文：\n\n"
             for ch in cross_act_full:
-                formatted_context += f"第{ch.chapter_number}章《{ch.title}》\n\n{ch.content or '(空章节)'}\n\n---\n\n"
+                formatted_context += f"{prompts.format_chapter_label(ch.act.act_type, ch.act.order, ch.chapter_number, ch.title)}\n\n{ch.content or '(空章节)'}\n\n---\n\n"
             formatted_context += "---\n\n"
 
         # Add chapter summaries (or full text for replaced in-act chapters)
@@ -295,15 +338,15 @@ def build_auto_edit_context(work, chapter, user, style_id, selected_lore_ids, se
 
             for ch in all_previous_chapters:
                 if ch.id in replace_ids:
-                    formatted_context += f"第{ch.chapter_number}章《{ch.title}》\n\n{ch.content or '(空章节)'}\n\n---\n\n"
+                    formatted_context += f"{prompts.format_chapter_label(ch.act.act_type, ch.act.order, ch.chapter_number, ch.title)}\n\n{ch.content or '(空章节)'}\n\n---\n\n"
                 elif ch.summary:
-                    formatted_context += f"第{ch.chapter_number}章《{ch.title}》摘要：{ch.summary}\n\n"
+                    formatted_context += f"{prompts.format_chapter_label(ch.act.act_type, ch.act.order, ch.chapter_number, ch.title)}摘要：{ch.summary}\n\n"
 
             formatted_context += "---\n\n"
 
     # Add current chapter content at the end
     if chapter.content:
-        formatted_context += f"当前章节《{chapter.title}》全文：\n\n{chapter.content}\n\n---\n\n"
+        formatted_context += f"当前章节{prompts.format_chapter_label(chapter.act.act_type, chapter.act.order, chapter.chapter_number, chapter.title)}全文：\n\n{chapter.content}\n\n---\n\n"
 
     return formatted_context
 
@@ -632,13 +675,11 @@ async def ai_summarize_stream(request):
     async def generate_stream():
         """生成SSE数据流 (async generator)"""
         try:
-            api_key, provider, default_model = await get_user_api_key_async(user)
-            ai_settings = await get_user_ai_settings(user)
+            api_key = await get_deepseek_api_key_async(user)
             ai_service = AIService(
                 api_key=api_key,
-                provider_name=provider,
-                default_model=default_model,
-                reasoning_effort=ai_settings.get('reasoning_effort', 'medium'),
+                provider_name='deepseek',
+                default_model='deepseek-v4-pro',
             )
 
             yield f"data: {json.dumps({'type': 'start', 'message': 'AI摘要生成开始'})}\n\n"
@@ -730,13 +771,11 @@ async def ai_generate_act_synopsis(request):
     async def generate_stream():
         """生成SSE数据流"""
         try:
-            api_key, provider, default_model = await get_user_api_key_async(user)
-            ai_settings = await get_user_ai_settings(user)
+            api_key = await get_deepseek_api_key_async(user)
             ai_service = AIService(
                 api_key=api_key,
-                provider_name=provider,
-                default_model=default_model,
-                reasoning_effort=ai_settings.get('reasoning_effort', 'medium'),
+                provider_name='deepseek',
+                default_model='deepseek-v4-pro',
             )
 
             yield f"data: {json.dumps({'type': 'start', 'message': '开始生成卷摘要'})}\n\n"
@@ -757,14 +796,14 @@ async def ai_generate_act_synopsis(request):
             ]
             if missing_summary_chapters:
                 missing_labels = [
-                    f"第{ch.chapter_number}章《{ch.title}》"
+                    prompts.format_chapter_label(ch.act.act_type, ch.act.order, ch.chapter_number, ch.title)
                     for ch in missing_summary_chapters
                 ]
                 yield f"data: {json.dumps({'type': 'error', 'message': '请先生成所有章节的摘要后再生成卷摘要：' + '、'.join(missing_labels)})}\n\n"
                 return
 
             chapter_summaries_parts = [
-                f"第{chapter.chapter_number}章《{chapter.title}》：\n{chapter.summary}"
+                f"{prompts.format_chapter_label(chapter.act.act_type, chapter.act.order, chapter.chapter_number, chapter.title)}：\n{chapter.summary}"
                 for chapter in all_chapters
             ]
             chapter_summaries_text = "\n\n".join(chapter_summaries_parts)
@@ -938,6 +977,16 @@ def get_work_lore_template(work):
     return work.lore_entry_template or ''
 
 
+ENTRY_FULL_TEXT_MENTION_THRESHOLD = 5
+
+
+def _count_name_mentions(text: str, name: str) -> int:
+    """Case-insensitive substring count of a character/entry name."""
+    if not text or not name:
+        return 0
+    return text.lower().count(name.lower())
+
+
 @sync_to_async
 def search_chapters_with_entry(work, entry_name, chapter_ids=None):
     """Search chapters containing entry name (async version)
@@ -946,27 +995,50 @@ def search_chapters_with_entry(work, entry_name, chapter_ids=None):
         work: The work object
         entry_name: The name to search for
         chapter_ids: Optional list of specific chapter IDs to use. If None, searches all chapters.
+
+    Full chapter text is used only when the name appears at least
+    ENTRY_FULL_TEXT_MENTION_THRESHOLD times; otherwise the chapter synopsis
+    is used, or the chapter is skipped if it has no synopsis.
     """
     from django.db.models import Q
     
-    if chapter_ids:
-        # Use specific chapters selected by user
-        chapters = work.chapters.filter(id__in=chapter_ids).order_by('order')
+    if chapter_ids is not None:
+        # Use the caller's selection (empty list = no chapter text, extra desc only)
+        chapters = list(work.chapters.filter(id__in=chapter_ids).select_related('act'))
+        chapters = sorted(chapters, key=lambda c: prompts.chapter_sort_key(c.act.act_type, c.act.order, c.chapter_number))
     else:
-        # Search all chapters containing entry name
-        chapters = work.chapters.filter(
+        # Search all chapters containing entry name; 外传 sink to the bottom before the 5-cap
+        chapters = list(work.chapters.filter(
             Q(content__icontains=entry_name) | Q(title__icontains=entry_name)
-        ).order_by('order')[:5]
+        ).select_related('act'))
+        chapters = sorted(chapters, key=lambda c: prompts.chapter_sort_key(c.act.act_type, c.act.order, c.chapter_number))[:5]
     
     # Build context and used chapters info
     context_parts = []
     used_chapters_info = []
     for chapter in chapters:
-        context_parts.append(f"### 第{chapter.chapter_number}章《{chapter.title}》\n\n{chapter.content}")
+        label = prompts.format_chapter_label(
+            chapter.act.act_type, chapter.act.order, chapter.chapter_number, chapter.title
+        )
+        use_full_text = _count_name_mentions(
+            chapter.content or '', entry_name
+        ) >= ENTRY_FULL_TEXT_MENTION_THRESHOLD
+
+        if use_full_text:
+            body = chapter.content or ''
+        else:
+            summary = (chapter.summary or '').strip()
+            if not summary:
+                continue
+            body = f"摘要：\n{summary}"
+
+        context_parts.append(f"### {label}\n\n{body}")
         used_chapters_info.append({
             'chapter_number': chapter.chapter_number,
             'title': chapter.title,
-            'id': chapter.id
+            'id': chapter.id,
+            'act_order': chapter.act.order,
+            'act_type': chapter.act.act_type,
         })
     
     context_text = "\n\n---\n\n".join(context_parts)
@@ -977,15 +1049,71 @@ def search_chapters_with_entry(work, entry_name, chapter_ids=None):
 def get_chapters_with_entry_name(work, entry_name):
     """Get all chapters containing entry name (for chapter selection UI)"""
     from django.db.models import Q
-    chapters = work.chapters.filter(
+    chapters = list(work.chapters.filter(
         Q(content__icontains=entry_name) | Q(title__icontains=entry_name)
-    ).order_by('order')
+    ).select_related('act'))
+    chapters = sorted(chapters, key=lambda c: prompts.chapter_sort_key(c.act.act_type, c.act.order, c.chapter_number))
     
     return [{
         'id': chapter.id,
         'chapter_number': chapter.chapter_number,
-        'title': chapter.title
+        'title': chapter.title,
+        'summary': chapter.summary or '',
+        'act_order': chapter.act.order,
+        'act_type': chapter.act.act_type,
     } for chapter in chapters]
+
+
+@sync_to_async
+def get_all_chapters_with_summary(work):
+    """Get all chapters of a work with their summaries (for chapter selection dropdown)"""
+    chapters = list(work.chapters.all().select_related('act'))
+    chapters = sorted(chapters, key=lambda c: prompts.chapter_sort_key(c.act.act_type, c.act.order, c.chapter_number))
+    return [{
+        'id': chapter.id,
+        'chapter_number': chapter.chapter_number,
+        'title': chapter.title,
+        'summary': chapter.summary or '',
+        'act_order': chapter.act.order,
+        'act_type': chapter.act.act_type,
+    } for chapter in chapters]
+
+
+@csrf_exempt
+async def ai_auto_describe_entry_all_chapters(request):
+    """获取作品所有章节（含摘要），用于章节选择下拉菜单"""
+    if request.method != 'POST':
+        return JsonResponse({'error': '仅支持POST请求'}, status=405)
+
+    try:
+        body = json.loads(request.body.decode('utf-8'))
+    except Exception:
+        return JsonResponse({'error': '无效的请求数据'}, status=400)
+
+    user = None
+    token = request.GET.get('token') or body.get('token')
+    if token:
+        try:
+            user = await get_token_user(token)
+        except Exception:
+            return JsonResponse({'error': '认证令牌无效'}, status=401)
+    elif hasattr(request, 'user') and request.user.is_authenticated:
+        user = request.user
+    else:
+        return JsonResponse({'error': '需要登录'}, status=401)
+
+    work_id = body.get('work_id')
+
+    if not work_id:
+        return JsonResponse({'error': '缺少必要参数'}, status=400)
+
+    try:
+        work = await get_work_for_user(work_id, user)
+    except Exception:
+        return JsonResponse({'error': '作品不存在'}, status=404)
+
+    chapters = await get_all_chapters_with_summary(work)
+    return JsonResponse({'chapters': chapters})
 
 
 @csrf_exempt
@@ -1072,6 +1200,7 @@ async def ai_auto_describe_entry(request):
     additional_context = body.get('additional_context', '')  # Additional user context
     is_update = body.get('is_update', False)  # Whether updating existing description
     original_description = body.get('original_description', '')  # Original description for update mode
+    is_worldbuilding = body.get('is_worldbuilding', False)  # Whether this is a worldbuilding entry
 
     if not all([entry_name, work_id]):
         return HttpResponse(
@@ -1089,8 +1218,11 @@ async def ai_auto_describe_entry(request):
             status=404
         )
 
-    # Get custom template for this work (if set)
-    custom_template = await get_work_lore_template(work)
+    # Get custom template for this work (if set) — only for character entries, not worldbuilding
+    if is_worldbuilding:
+        custom_template = ''
+    else:
+        custom_template = await get_work_lore_template(work)
 
     async def generate_stream():
         """生成SSE数据流 (async generator)"""
@@ -1100,19 +1232,12 @@ async def ai_auto_describe_entry(request):
                 work, entry_name, chapter_ids
             )
 
-            if not context_text:
-                not_found_msg = f'"{entry_name}" 尚未在故事中出现。'
-                yield f'data: {json.dumps({"type": "end", "message": "生成完成", "description": not_found_msg, "used_chapters": []})}\n\n'
-                return
-
-            # Get API key and AI settings
-            api_key, provider, default_model = await get_user_api_key_async(user)
-            ai_settings = await get_user_ai_settings(user)
+            api_key, provider, default_model, reasoning_effort = await get_auto_describe_provider_async(user)
             ai_service = AIService(
                 api_key=api_key,
                 provider_name=provider,
                 default_model=default_model,
-                reasoning_effort=ai_settings.get('reasoning_effort', 'medium'),
+                reasoning_effort=reasoning_effort,
             )
 
             yield f'data: {json.dumps({"type": "start", "message": "AI描述生成开始", "used_chapters": used_chapters_info})}\n\n'
@@ -1125,7 +1250,8 @@ async def ai_auto_describe_entry(request):
                     additional_context=additional_context,
                     is_update=is_update,
                     original_description=original_description,
-                    custom_template=custom_template
+                    custom_template=custom_template,
+                    is_worldbuilding=is_worldbuilding
                 ):
                     accumulated_description += chunk
                     yield f'data: {json.dumps({"type": "chunk", "content": chunk})}\n\n'
@@ -1143,6 +1269,196 @@ async def ai_auto_describe_entry(request):
         generate_stream(),
         content_type='text/event-stream'
     )
+    response['Cache-Control'] = 'no-cache'
+    response['X-Accel-Buffering'] = 'no'
+    response['Access-Control-Allow-Origin'] = '*'
+    return response
+
+
+def _split_outline_planner_output(text: str, current_content: str):
+    """Whole response is either the outline JSON object or a normal chat reply."""
+    raw = (text or '').strip()
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        logger.warning("Outline planner returned non-JSON content: %s", raw[:2000])
+        return raw, current_content, False
+    if not isinstance(data, dict) or not isinstance(data.get('reply'), str):
+        logger.warning("Outline planner JSON missing reply: %s", raw[:2000])
+        return raw, current_content, False
+    document = data.get('document') if isinstance(data.get('document'), dict) else {}
+    content = document.get('content', current_content)
+    if not isinstance(content, str):
+        content = current_content
+    if content.strip() == prompts.OUTLINE_PLANNER_UNCHANGED:
+        return data['reply'], current_content, False
+    return data['reply'], content, 'content' in document
+
+
+@sync_to_async
+def get_outline_planner_bundle(work_id, act_id, user):
+    """Load planner context and the last 20 chat turns. Does not read Act.outline into auto-edit."""
+    from apps.chat.models import OutlineChatSession
+    work = get_object_or_404(Work, id=work_id, author=user)
+    act = get_object_or_404(Act, id=act_id, work=work)
+
+    if act.act_type == 'side_chapters':
+        previous_acts = Act.objects.filter(
+            work=work, act_type='normal'
+        ).exclude(synopsis='').order_by('order')
+    else:
+        previous_acts = Act.objects.filter(
+            work=work, act_type='normal', order__lt=act.order
+        ).exclude(synopsis='').order_by('order')
+
+    synopsis_lines = [
+        f"【{prev.name}】\n{prev.synopsis}" for prev in previous_acts if (prev.synopsis or '').strip()
+    ]
+    lore_lines = [
+        f"- {entry.name}: {entry.description}"
+        for entry in LoreEntry.objects.filter(work=work).order_by('name')
+    ]
+
+    history = []
+    trimmed = False
+    session = OutlineChatSession.objects.filter(work=work, act=act, user=user).first()
+    if session:
+        messages = session.messages.all()
+        if session.api_history_after:
+            trimmed = True
+            messages = messages.filter(created_at__gte=session.api_history_after)
+        recent = list(messages.order_by('-created_at')[:20])
+        history = [{'role': msg.role, 'content': msg.content} for msg in reversed(recent)]
+
+    work_brief = "\n\n".join(part for part in [
+        f"作品标题：{work.title}",
+        f"作品大纲：\n{work.synopsis}" if (work.synopsis or '').strip() else '',
+    ] if part)
+    reference = "\n\n".join(part for part in [
+        f"当前卷：{act.name}",
+        "前卷摘要：\n\n" + "\n\n".join(synopsis_lines) if synopsis_lines else '',
+        "世界观与人物：\n" + "\n".join(lore_lines) if lore_lines else '',
+    ] if part)
+
+    return work_brief, reference, history, trimmed
+
+
+@csrf_exempt
+async def ai_outline_planner(request):
+    """卷大纲策划：一次返回对话回复和更新后的大纲 JSON。"""
+    if request.method != 'POST':
+        return HttpResponse(
+            'data: {"type": "error", "message": "仅支持POST请求"}\n\n',
+            content_type='text/event-stream'
+        )
+
+    try:
+        body = json.loads(request.body.decode('utf-8'))
+    except Exception:
+        return HttpResponse(
+            'data: {"type": "error", "message": "无效的请求数据"}\n\n',
+            content_type='text/event-stream'
+        )
+
+    user = None
+    token = request.GET.get('token') or body.get('token')
+    if token:
+        try:
+            user = await get_token_user(token)
+        except Exception:
+            return HttpResponse(
+                'data: {"type": "error", "message": "认证令牌无效"}\n\n',
+                content_type='text/event-stream',
+                status=401
+            )
+    elif hasattr(request, 'user') and request.user.is_authenticated:
+        user = request.user
+    else:
+        return HttpResponse(
+            'data: {"type": "error", "message": "需要登录"}\n\n',
+            content_type='text/event-stream',
+            status=401
+        )
+
+    work_id = body.get('work_id')
+    act_id = body.get('act_id')
+    message = (body.get('message') or '').strip()
+    prior_assistant = (body.get('prior_assistant') or '').strip()
+    document = body.get('document') or {}
+    current_content = document.get('content') if isinstance(document, dict) else ''
+    if current_content is None:
+        current_content = ''
+
+    if not all([work_id, act_id, message]):
+        return HttpResponse(
+            'data: {"type": "error", "message": "缺少必要参数"}\n\n',
+            content_type='text/event-stream'
+        )
+
+    async def generate_stream():
+        try:
+            work_brief, reference, history, trimmed = await get_outline_planner_bundle(work_id, act_id, user)
+            if history and history[-1].get('role') == 'user' and history[-1].get('content') == message:
+                history = history[:-1]
+            if prior_assistant and not any(
+                item.get('role') == 'assistant' and item.get('content') == prior_assistant
+                for item in history
+            ):
+                history.append({'role': 'assistant', 'content': prior_assistant})
+
+            document_json = json.dumps({'content': current_content}, ensure_ascii=False)
+            user_turn = "\n\n".join(part for part in [
+                prompts.OUTLINE_PLANNER_TRIMMED_USER_NOTE if trimmed else '',
+                work_brief,
+                reference,
+                f"当前大纲 JSON：\n{document_json}",
+                f"作者消息：\n{message}",
+            ] if part)
+
+            api_key, provider, default_model = await get_user_api_key_async(user)
+            ai_settings = await get_user_ai_settings(user)
+            ai_service = AIService(
+                api_key=api_key,
+                provider_name=provider,
+                default_model=default_model,
+                reasoning_effort=ai_settings.get('reasoning_effort', 'medium'),
+            )
+
+            messages = [
+                {
+                    'role': 'system',
+                    'content': f"{prompts.FICTION_PREAMBLE}\n\n{prompts.OUTLINE_PLANNER_SYSTEM_PROMPT}",
+                },
+                *history,
+                {'role': 'user', 'content': user_turn},
+            ]
+
+            yield f'data: {json.dumps({"type": "start", "message": "大纲策划开始"})}\n\n'
+
+            raw = await ai_service.provider.chat_completion(
+                messages,
+                temperature=ai_settings.get('temperature'),
+                top_p=ai_settings.get('top_p'),
+                max_tokens=ai_settings.get('max_tokens'),
+                frequency_penalty=ai_settings.get('frequency_penalty'),
+                presence_penalty=ai_settings.get('presence_penalty'),
+                include_reasoning=False,
+                response_format={'type': 'json_object'},
+            )
+
+            reply, content, document_updated = _split_outline_planner_output(raw, current_content)
+            payload = {
+                'type': 'end',
+                'reply': reply,
+                'document': {'content': content},
+                'document_updated': document_updated,
+            }
+            yield f'data: {json.dumps(payload, ensure_ascii=False)}\n\n'
+        except Exception as e:
+            logger.error(f"Outline planner error: {str(e)}")
+            yield f'data: {json.dumps({"type": "error", "message": f"大纲策划失败: {str(e)}"}, ensure_ascii=False)}\n\n'
+
+    response = StreamingHttpResponse(generate_stream(), content_type='text/event-stream')
     response['Cache-Control'] = 'no-cache'
     response['X-Accel-Buffering'] = 'no'
     response['Access-Control-Allow-Origin'] = '*'

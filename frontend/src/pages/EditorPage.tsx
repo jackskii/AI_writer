@@ -168,6 +168,18 @@ export const EditorPage: React.FC = () => {
     performAutoSave(content, true);
   }, [performAutoSave, editorContent]);
 
+  // Block browser Ctrl/Cmd+S save dialog and trigger manual save instead (covers all editor modes)
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        handleManualSave();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [handleManualSave]);
+
   // Chapter title editing functions
   const handleStartEditingTitle = () => {
     setChapterTitleInput(currentChapterData?.title || '');

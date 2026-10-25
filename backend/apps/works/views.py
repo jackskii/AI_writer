@@ -77,7 +77,13 @@ class ActViewSet(viewsets.ModelViewSet):
         work_id = self.kwargs.get('work_pk')
         work = get_object_or_404(Work, id=work_id, author=self.request.user)
         # Sort: normal acts first (by order), then side chapters acts (by order)
-        return Act.objects.filter(work=work).order_by(
+        return Act.objects.filter(work=work).annotate(
+            has_outline=models.Case(
+                models.When(outline='', then=models.Value(False)),
+                default=models.Value(True),
+                output_field=models.BooleanField(),
+            )
+        ).order_by(
             models.Case(
                 models.When(act_type='normal', then=models.Value(0)),
                 models.When(act_type='side_chapters', then=models.Value(1)),
@@ -121,6 +127,18 @@ class ActViewSet(viewsets.ModelViewSet):
             raise PermissionDenied("外传卷不可删除")
         super().perform_destroy(instance)
 
+    @action(detail=True, methods=['patch'], url_path='outline')
+    def save_outline(self, request, work_pk=None, pk=None):
+        """自动保存卷大纲"""
+        act = self.get_object()
+        content = request.data.get('content', '')
+        if content is None:
+            content = ''
+        act.outline = content
+        act.outline_autosave = timezone.now()
+        act.save(update_fields=['outline', 'outline_autosave', 'updated_at'])
+        return Response({'status': 'saved', 'timestamp': act.outline_autosave})
+
 
 class ChapterViewSet(viewsets.ModelViewSet):
     serializer_class = ChapterSerializer
@@ -152,12 +170,10 @@ class ChapterViewSet(viewsets.ModelViewSet):
             return ChapterListSerializer
         return ChapterSerializer
 
-    def _renumber_all_chapters(self, work):
-        """重新编号整个作品的所有章节，使其连续编号"""
-        # Get all chapters ordered by their global order
-        chapters = Chapter.objects.filter(work=work).order_by('order')
+    def _renumber_act_chapters(self, act):
+        """重新编号某个卷内的章节，使其在该卷内连续编号 1..N"""
+        chapters = Chapter.objects.filter(act=act).order_by('order')
 
-        # Batch update to minimize database queries
         updates = []
         for index, chapter in enumerate(chapters):
             new_number = index + 1
@@ -165,7 +181,6 @@ class ChapterViewSet(viewsets.ModelViewSet):
                 chapter.chapter_number = new_number
                 updates.append(chapter)
 
-        # Bulk update if there are changes
         if updates:
             Chapter.objects.bulk_update(updates, ['chapter_number'])
 
@@ -187,8 +202,8 @@ class ChapterViewSet(viewsets.ModelViewSet):
                 from rest_framework.exceptions import ValidationError
                 raise ValidationError(f"Act {act.id} does not belong to work {work.id}")
 
-        # Auto-set order to the next available number globally (across all acts)
-        # Use Chapter.objects directly to avoid any caching from work.chapters
+        # Global `order` stays a hidden unique sort key across the whole work.
+        # `chapter_number` is per-act 1..N.
         from django.db.models import Max
         from django.db import transaction
 
@@ -196,22 +211,28 @@ class ChapterViewSet(viewsets.ModelViewSet):
             # Lock the work to prevent race conditions when calculating order
             Work.objects.select_for_update().get(pk=work.pk)
 
-            # Query directly from Chapter model to get fresh data
+            # Next global order (across all acts)
             max_order = Chapter.objects.filter(work=work).aggregate(Max('order'))['order__max'] or 0
             next_order = max_order + 1
 
-            # Temporarily set chapter_number to order (will be renumbered)
-            serializer.save(work=work, act=act, order=next_order, chapter_number=next_order)
+            # Next chapter_number within this act
+            max_act_number = Chapter.objects.filter(act=act).aggregate(Max('chapter_number'))['chapter_number__max'] or 0
+            next_chapter_number = max_act_number + 1
 
-        # Renumber all chapters to ensure continuous numbering
-        self._renumber_all_chapters(work)
+            serializer.save(
+                work=work, act=act,
+                order=next_order, chapter_number=next_chapter_number,
+            )
+
+        # Renumber this act to ensure continuity (handles any concurrent inserts)
+        self._renumber_act_chapters(act)
 
     def perform_destroy(self, instance):
-        """删除章节后重新编号所有章节"""
-        work = instance.work
+        """删除章节后重新编号该卷内的章节"""
+        act = instance.act
         super().perform_destroy(instance)
-        # 重新编号整个作品的所有章节
-        self._renumber_all_chapters(work)
+        # 重新编号该卷内的章节
+        self._renumber_act_chapters(act)
 
     @action(detail=True, methods=['patch'])
     def autosave(self, request, work_pk=None, pk=None):
@@ -300,8 +321,12 @@ class ChapterViewSet(viewsets.ModelViewSet):
                 ch.order = idx
             Chapter.objects.bulk_update(final_sequence, ['order'])
 
-            # Renumber all chapter_number to ensure continuity
-            self._renumber_all_chapters(work)
+            # Renumber chapter_number within each affected act (per-arc 1..N).
+            # Only the target act's order changed; other acts keep their order,
+            # but renumber all acts touched by the reorder to be safe.
+            affected_act_ids = {act.id}
+            for aid in affected_act_ids:
+                self._renumber_act_chapters(Act.objects.get(id=aid))
 
         return Response({'status': 'success', 'updated': len(chapter_ids)})
 

@@ -11,6 +11,11 @@ import { EditPrefillModal } from './EditPrefillModal';
 import { stripThoughtProcess } from '../../utils/stripThoughtProcess';
 import { getLoreEntriesTriggeredByText, getTriggeredLoreIds } from '../../utils/loreTriggers';
 
+// Format a chapter label matching the backend prompts.format_chapter_label.
+// chapter_number is per-arc, so the act order must be included to disambiguate.
+const formatChapterLabel = (ch: Chapter): string =>
+  `第${ch.act_order ?? 0}卷 第${ch.chapter_number}章`;
+
 const FACTION_FILTER_RECENT = '__recent__' as const;
 const FACTION_FILTER_GROUP = '__factions__' as const;
 const FACTION_FILTER_WORLD = '__world__' as const;
@@ -271,16 +276,13 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
   const [allActs, setAllActs] = useState<Act[]>([]);
 
   const previousChapter = React.useMemo(() => {
-    const safeActs = Array.isArray(allActs) ? allActs : [];
+    // Previous chapter = previous chapter in the SAME act (per-arc numbering).
+    // chapter_number is no longer globally unique, so compare by global `order`.
     const priorChapters = allChapters
-      .filter((ch) => {
-        if (ch.chapter_number >= chapter.chapter_number) return false;
-        const act = safeActs.find((a) => a.id === ch.act);
-        return act?.act_type !== 'side_chapters';
-      })
-      .sort((a, b) => a.chapter_number - b.chapter_number);
+      .filter((ch) => ch.act === chapter.act && ch.order < chapter.order)
+      .sort((a, b) => a.order - b.order);
     return priorChapters[priorChapters.length - 1] ?? null;
-  }, [allChapters, allActs, chapter.chapter_number]);
+  }, [allChapters, chapter.act, chapter.order]);
 
   const [selectedPrefillId, setSelectedPrefillId] = useState<number | null>(() => {
     const saved = localStorage.getItem(selectedPrefillStorageKey);
@@ -886,39 +888,48 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
         }
       }
 
-      // Global previous chapters (cross-act, excludes side chapters)
-      const isNormalChapter = (ch: Chapter) => {
-        const act = safeActs.find(a => a.id === ch.act);
-        return act?.act_type !== 'side_chapters';
-      };
-      const globalPreviousChapters = allChapters
-        .filter(ch => ch.chapter_number < chapter.chapter_number && isNormalChapter(ch))
-        .sort((a, b) => a.chapter_number - b.chapter_number);
-
-      // Previous chapters in current act only (for summary section)
+      // Previous chapters in current act only (for summary section). Per-arc
+      // numbering means chapter_number is not globally comparable; use order.
       const previousChapters = allChapters
-        .filter(ch => ch.act === chapter.act && ch.chapter_number < chapter.chapter_number)
-        .sort((a, b) => a.chapter_number - b.chapter_number);
+        .filter(ch => ch.act === chapter.act && ch.order < chapter.order)
+        .sort((a, b) => a.order - b.order);
+
+      // Previous normal act (for overflow at the start of an arc)
+      const prevNormalAct = currentAct && currentAct.act_type === 'normal'
+        ? safeActs
+            .filter(a => a.act_type === 'normal' && a.order < currentAct.order)
+            .sort((a, b) => b.order - a.order)[0]
+        : undefined;
 
       let chaptersToReplaceWithFullText: Chapter[] = [];
       if (chapterSelection === 'none') {
         chaptersToReplaceWithFullText = [];
       } else if (chapterSelection === 'all') {
         chaptersToReplaceWithFullText = previousChapters;
-        if (chaptersToReplaceWithFullText.length === 0 && currentAct) {
-          const prevAct = safeActs
-            .filter(a => a.act_type === 'normal' && a.order < currentAct.order)
-            .sort((a, b) => b.order - a.order)[0];
-          if (prevAct) {
-            chaptersToReplaceWithFullText = globalPreviousChapters.filter(ch => ch.act === prevAct.id);
-          }
+        if (chaptersToReplaceWithFullText.length === 0 && prevNormalAct) {
+          chaptersToReplaceWithFullText = allChapters
+            .filter(ch => ch.act === prevNormalAct.id)
+            .sort((a, b) => a.order - b.order);
         }
       } else if (chapterSelection === 'custom') {
-        const count = Math.min(
-          Math.max(0, customChapterCount),
-          globalPreviousChapters.length
-        );
-        chaptersToReplaceWithFullText = globalPreviousChapters.slice(-count);
+        const count = Math.max(0, customChapterCount);
+        if (count > 0) {
+          if (previousChapters.length >= count) {
+            chaptersToReplaceWithFullText = previousChapters.slice(-count);
+          } else {
+            chaptersToReplaceWithFullText = previousChapters;
+            const remaining = count - previousChapters.length;
+            if (remaining > 0 && prevNormalAct) {
+              const prevActChapters = allChapters
+                .filter(ch => ch.act === prevNormalAct.id)
+                .sort((a, b) => a.order - b.order);
+              chaptersToReplaceWithFullText = [
+                ...chaptersToReplaceWithFullText,
+                ...prevActChapters.slice(-remaining),
+              ];
+            }
+          }
+        }
       }
 
       const replaceIds = new Set(chaptersToReplaceWithFullText.map(ch => ch.id));
@@ -927,7 +938,7 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
       if (crossActFull.length > 0) {
         length += 20; // "前卷章节全文：\n\n"
         crossActFull.forEach(ch => {
-          const chapterTitle = `第${ch.chapter_number}章《${ch.title}》\n\n`;
+          const chapterTitle = `${formatChapterLabel(ch)}《${ch.title}》\n\n`;
           const contentLength = ch.content?.length || ch.word_count || 0;
           length += chapterTitle.length + contentLength + 10;
         });
@@ -939,11 +950,11 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
 
         previousChapters.forEach(ch => {
           if (replaceIds.has(ch.id)) {
-            const chapterTitle = `第${ch.chapter_number}章《${ch.title}》\n\n`;
+            const chapterTitle = `${formatChapterLabel(ch)}《${ch.title}》\n\n`;
             const contentLength = ch.content?.length || ch.word_count || 0;
             length += chapterTitle.length + contentLength + 10;
           } else if (ch.summary) {
-            const chapterTitle = `第${ch.chapter_number}章《${ch.title}》摘要：`;
+            const chapterTitle = `${formatChapterLabel(ch)}《${ch.title}》摘要：`;
             length += chapterTitle.length + ch.summary.length + 5;
           }
         });
@@ -972,11 +983,23 @@ export const AutoEditModal: React.FC<AutoEditModalProps> = ({
 
   const promptCharCount = calculatePromptLength();
 
-  // Global previous chapters (cross-act) for full-text selection UI
-  const availablePreviousChapters = allChapters.filter(
-    ch => ch.chapter_number < chapter.chapter_number
-      && allActs.find(a => a.id === ch.act)?.act_type !== 'side_chapters'
-  ).length;
+  // Available previous chapters for full-text selection UI: in-arc previous,
+  // plus overflow into the previous normal arc only (matches backend custom/all).
+  const availablePreviousChapters = React.useMemo(() => {
+    const safeActs = Array.isArray(allActs) ? allActs : [];
+    const currentAct = safeActs.find(a => a.id === chapter.act);
+    const inArc = allChapters.filter(ch => ch.act === chapter.act && ch.order < chapter.order);
+    let overflow = 0;
+    if (currentAct && currentAct.act_type === 'normal') {
+      const prevNormalAct = safeActs
+        .filter(a => a.act_type === 'normal' && a.order < currentAct.order)
+        .sort((a, b) => b.order - a.order)[0];
+      if (prevNormalAct) {
+        overflow = allChapters.filter(ch => ch.act === prevNormalAct.id).length;
+      }
+    }
+    return inArc.length + overflow;
+  }, [allChapters, allActs, chapter.act, chapter.order]);
 
   if (!isOpen) return null;
 

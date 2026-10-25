@@ -11,7 +11,23 @@ interface ChapterInfo {
   id: number;
   chapter_number: number;
   title: string;
+  summary?: string;
+  act_order?: number;
+  act_type?: string;
 }
+
+// Per-arc numbering: chapter_number is only unique within an act, so the
+// act order must be included to disambiguate when listing chapters across acts.
+const chapterSortKey = (ch: ChapterInfo): [number, number, number] => {
+  // Side chapters (外传) sink to the bottom.
+  const isSide = ch.act_type === 'side_chapters' ? 1 : 0;
+  return [isSide, ch.act_order ?? 0, ch.chapter_number];
+};
+
+const formatChapterLabel = (ch: ChapterInfo): string =>
+  ch.act_type === 'side_chapters'
+    ? `外传 第${ch.chapter_number}章`
+    : `第${ch.act_order ?? 0}卷 第${ch.chapter_number}章`;
 
 interface AutoDescribeModalProps {
   workId: number;
@@ -20,6 +36,7 @@ interface AutoDescribeModalProps {
   isOpen: boolean;
   onClose: () => void;
   onDescriptionGenerated: (description: string, usedChapters: ChapterInfo[]) => void;
+  isWorldbuilding?: boolean;
 }
 
 export const AutoDescribeModal: React.FC<AutoDescribeModalProps> = ({
@@ -28,9 +45,10 @@ export const AutoDescribeModal: React.FC<AutoDescribeModalProps> = ({
   originalDescription = '',
   isOpen,
   onClose,
-  onDescriptionGenerated
+  onDescriptionGenerated,
+  isWorldbuilding = false
 }) => {
-  const [availableChapters, setAvailableChapters] = useState<ChapterInfo[]>([]);
+  const [allChapters, setAllChapters] = useState<ChapterInfo[]>([]);
   const [selectedChapterIds, setSelectedChapterIds] = useState<number[]>([]);
   const [additionalContext, setAdditionalContext] = useState('');
   const [isUpdate, setIsUpdate] = useState(false);
@@ -57,10 +75,14 @@ export const AutoDescribeModal: React.FC<AutoDescribeModalProps> = ({
     setIsLoadingChapters(true);
     setError('');
     try {
-      const chapters = await aiApi.getChaptersWithEntry(workId, entryName);
-      setAvailableChapters(chapters);
-      // Select all chapters by default
-      setSelectedChapterIds(chapters.map(ch => ch.id));
+      // Fetch both appeared chapters and all chapters in parallel
+      const [appearedChapters, all] = await Promise.all([
+        aiApi.getChaptersWithEntry(workId, entryName),
+        aiApi.getAllChaptersWithSummary(workId),
+      ]);
+      setAllChapters(all);
+      // Select all appeared chapters by default
+      setSelectedChapterIds(appearedChapters.map((ch: ChapterInfo) => ch.id));
     } catch (err) {
       console.error('Failed to load chapters:', err);
       setError('加载章节失败');
@@ -77,20 +99,32 @@ export const AutoDescribeModal: React.FC<AutoDescribeModalProps> = ({
     );
   };
 
-  const selectAllChapters = () => {
-    setSelectedChapterIds(availableChapters.map(ch => ch.id));
+  const addChapter = (chapterId: number) => {
+    setSelectedChapterIds(prev =>
+      prev.includes(chapterId) ? prev : [...prev, chapterId]
+    );
   };
 
-  const deselectAllChapters = () => {
-    setSelectedChapterIds([]);
-  };
+  // Chapters currently selected (with full info from allChapters)
+  const selectedChapters: ChapterInfo[] = selectedChapterIds
+    .map(id => allChapters.find(ch => ch.id === id))
+    .filter((ch): ch is ChapterInfo => ch !== undefined)
+    .sort((a, b) => {
+      const ka = chapterSortKey(a);
+      const kb = chapterSortKey(b);
+      return ka[0] - kb[0] || ka[1] - kb[1] || ka[2] - kb[2];
+    });
+
+  // Chapters available to add (not already selected)
+  const addableChapters: ChapterInfo[] = allChapters
+    .filter(ch => !selectedChapterIds.includes(ch.id))
+    .sort((a, b) => {
+      const ka = chapterSortKey(a);
+      const kb = chapterSortKey(b);
+      return ka[0] - kb[0] || ka[1] - kb[1] || ka[2] - kb[2];
+    });
 
   const handleGenerate = async () => {
-    if (selectedChapterIds.length === 0) {
-      setError('请至少选择一个章节');
-      return;
-    }
-
     setIsGenerating(true);
     setGeneratedDescription('');
     setUsedChapters([]);
@@ -129,7 +163,8 @@ export const AutoDescribeModal: React.FC<AutoDescribeModalProps> = ({
           chapterIds: selectedChapterIds,
           additionalContext: additionalContext.trim(),
           isUpdate: isUpdate,
-          originalDescription: isUpdate ? originalDescription : ''
+          originalDescription: isUpdate ? originalDescription : '',
+          isWorldbuilding: isWorldbuilding
         }
       );
     } catch (err) {
@@ -165,59 +200,84 @@ export const AutoDescribeModal: React.FC<AutoDescribeModalProps> = ({
         <CardContent className="space-y-4">
           {/* Chapter Selection */}
           <div>
-            <div className="flex items-center justify-between mb-2">
-              <label className="block text-sm font-medium text-dark-text">
-                选择章节
-              </label>
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={selectAllChapters}
-                  className="text-xs text-dark-primary hover:underline"
-                >
-                  全选
-                </button>
-                <span className="text-dark-text-muted">|</span>
-                <button
-                  type="button"
-                  onClick={deselectAllChapters}
-                  className="text-xs text-dark-primary hover:underline"
-                >
-                  取消全选
-                </button>
-              </div>
-            </div>
+            <label className="block text-sm font-medium text-dark-text mb-1">
+              选择章节
+            </label>
             <p className="text-xs text-dark-text-muted mb-3">
-              以下章节中出现了"{entryName}"
+              已自动选中"{entryName}"出现的章节，可通过下方下拉菜单添加其他章节
             </p>
-            
+
             {isLoadingChapters ? (
               <div className="flex items-center justify-center py-4">
                 <LoadingSpinner size="sm" />
                 <span className="ml-2 text-dark-text-muted">加载章节中...</span>
               </div>
-            ) : availableChapters.length === 0 ? (
-              <div className="text-center py-4 text-dark-text-muted">
-                "{entryName}" 尚未在任何章节中出现
-              </div>
             ) : (
-              <div className="max-h-40 overflow-y-auto border border-dark-border rounded-lg p-2 space-y-1">
-                {availableChapters.map((chapter) => (
-                  <label
-                    key={chapter.id}
-                    className="flex items-center gap-2 p-2 rounded hover:bg-dark-surface cursor-pointer"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={selectedChapterIds.includes(chapter.id)}
-                      onChange={() => toggleChapter(chapter.id)}
-                      className="rounded border-dark-border text-dark-primary focus:ring-dark-primary"
-                    />
-                    <span className="text-sm text-dark-text">
-                      第{chapter.chapter_number}章《{chapter.title}》
-                    </span>
-                  </label>
-                ))}
+              <div className="space-y-2">
+                {/* Selected chapters list */}
+                <div className="border border-dark-border rounded-lg overflow-hidden">
+                  <div className="px-3 py-2 bg-dark-surface text-xs text-dark-text-muted border-b border-dark-border">
+                    已选章节 ({selectedChapters.length})
+                  </div>
+                  <div className="max-h-64 overflow-y-auto">
+                    {selectedChapters.length === 0 ? (
+                      <div className="px-3 py-4 text-center text-sm text-dark-text-muted">
+                        未选择任何章节
+                      </div>
+                    ) : (
+                      selectedChapters.map((chapter) => (
+                        <div
+                          key={chapter.id}
+                          className="flex items-start gap-2 px-3 py-2 border-b border-dark-border last:border-b-0 hover:bg-dark-surface"
+                        >
+                          <input
+                            type="checkbox"
+                            checked
+                            onChange={() => toggleChapter(chapter.id)}
+                            className="mt-1 rounded border-dark-border text-dark-primary focus:ring-dark-primary shrink-0"
+                          />
+                          <div className="min-w-0 flex-1">
+                            <div className="text-sm text-dark-text font-medium">
+                              {formatChapterLabel(chapter)}
+                            </div>
+                            <div
+                              className="text-xs text-dark-text-muted mt-0.5"
+                              style={{
+                                display: '-webkit-box',
+                                WebkitLineClamp: 3,
+                                WebkitBoxOrient: 'vertical',
+                                overflow: 'hidden',
+                              }}
+                            >
+                              {chapter.summary?.trim() ? chapter.summary.trim() : '(无摘要)'}
+                            </div>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+
+                {/* Add chapter dropdown */}
+                {addableChapters.length > 0 && (
+                  <div className="relative">
+                    <select
+                      value=""
+                      onChange={(e) => {
+                        const id = Number(e.target.value);
+                        if (id) addChapter(id);
+                      }}
+                      className="w-full px-3 py-2 text-sm bg-dark-surface border border-dark-border rounded-lg text-dark-text focus:outline-none focus:ring-1 focus:ring-dark-primary cursor-pointer"
+                    >
+                      <option value="">+ 添加章节...</option>
+                      {addableChapters.map((chapter) => (
+                        <option key={chapter.id} value={chapter.id}>
+                          {formatChapterLabel(chapter)}{chapter.title ? `《${chapter.title}》` : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -265,7 +325,7 @@ export const AutoDescribeModal: React.FC<AutoDescribeModalProps> = ({
               </label>
               {usedChapters.length > 0 && (
                 <p className="text-xs text-dark-text-muted mb-2">
-                  使用章节: {usedChapters.map(ch => `第${ch.chapter_number}章`).join(', ')}
+                  使用章节: {usedChapters.map(ch => formatChapterLabel(ch)).join(', ')}
                 </p>
               )}
               <div className="p-3 bg-dark-bg border border-dark-border rounded-lg min-h-[100px] max-h-[200px] overflow-y-auto">

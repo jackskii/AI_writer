@@ -8,8 +8,10 @@ urlpatterns = [
     path('api/ai/summarize/stream/', views.ai_summarize_stream, name='ai-summarize-stream'),
     path('api/ai/act-synopsis/stream/', views.ai_generate_act_synopsis, name='ai-act-synopsis-stream'),
     path('api/ai/auto-edit/stream/', views.ai_auto_edit_stream, name='ai-auto-edit-stream'),
+    path('api/ai/outline-planner/', views.ai_outline_planner, name='ai-outline-planner'),
     path('api/ai/auto-describe-entry/', views.ai_auto_describe_entry, name='ai-auto-describe-entry'),
     path('api/ai/auto-describe-entry/chapters/', views.ai_auto_describe_entry_chapters, name='ai-auto-describe-entry-chapters'),
+    path('api/ai/auto-describe-entry/all-chapters/', views.ai_auto_describe_entry_all_chapters, name='ai-auto-describe-entry-all-chapters'),
 
     # Non-streaming endpoints
     path('api/ai/suggest/', views.ai_suggest, name='ai-suggest'),

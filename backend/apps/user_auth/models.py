@@ -168,7 +168,7 @@ class UserEditPrefill(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='edit_prefills')
     scope = models.CharField('预设类型', max_length=20, choices=SCOPE_CHOICES, default='auto_edit')
     name = models.CharField('名称', max_length=50)  # Max 10 words, ~50 chars
-    prompt_text = models.TextField('提示文本', max_length=1000)  # Max 200 words, ~1000 chars
+    prompt_text = models.TextField('提示文本')
     is_default = models.BooleanField('是否默认（增加细节）', default=False)  # Marks the special "增加细节" that can't be deleted
     order = models.IntegerField('排序', default=0)
     created_at = models.DateTimeField('创建时间', auto_now_add=True)

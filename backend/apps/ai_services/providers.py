@@ -23,8 +23,8 @@ OPENROUTER_MODELS = [
 ]
 
 OPENROUTER_PROVIDER_ROUTING = {
-    "order": ["z-ai", "parasail", "novita"],
     "quantizations": ["fp16", "fp8"],
+    "ignore": ["alibaba", "baidu"],
 }
 
 
@@ -267,7 +267,9 @@ class LLMProvider(ABC):
         top_p: float = None,
         frequency_penalty: float = None,
         presence_penalty: float = None,
-        reasoning_mode: bool = False
+        reasoning_mode: bool = False,
+        include_reasoning: bool = True,
+        response_format: dict = None,
     ) -> str:
         """
         Non-streaming chat completion.
@@ -283,6 +285,8 @@ class LLMProvider(ABC):
             "messages": messages,
             "stream": False,
         }
+        if response_format is not None:
+            params["response_format"] = response_format
 
         # Add optional parameters if provided
         if max_tokens is not None:
@@ -305,16 +309,17 @@ class LLMProvider(ABC):
             if response.choices and len(response.choices) > 0:
                 message = response.choices[0].message
 
-                # Handle reasoning content
+                content_text = self._extract_content_text(message) or ""
                 reasoning_text, encrypted_reasoning = self._extract_reasoning_info(message)
-                if reasoning_text:
-                    result = f"【思考过程】\n{reasoning_text}\n【回答】\n"
-                elif encrypted_reasoning:
-                    result = "【思考过程】\n（当前模型返回加密推理，无法显示明文）\n【回答】\n"
-
-                content_text = self._extract_content_text(message)
-                if content_text:
-                    result += content_text
+                if include_reasoning:
+                    if reasoning_text:
+                        result = f"【思考过程】\n{reasoning_text}\n【回答】\n"
+                    elif encrypted_reasoning:
+                        result = "【思考过程】\n（当前模型返回加密推理，无法显示明文）\n【回答】\n"
+                    if content_text:
+                        result += content_text
+                else:
+                    result = content_text
 
             return result
 
@@ -445,7 +450,9 @@ class DeepSeekProvider(LLMProvider):
         top_p: float = None,
         frequency_penalty: float = None,
         presence_penalty: float = None,
-        reasoning_mode: bool = False
+        reasoning_mode: bool = False,
+        include_reasoning: bool = True,
+        response_format: dict = None,
     ) -> str:
         model = model or self.default_model
         params = {
@@ -453,6 +460,8 @@ class DeepSeekProvider(LLMProvider):
             "messages": messages,
             "stream": False,
         }
+        if response_format is not None:
+            params["response_format"] = response_format
 
         if max_tokens is not None:
             params["max_tokens"] = max_tokens
@@ -487,14 +496,17 @@ class DeepSeekProvider(LLMProvider):
             result = ""
             if response.choices and len(response.choices) > 0:
                 message = response.choices[0].message
+                content_text = self._extract_content_text(message) or ""
                 reasoning_text, encrypted_reasoning = self._extract_reasoning_info(message)
-                if reasoning_text:
-                    result = f"【思考过程】\n{reasoning_text}\n【回答】\n"
-                elif encrypted_reasoning:
-                    result = "【思考过程】\n（当前模型返回加密推理，无法显示明文）\n【回答】\n"
-                content_text = self._extract_content_text(message)
-                if content_text:
-                    result += content_text
+                if include_reasoning:
+                    if reasoning_text:
+                        result = f"【思考过程】\n{reasoning_text}\n【回答】\n"
+                    elif encrypted_reasoning:
+                        result = "【思考过程】\n（当前模型返回加密推理，无法显示明文）\n【回答】\n"
+                    if content_text:
+                        result += content_text
+                else:
+                    result = content_text
             return result
         except Exception as e:
             logger.error(f"[{self.provider_name}] Chat completion error: {str(e)}")
@@ -690,7 +702,9 @@ class OpenRouterProvider(LLMProvider):
         top_p: float = None,
         frequency_penalty: float = None,
         presence_penalty: float = None,
-        reasoning_mode: bool = False
+        reasoning_mode: bool = False,
+        include_reasoning: bool = True,
+        response_format: dict = None,
     ) -> str:
         model = model or self.default_model
         params = {
@@ -698,6 +712,8 @@ class OpenRouterProvider(LLMProvider):
             "messages": messages,
             "stream": False,
         }
+        if response_format is not None:
+            params["response_format"] = response_format
 
         if max_tokens is not None:
             params["max_tokens"] = max_tokens
@@ -717,14 +733,17 @@ class OpenRouterProvider(LLMProvider):
             result = ""
             if response.choices and len(response.choices) > 0:
                 message = response.choices[0].message
+                content_text = self._extract_content_text(message) or ""
                 reasoning_text, encrypted_reasoning = self._extract_reasoning_info(message)
-                if reasoning_text:
-                    result = f"【思考过程】\n{reasoning_text}\n【回答】\n"
-                elif encrypted_reasoning:
-                    result = "【思考过程】\n（当前模型返回加密推理，无法显示明文）\n【回答】\n"
-                content_text = self._extract_content_text(message)
-                if content_text:
-                    result += content_text
+                if include_reasoning:
+                    if reasoning_text:
+                        result = f"【思考过程】\n{reasoning_text}\n【回答】\n"
+                    elif encrypted_reasoning:
+                        result = "【思考过程】\n（当前模型返回加密推理，无法显示明文）\n【回答】\n"
+                    if content_text:
+                        result += content_text
+                else:
+                    result = content_text
             return result
         except Exception as e:
             logger.error(f"[{self.provider_name}] Chat completion error: {str(e)}")

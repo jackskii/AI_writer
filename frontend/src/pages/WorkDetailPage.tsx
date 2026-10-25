@@ -27,6 +27,7 @@ import { WorkChatPanel } from '../components/work/WorkChatPanel';
 import { FactionSection } from '../components/lore/FactionSection';
 import { LoreTemplateModal } from '../components/modals/LoreTemplateModal';
 import { ActSynopsisModal } from '../components/modals/ActSynopsisModal';
+import { OutlinePlannerModal } from '../components/modals/OutlinePlannerModal';
 import type { Work, Act, Chapter, Faction, LoreEntry } from '../types';
 
 export const WorkDetailPage: React.FC = () => {
@@ -57,6 +58,7 @@ export const WorkDetailPage: React.FC = () => {
   const [editActNameModal, setEditActNameModal] = useState<{ act: number; currentName?: string } | null>(null);
   const [deleteActModal, setDeleteActModal] = useState<{ act: number; actName?: string } | null>(null);
   const [actSynopsisModalAct, setActSynopsisModalAct] = useState<Act | null>(null);
+  const [outlinePlannerAct, setOutlinePlannerAct] = useState<Act | null>(null);
   const [isEditingSynopsis, setIsEditingSynopsis] = useState(false);
   const [synopsisContent, setSynopsisContent] = useState('');
   const [isEditingTitle, setIsEditingTitle] = useState(false);
@@ -593,7 +595,7 @@ export const WorkDetailPage: React.FC = () => {
                     if (aType !== bType) return aType - bType;
                     return a.order - b.order;
                   }).map(act => (
-                    <ActSection key={act.id} actData={act} chapters={(workChapters || []).filter(ch => ch.act === act.id).sort((a, b) => a.chapter_number - b.chapter_number)} onChapterClick={handleChapterClick} onChapterDelete={handleChapterDelete} onChapterSummary={handleChapterSummary} onCreateChapter={handleCreateChapterInAct} onEditActName={handleEditActName} onDeleteAct={handleDeleteAct} onReorderChapters={handleReorderChapters} onActSynopsis={handleActSynopsis} />
+                    <ActSection key={act.id} actData={act} chapters={(workChapters || []).filter(ch => ch.act === act.id).sort((a, b) => a.chapter_number - b.chapter_number)} onChapterClick={handleChapterClick} onChapterDelete={handleChapterDelete} onChapterSummary={handleChapterSummary} onCreateChapter={handleCreateChapterInAct} onEditActName={handleEditActName} onDeleteAct={handleDeleteAct} onReorderChapters={handleReorderChapters} onActSynopsis={handleActSynopsis} onOpenOutline={setOutlinePlannerAct} />
                   ))
                 ) : (
                   <div className="text-center py-8 text-dark-text-muted"><BookOpen size={48} className="mx-auto mb-4 opacity-50" /><p>暂无卷，点击"添加新卷"开始创作</p></div>
@@ -711,6 +713,7 @@ export const WorkDetailPage: React.FC = () => {
       <DeleteActConfirmDialog act={deleteActModal?.act || null} actName={deleteActModal?.actName} isOpen={!!deleteActModal} onClose={() => setDeleteActModal(null)} onConfirm={handleConfirmDeleteAct} isDeleting={deleteActMutation.isPending} />
       <LoreTemplateModal work={work} isOpen={isLoreTemplateModalOpen} onClose={() => setIsLoreTemplateModalOpen(false)} />
       <ActSynopsisModal act={actSynopsisModalAct} workId={workIdNum} isOpen={!!actSynopsisModalAct} onClose={() => setActSynopsisModalAct(null)} onSynopsisUpdated={handleActSynopsisUpdated} />
+      <OutlinePlannerModal act={outlinePlannerAct} workId={workIdNum} isOpen={!!outlinePlannerAct} onClose={() => { setOutlinePlannerAct(null); queryClient.invalidateQueries({ queryKey: ['acts', workIdNum] }); }} />
       {/* Mobile Bottom Tab Bar for Synopsis Page */}
       {activeTab === 'synopsis' && (
         <div className="fixed bottom-0 left-0 right-0 md:hidden bg-dark-surface border-t border-dark-border safe-area-bottom z-30">

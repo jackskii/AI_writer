@@ -104,7 +104,7 @@ class UserSettingsSerializer(serializers.ModelSerializer):
     # AI Settings with validation
     temperature = serializers.FloatField(min_value=0.0, max_value=2.0, required=False)
     top_p = serializers.FloatField(min_value=0.0, max_value=1.0, required=False)
-    max_tokens = serializers.IntegerField(min_value=100, max_value=20000, required=False)
+    max_tokens = serializers.IntegerField(min_value=0, max_value=200000, required=False)
     frequency_penalty = serializers.FloatField(min_value=-2.0, max_value=2.0, required=False)
     presence_penalty = serializers.FloatField(min_value=-2.0, max_value=2.0, required=False)
     reasoning_effort = serializers.CharField(max_length=50, required=False, allow_blank=True)
@@ -230,14 +230,8 @@ class UserEditPrefillSerializer(serializers.ModelSerializer):
         return value.strip()
 
     def validate_prompt_text(self, value):
-        """Validate prompt text length (max 200 words)"""
         if not value or not value.strip():
             raise serializers.ValidationError("提示文本不能为空")
-        words = value.strip().split()
-        if len(words) > 200:
-            raise serializers.ValidationError("提示文本最多200字")
-        if len(value) > 1000:
-            raise serializers.ValidationError("提示文本过长")
         return value.strip()
 
     def validate(self, attrs):

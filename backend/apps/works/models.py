@@ -63,6 +63,8 @@ class Act(models.Model):
     name = models.CharField('卷名', max_length=100)
     order = models.PositiveIntegerField('排序')
     synopsis = models.TextField('卷摘要', blank=True, default='')
+    outline = models.TextField('卷大纲', blank=True, default='')
+    outline_autosave = models.DateTimeField('大纲自动保存时间', null=True, blank=True)
     act_type = models.CharField(
         '卷类型',
         max_length=20,

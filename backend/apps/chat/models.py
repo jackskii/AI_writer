@@ -1,6 +1,6 @@
 from django.db import models
 from django.contrib.auth.models import User
-from apps.works.models import Work, Chapter
+from apps.works.models import Work, Chapter, Act
 
 
 class ChatSession(models.Model):
@@ -117,6 +117,68 @@ class WorkChatMessage(models.Model):
     class Meta:
         verbose_name = '作品总览聊天消息'
         verbose_name_plural = '作品总览聊天消息'
+        ordering = ['created_at']
+
+    def __str__(self):
+        return f'{self.session} - {self.role}: {self.content[:50]}...'
+
+
+class OutlineChatSession(models.Model):
+    """卷大纲策划聊天会话"""
+
+    work = models.ForeignKey(
+        Work,
+        on_delete=models.CASCADE,
+        related_name='outline_chat_sessions',
+        verbose_name='所属作品'
+    )
+    act = models.ForeignKey(
+        Act,
+        on_delete=models.CASCADE,
+        related_name='outline_chat_sessions',
+        verbose_name='所属卷'
+    )
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='outline_chat_sessions',
+        verbose_name='用户'
+    )
+    session_id = models.CharField('会话ID', max_length=100, unique=True)
+    api_history_after = models.DateTimeField('接口历史截止时间', null=True, blank=True)
+
+    created_at = models.DateTimeField('创建时间', auto_now_add=True)
+    updated_at = models.DateTimeField('更新时间', auto_now=True)
+
+    class Meta:
+        verbose_name = '大纲策划聊天会话'
+        verbose_name_plural = '大纲策划聊天会话'
+        ordering = ['-updated_at']
+        unique_together = ('work', 'act', 'user')
+
+    def __str__(self):
+        return f'{self.work.title} - {self.act.name} 大纲会话'
+
+
+class OutlineChatMessage(models.Model):
+    """大纲策划聊天消息"""
+
+    MESSAGE_ROLES = ChatMessage.MESSAGE_ROLES
+
+    session = models.ForeignKey(
+        OutlineChatSession,
+        on_delete=models.CASCADE,
+        related_name='messages',
+        verbose_name='所属会话'
+    )
+    role = models.CharField('角色', max_length=20, choices=MESSAGE_ROLES)
+    content = models.TextField('消息内容')
+    metadata = models.JSONField('元数据', default=dict, blank=True)
+    created_at = models.DateTimeField('创建时间', auto_now_add=True)
+
+    class Meta:
+        verbose_name = '大纲策划聊天消息'
+        verbose_name_plural = '大纲策划聊天消息'
         ordering = ['created_at']
 
     def __str__(self):

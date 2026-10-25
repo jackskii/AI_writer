@@ -824,27 +824,27 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         <label className="text-sm text-dark-text">Max Tokens</label>
                         <input
                           type="number"
-                          min="100"
-                          max="20000"
+                          min="0"
+                          max="200000"
                           step="100"
                           value={maxTokens}
                           onChange={(e) => {
                             const val = parseInt(e.target.value);
-                            if (!isNaN(val)) setMaxTokens(Math.min(20000, Math.max(100, val)));
+                            if (!isNaN(val)) setMaxTokens(Math.min(200000, Math.max(0, val)));
                           }}
                           className="w-20 px-2 py-1 text-sm text-center font-mono bg-transparent rounded text-dark-primary transition-all duration-200 outline-none hover:bg-white/5 hover:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.1)] focus:bg-white/10 focus:shadow-[inset_0_0_0_1px_rgba(59,130,246,0.5)]"
                         />
                       </div>
                       <input
                         type="range"
-                        min="100"
-                        max="20000"
+                        min="0"
+                        max="200000"
                         step="100"
                         value={maxTokens}
                         onChange={(e) => setMaxTokens(parseInt(e.target.value))}
                         className="w-full h-2 bg-dark-border rounded-lg appearance-none cursor-pointer slider"
                       />
-                      <p className="text-xs text-dark-text-muted">AI回复的最大长度限制。</p>
+                      <p className="text-xs text-dark-text-muted">AI回复的最大长度限制。设为 0 表示不限制。</p>
                     </div>
 
                     {/* Reasoning Effort */}

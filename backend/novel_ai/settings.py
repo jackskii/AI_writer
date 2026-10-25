@@ -150,6 +150,10 @@ CORS_ALLOWED_ORIGIN_REGEXES = [
     r"^https?://.*\.ngrok-free\.app$",
     r"^https?://.*\.loca\.lt$",
     r"^https?://.*\.serveo\.net$",
+    r"^https?://192\.168\.\d{1,3}\.\d{1,3}(:\d+)?$",
+    r"^https?://10\.\d{1,3}\.\d{1,3}\.\d{1,3}(:\d+)?$",
+    r"^https?://172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}(:\d+)?$",
+    r"^https?://aiwriter\.local(:\d+)?$",
 ]
 
 CORS_ALLOW_CREDENTIALS = True

@@ -116,6 +116,8 @@ export const actsApi = {
   update: (workId: number, id: number, data: Partial<Act>) => 
     api.patch<Act>(`/works/${workId}/acts/${id}/`, data),
   delete: (workId: number, id: number) => api.delete(`/works/${workId}/acts/${id}/`),
+  autosaveOutline: (workId: number, actId: number, content: string) =>
+    api.patch<{ status: string; timestamp: string }>(`/works/${workId}/acts/${actId}/outline/`, { content }),
 };
 
 // 阵营相关 API
@@ -204,6 +206,21 @@ export const chatApi = {
 
   clearWorkHistory: (workId: number) =>
     api.delete(`/chat/work/${workId}/clear/`),
+
+  getOutlineHistory: (workId: number, actId: number) =>
+    api.get<{ session_id: string; messages: ChatMessage[]; outline_template: string }>(`/chat/outline/${workId}/${actId}/`),
+
+  saveOutlineMessage: (workId: number, actId: number, role: string, content: string) =>
+    api.post<ChatMessage>(`/chat/outline/${workId}/${actId}/save/`, { role, content }),
+
+  keepOutlineRounds: (workId: number, actId: number, pairs: number) =>
+    api.post<{ pairs: number }>(`/chat/outline/${workId}/${actId}/keep/`, { pairs }),
+
+  deleteOutlineMessage: (workId: number, actId: number, messageId: string) =>
+    api.delete(`/chat/outline/${workId}/${actId}/message/${messageId}/`),
+
+  clearOutlineHistory: (workId: number, actId: number) =>
+    api.delete(`/chat/outline/${workId}/${actId}/clear/`),
 };
 
 // AI 服务相关 API
@@ -700,7 +717,7 @@ export const aiApi = {
   getChaptersWithEntry: async (
     workId: number,
     entryName: string
-  ): Promise<Array<{id: number, chapter_number: number, title: string}>> => {
+  ): Promise<Array<{id: number, chapter_number: number, title: string, summary?: string, act_order?: number, act_type?: string}>> => {
     const requestBody: Record<string, string | number> = {
       work_id: workId,
       entry_name: entryName,
@@ -737,19 +754,59 @@ export const aiApi = {
     return data.chapters || [];
   },
 
+  // Get all chapters of a work with summaries (for chapter selection dropdown)
+  getAllChaptersWithSummary: async (
+    workId: number
+  ): Promise<Array<{id: number, chapter_number: number, title: string, summary?: string, act_order?: number, act_type?: string}>> => {
+    const requestBody: Record<string, string | number> = {
+      work_id: workId,
+    };
+
+    // Add token for authentication
+    const authStorage = localStorage.getItem('auth-storage');
+    if (authStorage) {
+      try {
+        const parsedStorage = JSON.parse(authStorage);
+        const token = parsedStorage?.state?.token;
+        if (token) {
+          requestBody.token = token;
+        }
+      } catch (e) {
+        console.error('Failed to parse auth storage:', e);
+      }
+    }
+
+    const response = await fetch(`${API_BASE_URL}/ai/auto-describe-entry/all-chapters/`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(requestBody),
+      credentials: 'include',
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
+    const data = await response.json();
+    return data.chapters || [];
+  },
+
   // Streaming auto describe entry
   autoDescribeEntry: async (
     workId: number,
     entryName: string,
     onChunk: (chunk: string) => void,
-    onStart?: (usedChapters: Array<{chapter_number: number, title: string, id?: number}>) => void,
-    onEnd?: (description: string, usedChapters: Array<{chapter_number: number, title: string, id?: number}>) => void,
+    onStart?: (usedChapters: Array<{chapter_number: number, title: string, id?: number, act_order?: number, act_type?: string}>) => void,
+    onEnd?: (description: string, usedChapters: Array<{chapter_number: number, title: string, id?: number, act_order?: number, act_type?: string}>) => void,
     onError?: (error: string) => void,
     options?: {
       chapterIds?: number[];
       additionalContext?: string;
       isUpdate?: boolean;
       originalDescription?: string;
+      isWorldbuilding?: boolean;
     }
   ) => {
     // Build request body
@@ -768,6 +825,9 @@ export const aiApi = {
     if (options?.isUpdate) {
       requestBody.is_update = true;
       requestBody.original_description = options.originalDescription || '';
+    }
+    if (options?.isWorldbuilding) {
+      requestBody.is_worldbuilding = true;
     }
 
     // Add token for authentication
@@ -859,6 +919,86 @@ export const aiApi = {
     } catch (error) {
       console.error('Fetch error:', error);
       onError?.('Connection error occurred');
+    }
+  },
+
+  outlinePlanner: async (
+    workId: number,
+    actId: number,
+    message: string,
+    content: string,
+    onStart: (() => void) | undefined,
+    onEnd: (reply: string, documentContent: string, documentUpdated: boolean) => void,
+    onError: (error: string) => void,
+    signal?: AbortSignal,
+    priorAssistant = '',
+  ) => {
+    const requestBody: Record<string, unknown> = {
+      work_id: workId,
+      act_id: actId,
+      message,
+      document: { content },
+    };
+    if (priorAssistant) requestBody.prior_assistant = priorAssistant;
+    const authStorage = localStorage.getItem('auth-storage');
+    if (authStorage) {
+      try {
+        const parsedStorage = JSON.parse(authStorage);
+        const token = parsedStorage?.state?.token;
+        if (token) requestBody.token = token;
+      } catch (e) {
+        console.error('Failed to parse auth storage:', e);
+      }
+    }
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/ai/outline-planner/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
+        credentials: 'include',
+        signal,
+      });
+      if (!response.ok) {
+        onError(`HTTP error! status: ${response.status}`);
+        return;
+      }
+      const reader = response.body?.getReader();
+      if (!reader) {
+        onError('Failed to get response reader');
+        return;
+      }
+      const decoder = new TextDecoder();
+      let buffer = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const messages = buffer.split('\n\n');
+        buffer = messages.pop() || '';
+        for (const raw of messages) {
+          const line = raw.split('\n').find((item) => item.startsWith('data: '));
+          if (!line) continue;
+          try {
+            const data = JSON.parse(line.slice(6));
+            if (data.type === 'start') onStart?.();
+            else if (data.type === 'end') {
+              onEnd(data.reply || '', data.document?.content ?? content, Boolean(data.document_updated));
+              return;
+            } else if (data.type === 'error') {
+              onError(data.message || '大纲策划失败');
+              return;
+            }
+          } catch {
+            onError('Error parsing server response');
+            return;
+          }
+        }
+      }
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') return;
+      console.error('Outline planner fetch error:', error);
+      onError('Connection error occurred');
     }
   },
 

@@ -19,6 +19,8 @@ export interface Act {
   name: string;
   order: number;
   synopsis: string;
+  outline?: string;
+  has_outline?: boolean;
   act_type?: 'normal' | 'side_chapters';
   word_count: number;
   chapter_count: number;

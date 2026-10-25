@@ -30,6 +30,7 @@ interface ActSectionProps {
   onDeleteAct: (actId: number) => void;
   onReorderChapters: (actId: number, chapterIds: number[]) => void;
   onActSynopsis: (act: Act) => void;
+  onOpenOutline: (act: Act) => void;
 }
 
 export const ActSection: React.FC<ActSectionProps> = ({
@@ -42,7 +43,8 @@ export const ActSection: React.FC<ActSectionProps> = ({
   onEditActName,
   onDeleteAct,
   onReorderChapters,
-  onActSynopsis
+  onActSynopsis,
+  onOpenOutline
 }) => {
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [localChapters, setLocalChapters] = useState(chapters);
@@ -136,6 +138,19 @@ export const ActSection: React.FC<ActSectionProps> = ({
         </div>
 
         <div className="flex items-center gap-1.5 md:gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={(e) => {
+              e.stopPropagation();
+              onOpenOutline(actData);
+            }}
+            className={`${actData.has_outline || (actData.outline && actData.outline.trim()) ? 'bg-green-500/10 border-green-500/30 text-green-400 hover:bg-green-500/20 hover:border-green-500/50' : 'bg-dark-surface/50 border-dark-border text-dark-text-muted hover:bg-dark-primary/20 hover:text-dark-primary'} text-xs px-2 md:px-3 py-1 h-7 flex items-center gap-0.5 md:gap-1 font-medium`}
+            title="创建大纲"
+          >
+            <FileText size={12} className="hidden md:block" />
+            创建大纲
+          </Button>
           <Button
             variant="outline"
             size="sm"
