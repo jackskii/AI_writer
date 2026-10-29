@@ -208,13 +208,13 @@ export const chatApi = {
     api.delete(`/chat/work/${workId}/clear/`),
 
   getOutlineHistory: (workId: number, actId: number) =>
-    api.get<{ session_id: string; messages: ChatMessage[]; outline_template: string }>(`/chat/outline/${workId}/${actId}/`),
+    api.get<{ session_id: string; messages: ChatMessage[]; outline_template: string; rounds: { id: number; closed_at: string; preview: string }[] }>(`/chat/outline/${workId}/${actId}/`),
+
+  getOutlineRound: (workId: number, actId: number, roundId: number) =>
+    api.get<{ id: number; closed_at: string | null; messages: ChatMessage[] }>(`/chat/outline/${workId}/${actId}/round/${roundId}/`),
 
   saveOutlineMessage: (workId: number, actId: number, role: string, content: string) =>
     api.post<ChatMessage>(`/chat/outline/${workId}/${actId}/save/`, { role, content }),
-
-  keepOutlineRounds: (workId: number, actId: number, pairs: number) =>
-    api.post<{ pairs: number }>(`/chat/outline/${workId}/${actId}/keep/`, { pairs }),
 
   deleteOutlineMessage: (workId: number, actId: number, messageId: string) =>
     api.delete(`/chat/outline/${workId}/${actId}/message/${messageId}/`),
@@ -922,13 +922,14 @@ export const aiApi = {
     }
   },
 
-  outlinePlanner: async (
+  outlinePlannerChat: async (
     workId: number,
     actId: number,
     message: string,
     content: string,
     onStart: (() => void) | undefined,
-    onEnd: (reply: string, documentContent: string, documentUpdated: boolean) => void,
+    onChunk: (chunk: string) => void,
+    onEnd: (reply: string) => void,
     onError: (error: string) => void,
     signal?: AbortSignal,
     priorAssistant = '',
@@ -952,7 +953,84 @@ export const aiApi = {
     }
 
     try {
-      const response = await fetch(`${API_BASE_URL}/ai/outline-planner/`, {
+      const response = await fetch(`${API_BASE_URL}/ai/outline-planner/chat/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
+        credentials: 'include',
+        signal,
+      });
+      if (!response.ok) {
+        onError(`HTTP error! status: ${response.status}`);
+        return;
+      }
+      const reader = response.body?.getReader();
+      if (!reader) {
+        onError('Failed to get response reader');
+        return;
+      }
+      const decoder = new TextDecoder();
+      let buffer = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const messages = buffer.split('\n\n');
+        buffer = messages.pop() || '';
+        for (const raw of messages) {
+          const line = raw.split('\n').find((item) => item.startsWith('data: '));
+          if (!line) continue;
+          try {
+            const data = JSON.parse(line.slice(6));
+            if (data.type === 'start') onStart?.();
+            else if (data.type === 'chunk') onChunk(data.content || '');
+            else if (data.type === 'end') {
+              onEnd(data.reply || '');
+              return;
+            } else if (data.type === 'error') {
+              onError(data.message || '大纲策划失败');
+              return;
+            }
+          } catch {
+            onError('Error parsing server response');
+            return;
+          }
+        }
+      }
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') return;
+      console.error('Outline planner chat fetch error:', error);
+      onError('Connection error occurred');
+    }
+  },
+
+  outlinePlannerUpdate: async (
+    workId: number,
+    actId: number,
+    content: string,
+    onStart: (() => void) | undefined,
+    onEnd: (reply: string, documentContent: string, closedRound: { id: number; closed_at: string; preview: string }, messages: ChatMessage[]) => void,
+    onError: (error: string) => void,
+    signal?: AbortSignal,
+  ) => {
+    const requestBody: Record<string, unknown> = {
+      work_id: workId,
+      act_id: actId,
+      document: { content },
+    };
+    const authStorage = localStorage.getItem('auth-storage');
+    if (authStorage) {
+      try {
+        const parsedStorage = JSON.parse(authStorage);
+        const token = parsedStorage?.state?.token;
+        if (token) requestBody.token = token;
+      } catch (e) {
+        console.error('Failed to parse auth storage:', e);
+      }
+    }
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/ai/outline-planner/update/`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(requestBody),
@@ -983,10 +1061,15 @@ export const aiApi = {
             const data = JSON.parse(line.slice(6));
             if (data.type === 'start') onStart?.();
             else if (data.type === 'end') {
-              onEnd(data.reply || '', data.document?.content ?? content, Boolean(data.document_updated));
+              onEnd(
+                data.reply || '',
+                data.document?.content ?? content,
+                data.closed_round,
+                data.messages || [],
+              );
               return;
             } else if (data.type === 'error') {
-              onError(data.message || '大纲策划失败');
+              onError(data.message || '大纲更新失败');
               return;
             }
           } catch {
@@ -997,7 +1080,7 @@ export const aiApi = {
       }
     } catch (error) {
       if (error instanceof DOMException && error.name === 'AbortError') return;
-      console.error('Outline planner fetch error:', error);
+      console.error('Outline planner update fetch error:', error);
       onError('Connection error occurred');
     }
   },

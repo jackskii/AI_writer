@@ -1,11 +1,17 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
-import { X, Send, Square, Check, Save } from 'lucide-react';
+import { X, Send, Square, Check, Save, FileText, ArrowLeft, Sparkles } from 'lucide-react';
 import { actsApi, aiApi, chatApi } from '../../services/api';
 import { ChatMessageList } from '../chat/ChatMessageList';
 import { Button } from '../ui/Button';
 import { Textarea } from '../ui/Input';
 import type { Act, ChatMessage } from '../../types';
+
+interface OutlineRound {
+  id: number;
+  closed_at: string;
+  preview: string;
+}
 
 interface OutlinePlannerModalProps {
   workId: number;
@@ -24,18 +30,25 @@ export const OutlinePlannerModal: React.FC<OutlinePlannerModalProps> = ({
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputMessage, setInputMessage] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isUpdating, setIsUpdating] = useState(false);
+  const [streamingMessage, setStreamingMessage] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [lastSaveTime, setLastSaveTime] = useState<Date | null>(null);
-  const [keepPairs, setKeepPairs] = useState('5');
   const [outlineView, setOutlineView] = useState<'preview' | 'edit'>('preview');
+  const [rounds, setRounds] = useState<OutlineRound[]>([]);
+  const [viewingRound, setViewingRound] = useState<OutlineRound | null>(null);
+  const [roundMessages, setRoundMessages] = useState<ChatMessage[]>([]);
+  const [showHistory, setShowHistory] = useState(false);
+
   const lastSavedRef = useRef('');
   const saveTimerRef = useRef<number | null>(null);
   const generatingRef = useRef(false);
+  const updatingRef = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const contentRef = useRef(content);
+  const contentRef = useRef('');
   contentRef.current = content;
 
   const saveOutline = useCallback(async (next: string, force = false) => {
@@ -59,7 +72,12 @@ export const OutlinePlannerModal: React.FC<OutlinePlannerModalProps> = ({
     setErrorMessage('');
     setInputMessage('');
     setIsGenerating(false);
+    setIsUpdating(false);
+    setStreamingMessage('');
     setOutlineView('preview');
+    setViewingRound(null);
+    setRoundMessages([]);
+    setShowHistory(false);
 
     (async () => {
       try {
@@ -75,8 +93,9 @@ export const OutlinePlannerModal: React.FC<OutlinePlannerModalProps> = ({
         contentRef.current = initial;
         lastSavedRef.current = stored;
         setLastSaveTime(null);
-        if (!cancelled) setMessages(historyResponse.data.messages || []);
-        if (!cancelled && !stored.trim() && template) {
+        setMessages(historyResponse.data.messages || []);
+        setRounds(historyResponse.data.rounds || []);
+        if (!stored.trim() && template) {
           await saveOutline(template, true);
         }
       } catch (error) {
@@ -93,10 +112,10 @@ export const OutlinePlannerModal: React.FC<OutlinePlannerModalProps> = ({
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, isGenerating]);
+  }, [messages, isGenerating, streamingMessage]);
 
   const handleContentChange = (next: string) => {
-    if (generatingRef.current) return;
+    if (updatingRef.current) return;
     setContent(next);
     if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
     saveTimerRef.current = window.setTimeout(() => {
@@ -104,24 +123,13 @@ export const OutlinePlannerModal: React.FC<OutlinePlannerModalProps> = ({
     }, 5000);
   };
 
-  const applyPlannerResult = async (reply: string, documentContent: string, documentUpdated: boolean) => {
-    if (!act) return;
-    if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
-    if (documentUpdated) {
-      setContent(documentContent);
-      contentRef.current = documentContent;
-      await saveOutline(documentContent, true);
-    }
-    const response = await chatApi.saveOutlineMessage(workId, act.id, 'assistant', reply);
-    setMessages((prev) => [...prev, response.data]);
-  };
-
-  const requestPlanner = async (message: string, saveUser: boolean, priorAssistant = '') => {
-    if (!act || isGenerating || generatingRef.current) return;
+  const requestChat = async (message: string, saveUser: boolean, priorAssistant = '') => {
+    if (!act || isGenerating || generatingRef.current || updatingRef.current) return;
     if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
     generatingRef.current = true;
     setIsGenerating(true);
     setErrorMessage('');
+    setStreamingMessage('');
     const controller = new AbortController();
     abortRef.current = controller;
     try {
@@ -129,19 +137,24 @@ export const OutlinePlannerModal: React.FC<OutlinePlannerModalProps> = ({
         const saved = await chatApi.saveOutlineMessage(workId, act.id, 'user', message);
         setMessages((prev) => [...prev, saved.data]);
       }
-      await aiApi.outlinePlanner(
+      await aiApi.outlinePlannerChat(
         workId,
         act.id,
         message,
         contentRef.current,
         undefined,
-        async (reply, documentContent, documentUpdated) => {
+        (chunk) => {
+          setStreamingMessage((prev) => prev + chunk);
+        },
+        async (reply) => {
           try {
-            await applyPlannerResult(reply, documentContent, documentUpdated);
+            const saved = await chatApi.saveOutlineMessage(workId, act.id, 'assistant', reply);
+            setMessages((prev) => [...prev, saved.data]);
           } catch (error) {
-            console.error('Failed to apply outline planner result:', error);
-            setErrorMessage('保存大纲策划结果失败');
+            console.error('Failed to save outline chat reply:', error);
+            setErrorMessage('保存回复失败');
           } finally {
+            setStreamingMessage('');
             generatingRef.current = false;
             setIsGenerating(false);
             abortRef.current = null;
@@ -149,6 +162,7 @@ export const OutlinePlannerModal: React.FC<OutlinePlannerModalProps> = ({
         },
         (error) => {
           setErrorMessage(error);
+          setStreamingMessage('');
           generatingRef.current = false;
           setIsGenerating(false);
           abortRef.current = null;
@@ -157,10 +171,59 @@ export const OutlinePlannerModal: React.FC<OutlinePlannerModalProps> = ({
         priorAssistant,
       );
     } catch (error) {
-      console.error('Outline planner failed:', error);
+      console.error('Outline chat failed:', error);
       setErrorMessage('大纲策划失败');
+      setStreamingMessage('');
       generatingRef.current = false;
       setIsGenerating(false);
+    }
+  };
+
+  const requestUpdate = async () => {
+    if (!act || isGenerating || generatingRef.current || updatingRef.current) return;
+    if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
+    updatingRef.current = true;
+    setIsUpdating(true);
+    setErrorMessage('');
+    const controller = new AbortController();
+    abortRef.current = controller;
+    try {
+      await aiApi.outlinePlannerUpdate(
+        workId,
+        act.id,
+        contentRef.current,
+        undefined,
+        async (_reply, documentContent, closedRound, newMessages) => {
+          try {
+            setContent(documentContent);
+            contentRef.current = documentContent;
+            await saveOutline(documentContent, true);
+            setMessages(newMessages);
+            if (closedRound) {
+              setRounds((prev) => [closedRound, ...prev]);
+            }
+          } catch (error) {
+            console.error('Failed to apply outline update:', error);
+            setErrorMessage('保存大纲失败');
+          } finally {
+            updatingRef.current = false;
+            setIsUpdating(false);
+            abortRef.current = null;
+          }
+        },
+        (error) => {
+          setErrorMessage(error);
+          updatingRef.current = false;
+          setIsUpdating(false);
+          abortRef.current = null;
+        },
+        controller.signal,
+      );
+    } catch (error) {
+      console.error('Outline update failed:', error);
+      setErrorMessage('大纲更新失败');
+      updatingRef.current = false;
+      setIsUpdating(false);
     }
   };
 
@@ -176,22 +239,6 @@ export const OutlinePlannerModal: React.FC<OutlinePlannerModalProps> = ({
     resizeInput(e.target);
   };
 
-  const handleKeepRounds = async () => {
-    if (!act || isGenerating) return;
-    const pairs = Number.parseInt(keepPairs, 10);
-    if (!Number.isFinite(pairs) || pairs < 0) {
-      setErrorMessage('保留轮数无效');
-      return;
-    }
-    try {
-      await chatApi.keepOutlineRounds(workId, act.id, pairs);
-      setErrorMessage('');
-    } catch (error) {
-      console.error('Failed to keep outline rounds:', error);
-      setErrorMessage('保留轮数设置失败');
-    }
-  };
-
   const handleSend = () => {
     const message = inputMessage.trim();
     if (!message) return;
@@ -199,14 +246,20 @@ export const OutlinePlannerModal: React.FC<OutlinePlannerModalProps> = ({
     if (inputRef.current) {
       inputRef.current.style.height = 'auto';
     }
-    requestPlanner(message, true);
+    requestChat(message, true);
   };
 
   const handleStop = () => {
     abortRef.current?.abort();
     abortRef.current = null;
-    generatingRef.current = false;
-    setIsGenerating(false);
+    if (updatingRef.current) {
+      updatingRef.current = false;
+      setIsUpdating(false);
+    } else {
+      generatingRef.current = false;
+      setIsGenerating(false);
+      setStreamingMessage('');
+    }
   };
 
   const handleDelete = async (messageId: string) => {
@@ -225,7 +278,20 @@ export const OutlinePlannerModal: React.FC<OutlinePlannerModalProps> = ({
     const priorAssistant = question?.role === 'assistant' ? question.content : '';
     await chatApi.deleteOutlineMessage(workId, act.id, messageId);
     setMessages((prev) => prev.slice(0, index));
-    requestPlanner(previous.content, false, priorAssistant);
+    requestChat(previous.content, false, priorAssistant);
+  };
+
+  const handleViewRound = async (round: OutlineRound) => {
+    if (!act) return;
+    try {
+      const res = await chatApi.getOutlineRound(workId, act.id, round.id);
+      setViewingRound(round);
+      setRoundMessages(res.data.messages || []);
+      setShowHistory(false);
+    } catch (error) {
+      console.error('Failed to load round:', error);
+      setErrorMessage('加载历史对话失败');
+    }
   };
 
   const handleClose = async () => {
@@ -237,6 +303,11 @@ export const OutlinePlannerModal: React.FC<OutlinePlannerModalProps> = ({
   };
 
   if (!isOpen || !act) return null;
+
+  const busy = isGenerating || isUpdating;
+  const hasUserMessage = messages.some((m) => m.role === 'user');
+  const shownMessages = viewingRound ? roundMessages : messages;
+  const showStreaming = isGenerating && streamingMessage.length > 0;
 
   return (
     <div className="fixed inset-0 z-50 bg-dark-bg flex flex-col">
@@ -259,10 +330,55 @@ export const OutlinePlannerModal: React.FC<OutlinePlannerModalProps> = ({
             )}
           </div>
         </div>
-        <button onClick={handleClose} className="text-dark-text-muted hover:text-dark-text" title="关闭">
-          <X size={20} />
-        </button>
+        <div className="flex items-center gap-2">
+          {rounds.length > 0 && !viewingRound && (
+            <button
+              type="button"
+              onClick={() => setShowHistory((v) => !v)}
+              className="flex items-center gap-1 px-2 py-1 text-xs text-dark-text-muted hover:text-dark-text rounded hover:bg-dark-surface"
+              title="历史对话"
+            >
+              <FileText size={14} />
+              历史
+            </button>
+          )}
+          {viewingRound && (
+            <button
+              type="button"
+              onClick={() => {
+                setViewingRound(null);
+                setRoundMessages([]);
+              }}
+              className="flex items-center gap-1 px-2 py-1 text-xs text-dark-text-muted hover:text-dark-text rounded hover:bg-dark-surface"
+              title="返回当前对话"
+            >
+              <ArrowLeft size={14} />
+              返回当前对话
+            </button>
+          )}
+          <button onClick={handleClose} className="text-dark-text-muted hover:text-dark-text" title="关闭">
+            <X size={20} />
+          </button>
+        </div>
       </div>
+
+      {showHistory && !viewingRound && (
+        <div className="border-b border-dark-border bg-dark-surface max-h-48 overflow-y-auto">
+          {rounds.map((round) => (
+            <button
+              key={round.id}
+              type="button"
+              onClick={() => handleViewRound(round)}
+              className="w-full text-left px-4 py-2 text-sm text-dark-text hover:bg-dark-bg border-b border-dark-border/50"
+            >
+              <div className="text-xs text-dark-text-muted">
+                {new Date(round.closed_at).toLocaleString('zh-CN')}
+              </div>
+              <div className="truncate">{round.preview}</div>
+            </button>
+          ))}
+        </div>
+      )}
 
       <div className="flex flex-1 min-h-0 flex-col md:flex-row">
         <div className="md:w-[55%] h-1/2 md:h-full min-h-0 border-b md:border-b-0 md:border-r border-dark-border p-4 flex flex-col gap-2">
@@ -281,6 +397,7 @@ export const OutlinePlannerModal: React.FC<OutlinePlannerModalProps> = ({
             >
               编辑
             </button>
+            {isUpdating && <span className="px-2 py-1 text-xs text-dark-primary">正在更新大纲…</span>}
           </div>
           {outlineView === 'preview' ? (
             <div className="flex-1 min-h-0 overflow-auto px-3 py-2 bg-dark-surface border border-dark-border rounded-lg text-dark-text">
@@ -296,8 +413,8 @@ export const OutlinePlannerModal: React.FC<OutlinePlannerModalProps> = ({
             <textarea
               value={content}
               onChange={(e) => handleContentChange(e.target.value)}
-              readOnly={isGenerating}
-              disabled={isGenerating}
+              readOnly={isUpdating}
+              disabled={isUpdating}
               placeholder="在这里写这一卷的详细大纲..."
               className="flex-1 min-h-0 w-full px-3 py-2 bg-dark-surface border border-dark-border rounded-lg text-dark-text placeholder-dark-text-muted focus-ring focus:border-dark-primary chinese-text leading-relaxed resize-none overflow-auto"
             />
@@ -306,55 +423,51 @@ export const OutlinePlannerModal: React.FC<OutlinePlannerModalProps> = ({
         <div className="md:w-[45%] h-1/2 md:h-full flex flex-col min-h-0">
           <div className="flex-1 overflow-y-auto p-4">
             <ChatMessageList
-              messages={messages}
-              streamingMessage={isGenerating ? '正在更新大纲…' : ''}
-              isStreamingChat={isGenerating}
+              messages={shownMessages}
+              streamingMessage={showStreaming ? streamingMessage : isUpdating ? '正在更新大纲…' : ''}
+              isStreamingChat={busy}
+              isStreamingChatDisabled={busy || !!viewingRound}
               errorMessage={errorMessage}
               assistantLabel="大纲策划"
-              onRegenerate={handleRegenerate}
-              onDelete={handleDelete}
+              onRegenerate={viewingRound ? () => {} : handleRegenerate}
+              onDelete={viewingRound ? () => {} : handleDelete}
               messagesEndRef={messagesEndRef}
             />
           </div>
-          <div className="p-3 border-t border-dark-border flex gap-2 items-end">
-            <div className="flex-1 min-w-0">
-            <Textarea
-              ref={inputRef}
-              value={inputMessage}
-              onChange={handleInputChange}
-              placeholder="和策划讨论这一卷..."
-              rows={4}
-              disabled={isGenerating}
-              className="bg-dark-bg border-dark-border text-sm leading-relaxed resize-y min-h-[7rem] max-h-[50vh]"
-            />
-            </div>
-            <div className="flex flex-col gap-2 self-end">
-              <label className="flex items-center gap-1 text-xs text-dark-text-muted">
-                保留轮数
-                <input
-                  type="number"
-                  min={0}
-                  step={1}
-                  value={keepPairs}
-                  disabled={isGenerating}
-                  onChange={(e) => setKeepPairs(e.target.value)}
-                  className="w-14 px-2 py-1 bg-dark-bg border border-dark-border rounded text-dark-text"
+          {!viewingRound && (
+            <div className="p-3 border-t border-dark-border flex gap-2 items-end">
+              <div className="flex-1 min-w-0">
+                <Textarea
+                  ref={inputRef}
+                  value={inputMessage}
+                  onChange={handleInputChange}
+                  placeholder="和策划讨论这一卷..."
+                  rows={4}
+                  disabled={busy}
+                  className="bg-dark-bg border-dark-border text-sm leading-relaxed resize-y min-h-[7rem] max-h-[50vh]"
                 />
-              </label>
-              <Button onClick={handleKeepRounds} variant="outline" disabled={isGenerating} title="应用保留轮数">
-                应用
-              </Button>
-              {isGenerating ? (
-                <Button onClick={handleStop} variant="outline" title="停止">
-                  <Square size={16} />
+              </div>
+              <div className="flex flex-col gap-2 self-end">
+                <Button
+                  onClick={requestUpdate}
+                  variant="outline"
+                  disabled={busy || !hasUserMessage}
+                  title="更新大纲"
+                >
+                  <Sparkles size={16} />
                 </Button>
-              ) : (
-                <Button onClick={handleSend} disabled={!inputMessage.trim()} title="发送">
-                  <Send size={16} />
-                </Button>
-              )}
+                {busy ? (
+                  <Button onClick={handleStop} variant="outline" title="停止">
+                    <Square size={16} />
+                  </Button>
+                ) : (
+                  <Button onClick={handleSend} disabled={!inputMessage.trim()} title="发送">
+                    <Send size={16} />
+                  </Button>
+                )}
+              </div>
             </div>
-          </div>
+          )}
         </div>
       </div>
     </div>

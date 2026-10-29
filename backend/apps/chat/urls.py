@@ -12,7 +12,7 @@ urlpatterns = [
     path('api/chat/work/<int:work_id>/clear/', views.clear_work_chat_history, name='work-clear-chat-history'),
     path('api/chat/outline/<int:work_id>/<int:act_id>/', views.get_outline_chat_history, name='outline-chat-history'),
     path('api/chat/outline/<int:work_id>/<int:act_id>/save/', views.save_outline_chat_message, name='outline-save-chat-message'),
-    path('api/chat/outline/<int:work_id>/<int:act_id>/keep/', views.keep_outline_chat_rounds, name='outline-keep-chat-rounds'),
+    path('api/chat/outline/<int:work_id>/<int:act_id>/round/<int:round_id>/', views.get_outline_chat_round, name='outline-chat-round'),
     path('api/chat/outline/<int:work_id>/<int:act_id>/message/<int:message_id>/', views.delete_outline_chat_message, name='outline-delete-chat-message'),
     path('api/chat/outline/<int:work_id>/<int:act_id>/clear/', views.clear_outline_chat_history, name='outline-clear-chat-history'),
 ]

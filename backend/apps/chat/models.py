@@ -146,6 +146,7 @@ class OutlineChatSession(models.Model):
     )
     session_id = models.CharField('会话ID', max_length=100, unique=True)
     api_history_after = models.DateTimeField('接口历史截止时间', null=True, blank=True)
+    keep_pairs = models.PositiveIntegerField('保留轮数', default=5)
 
     created_at = models.DateTimeField('创建时间', auto_now_add=True)
     updated_at = models.DateTimeField('更新时间', auto_now=True)
@@ -160,6 +161,28 @@ class OutlineChatSession(models.Model):
         return f'{self.work.title} - {self.act.name} 大纲会话'
 
 
+class OutlineChatRound(models.Model):
+    """一次大纲更新前的对话。closed_at 为空的是当前轮。"""
+
+    session = models.ForeignKey(
+        OutlineChatSession,
+        on_delete=models.CASCADE,
+        related_name='rounds',
+        verbose_name='所属会话'
+    )
+    closed_at = models.DateTimeField('结束时间', null=True, blank=True)
+    created_at = models.DateTimeField('创建时间', auto_now_add=True)
+
+    class Meta:
+        verbose_name = '大纲策划对话轮'
+        verbose_name_plural = '大纲策划对话轮'
+        ordering = ['created_at']
+
+    def __str__(self):
+        state = '进行中' if self.closed_at is None else '已归档'
+        return f'{self.session} - {state}'
+
+
 class OutlineChatMessage(models.Model):
     """大纲策划聊天消息"""
 
@@ -170,6 +193,12 @@ class OutlineChatMessage(models.Model):
         on_delete=models.CASCADE,
         related_name='messages',
         verbose_name='所属会话'
+    )
+    round = models.ForeignKey(
+        OutlineChatRound,
+        on_delete=models.CASCADE,
+        related_name='messages',
+        verbose_name='所属轮次'
     )
     role = models.CharField('角色', max_length=20, choices=MESSAGE_ROLES)
     content = models.TextField('消息内容')

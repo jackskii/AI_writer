@@ -14,6 +14,19 @@ ANSWER_MARKER = "【回答】"
 THOUGHT_MARKER = "【思考过程】"
 
 
+def strip_chat_reasoning(content: str) -> str:
+    """Drop reasoning text so chat history keeps only the reply."""
+    if not content or THOUGHT_MARKER not in content:
+        return content or ""
+    text = re.sub(
+        rf"{re.escape(THOUGHT_MARKER)}[\s\S]*?(?={re.escape(ANSWER_MARKER)}|$)",
+        "",
+        content,
+    )
+    text = text.replace(ANSWER_MARKER, "")
+    return text.strip()
+
+
 def _strip_answer_only_text(content: str) -> str:
     """Strip reasoning/thinking markers from a non-streaming completion."""
     if not content:
@@ -652,9 +665,12 @@ class AIService:
             if chat_history:
                 for msg in chat_history:
                     if msg.get('role') in ['user', 'assistant']:
+                        content = msg.get('content') or ''
+                        if msg.get('role') == 'assistant':
+                            content = strip_chat_reasoning(content)
                         messages.append({
                             "role": msg['role'],
-                            "content": msg['content']
+                            "content": content
                         })
 
             # Frontend may persist the latest user message before invoking stream chat.
@@ -678,7 +694,8 @@ class AIService:
                 top_p=top_p,
                 frequency_penalty=frequency_penalty,
                 presence_penalty=presence_penalty,
-                reasoning_mode=reasoning_mode
+                reasoning_mode=reasoning_mode,
+                include_reasoning=False,
             ):
                 yield chunk
 

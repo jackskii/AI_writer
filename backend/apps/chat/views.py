@@ -4,12 +4,17 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from django.shortcuts import get_object_or_404
 from django.http import StreamingHttpResponse
-from datetime import timedelta
 from apps.works.models import Work, Chapter, Act
 from apps.ai_services import prompts
+from apps.ai_services.services import strip_chat_reasoning
 from .models import (
     ChatSession, ChatMessage, WorkChatSession, WorkChatMessage,
     OutlineChatSession, OutlineChatMessage,
+)
+from .outline_rounds import (
+    closed_round_payloads,
+    ensure_open_round,
+    message_payload,
 )
 from apps.ai_services.services import AIService, run_async_ai_task
 import logging
@@ -44,7 +49,7 @@ def get_chat_history(request, work_id, chapter_id):
             history.append({
                 'id': str(msg.id),
                 'role': msg.role,
-                'content': msg.content,
+                'content': strip_chat_reasoning(msg.content) if msg.role == 'assistant' else msg.content,
                 'timestamp': msg.created_at.isoformat()
             })
         
@@ -70,6 +75,8 @@ def save_chat_message(request, work_id, chapter_id):
     
     role = request.data.get('role')
     content = request.data.get('content')
+    if role == 'assistant':
+        content = strip_chat_reasoning(content)
     
     if not all([role, content]):
         return Response(
@@ -191,7 +198,7 @@ def get_work_chat_history(request, work_id):
             {
                 'id': str(msg.id),
                 'role': msg.role,
-                'content': msg.content,
+                'content': strip_chat_reasoning(msg.content) if msg.role == 'assistant' else msg.content,
                 'timestamp': msg.created_at.isoformat()
             }
             for msg in messages
@@ -218,6 +225,8 @@ def save_work_chat_message(request, work_id):
 
     role = request.data.get('role')
     content = request.data.get('content')
+    if role == 'assistant':
+        content = strip_chat_reasoning(content)
 
     if not all([role, content]):
         return Response(
@@ -327,26 +336,16 @@ def get_outline_chat_history(request, work_id, act_id):
             user=request.user,
             defaults={'session_id': str(uuid.uuid4())}
         )
-        if not session.messages.exists():
-            OutlineChatMessage.objects.create(
-                session=session,
-                role='assistant',
-                content=prompts.OUTLINE_PLANNER_GREETING,
-            )
-        messages = session.messages.all().order_by('created_at')
+        chat_round = ensure_open_round(session)
         history = [
-            {
-                'id': str(msg.id),
-                'role': msg.role,
-                'content': msg.content,
-                'timestamp': msg.created_at.isoformat()
-            }
-            for msg in messages
+            message_payload(msg)
+            for msg in chat_round.messages.order_by('created_at')
         ]
         return Response({
             'session_id': session.session_id,
             'messages': history,
             'outline_template': prompts.OUTLINE_PLANNER_TEMPLATE,
+            'rounds': closed_round_payloads(session),
         })
     except Exception as e:
         logger.error(f"Get outline chat history error: {str(e)}")
@@ -354,6 +353,26 @@ def get_outline_chat_history(request, work_id, act_id):
             {'error': f'获取聊天历史失败：{str(e)}'},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_outline_chat_round(request, work_id, act_id, round_id):
+    """获取一轮已归档的大纲策划对话"""
+    work = get_object_or_404(Work, id=work_id, author=request.user)
+    act = get_object_or_404(Act, id=act_id, work=work)
+    session = OutlineChatSession.objects.filter(work=work, act=act, user=request.user).first()
+    if not session:
+        return Response({'error': '聊天会话不存在'}, status=status.HTTP_404_NOT_FOUND)
+    chat_round = get_object_or_404(session.rounds, id=round_id)
+    return Response({
+        'id': chat_round.id,
+        'closed_at': chat_round.closed_at.isoformat() if chat_round.closed_at else None,
+        'messages': [
+            message_payload(msg)
+            for msg in chat_round.messages.order_by('created_at')
+        ],
+    })
 
 
 @api_view(['POST'])
@@ -365,6 +384,8 @@ def save_outline_chat_message(request, work_id, act_id):
 
     role = request.data.get('role')
     content = request.data.get('content')
+    if role == 'assistant':
+        content = strip_chat_reasoning(content)
     if not all([role, content]):
         return Response({'error': '缺少必要参数'}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -375,92 +396,18 @@ def save_outline_chat_message(request, work_id, act_id):
             user=request.user,
             defaults={'session_id': str(uuid.uuid4())}
         )
+        chat_round = ensure_open_round(session)
         message = OutlineChatMessage.objects.create(
             session=session,
+            round=chat_round,
             role=role,
             content=content
         )
-        return Response({
-            'id': str(message.id),
-            'role': message.role,
-            'content': message.content,
-            'timestamp': message.created_at.isoformat()
-        })
+        return Response(message_payload(message))
     except Exception as e:
         logger.error(f"Save outline chat message error: {str(e)}")
         return Response(
             {'error': f'保存聊天消息失败：{str(e)}'},
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR
-        )
-
-
-def _outline_keep_cutoff(messages, pairs_to_keep):
-    """First message that stays in the model request.
-
-    Returns the message, None to keep the whole chat, or False to keep none.
-    A pair is an assistant message followed by a user message. An assistant
-    message at the end has no user reply yet, so it stays along with the last
-    `pairs_to_keep` complete pairs before it.
-    """
-    pairs = []
-    open_index = None
-    index = 0
-    while index < len(messages):
-        message = messages[index]
-        following = messages[index + 1] if index + 1 < len(messages) else None
-        if message.role == 'assistant' and following is not None and following.role == 'user':
-            pairs.append(index)
-            index += 2
-        elif message.role == 'assistant' and following is None:
-            open_index = index
-            index += 1
-        else:
-            index += 1
-
-    if len(pairs) <= pairs_to_keep:
-        return None
-    if pairs_to_keep == 0:
-        if open_index is None:
-            return False
-        return messages[open_index]
-    return messages[pairs[-pairs_to_keep]]
-
-
-@api_view(['POST'])
-@permission_classes([IsAuthenticated])
-def keep_outline_chat_rounds(request, work_id, act_id):
-    """Set how many recent assistant-user pairs the outline planner still sends."""
-    work = get_object_or_404(Work, id=work_id, author=request.user)
-    act = get_object_or_404(Act, id=act_id, work=work)
-
-    try:
-        pairs = int(request.data.get('pairs'))
-    except (TypeError, ValueError):
-        return Response({'error': '保留轮数无效'}, status=status.HTTP_400_BAD_REQUEST)
-    if pairs < 0:
-        return Response({'error': '保留轮数无效'}, status=status.HTTP_400_BAD_REQUEST)
-
-    try:
-        session, _ = OutlineChatSession.objects.get_or_create(
-            work=work,
-            act=act,
-            user=request.user,
-            defaults={'session_id': str(uuid.uuid4())}
-        )
-        messages = list(session.messages.order_by('created_at'))
-        start = _outline_keep_cutoff(messages, pairs)
-        if start is None:
-            session.api_history_after = None
-        elif start is False:
-            session.api_history_after = messages[-1].created_at + timedelta(microseconds=1)
-        else:
-            session.api_history_after = start.created_at
-        session.save(update_fields=['api_history_after', 'updated_at'])
-        return Response({'pairs': pairs})
-    except Exception as e:
-        logger.error(f"Keep outline chat rounds error: {str(e)}")
-        return Response(
-            {'error': f'保留轮数设置失败：{str(e)}'},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
 
@@ -480,8 +427,10 @@ def delete_outline_chat_message(request, work_id, act_id, message_id):
             return Response({'error': '聊天会话不存在'}, status=status.HTTP_404_NOT_FOUND)
 
         message = get_object_or_404(OutlineChatMessage, id=message_id, session=session)
+        if message.round.closed_at is not None:
+            return Response({'error': '已归档的对话不能删除'}, status=status.HTTP_400_BAD_REQUEST)
         OutlineChatMessage.objects.filter(
-            session=session,
+            round=message.round,
             created_at__gte=message.created_at
         ).delete()
         return Response({'message': '消息已删除'})

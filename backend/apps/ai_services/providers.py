@@ -177,6 +177,32 @@ class LLMProvider(ABC):
             content_value = extra.get('content')
         return self._extract_text(content_value)
 
+    def _visible_stream_pieces(self, delta, state, include_reasoning: bool):
+        """Buffer reasoning. Yield reply text as soon as it arrives."""
+        reasoning_text, encrypted_reasoning = self._extract_reasoning_info(delta)
+        content_text = self._extract_content_text(delta)
+        pieces = []
+        if not include_reasoning:
+            if content_text:
+                pieces.append(content_text)
+            return pieces
+
+        if reasoning_text:
+            if not state['reasoning_started']:
+                pieces.append("【思考过程】\n")
+                state['reasoning_started'] = True
+            pieces.append(reasoning_text)
+        elif encrypted_reasoning and not state['reasoning_started']:
+            pieces.append("【思考过程】\n（当前模型返回加密推理，无法显示明文）")
+            state['reasoning_started'] = True
+
+        if content_text:
+            if state['reasoning_started'] and not state['answer_started']:
+                pieces.append("\n\n【回答】\n")
+                state['answer_started'] = True
+            pieces.append(content_text)
+        return pieces
+
     async def chat_completion_stream(
         self,
         messages: List[Dict],
@@ -186,7 +212,8 @@ class LLMProvider(ABC):
         top_p: float = None,
         frequency_penalty: float = None,
         presence_penalty: float = None,
-        reasoning_mode: bool = False
+        reasoning_mode: bool = False,
+        include_reasoning: bool = True
     ) -> AsyncGenerator[str, None]:
         """
         Stream chat completion responses.
@@ -228,31 +255,14 @@ class LLMProvider(ABC):
 
         try:
             response = await self.client.chat.completions.create(**params)
-            reasoning_started = False
-            answer_started = False
+            state = {'reasoning_started': False, 'answer_started': False}
 
             async for chunk in response:
                 if chunk.choices and len(chunk.choices) > 0:
-                    delta = chunk.choices[0].delta
-
-                    # Handle reasoning content (for providers that support it)
-                    reasoning_text, encrypted_reasoning = self._extract_reasoning_info(delta)
-                    if reasoning_text:
-                        if not reasoning_started:
-                            yield "【思考过程】\n"
-                            reasoning_started = True
-                        yield reasoning_text
-                    elif encrypted_reasoning and not reasoning_started:
-                        yield "【思考过程】\n（当前模型返回加密推理，无法显示明文）"
-                        reasoning_started = True
-
-                    # Handle regular content
-                    content_text = self._extract_content_text(delta)
-                    if content_text:
-                        if reasoning_started and not answer_started:
-                            yield "\n\n【回答】\n"
-                            answer_started = True
-                        yield content_text
+                    for piece in self._visible_stream_pieces(
+                        chunk.choices[0].delta, state, include_reasoning
+                    ):
+                        yield piece
 
         except Exception as e:
             logger.error(f"[{self.provider_name}] Streaming error: {str(e)}")
@@ -378,7 +388,8 @@ class DeepSeekProvider(LLMProvider):
         top_p: float = None,
         frequency_penalty: float = None,
         presence_penalty: float = None,
-        reasoning_mode: bool = False
+        reasoning_mode: bool = False,
+        include_reasoning: bool = True
     ) -> AsyncGenerator[str, None]:
         model = model or self.default_model
         params = {
@@ -417,26 +428,13 @@ class DeepSeekProvider(LLMProvider):
             else:
                 response = await self.client.chat.completions.create(**params)
 
-            reasoning_started = False
-            answer_started = False
+            state = {'reasoning_started': False, 'answer_started': False}
             async for chunk in response:
                 if chunk.choices and len(chunk.choices) > 0:
-                    delta = chunk.choices[0].delta
-                    reasoning_text, encrypted_reasoning = self._extract_reasoning_info(delta)
-                    if reasoning_text:
-                        if not reasoning_started:
-                            yield "【思考过程】\n"
-                            reasoning_started = True
-                        yield reasoning_text
-                    elif encrypted_reasoning and not reasoning_started:
-                        yield "【思考过程】\n（当前模型返回加密推理，无法显示明文）"
-                        reasoning_started = True
-                    content_text = self._extract_content_text(delta)
-                    if content_text:
-                        if reasoning_started and not answer_started:
-                            yield "\n\n【回答】\n"
-                            answer_started = True
-                        yield content_text
+                    for piece in self._visible_stream_pieces(
+                        chunk.choices[0].delta, state, include_reasoning
+                    ):
+                        yield piece
         except Exception as e:
             logger.error(f"[{self.provider_name}] Streaming error: {str(e)}")
             raise
@@ -645,7 +643,8 @@ class OpenRouterProvider(LLMProvider):
         top_p: float = None,
         frequency_penalty: float = None,
         presence_penalty: float = None,
-        reasoning_mode: bool = False
+        reasoning_mode: bool = False,
+        include_reasoning: bool = True
     ) -> AsyncGenerator[str, None]:
         model = model or self.default_model
         params = {
@@ -669,26 +668,13 @@ class OpenRouterProvider(LLMProvider):
 
         try:
             response = await self._create_with_extra_body_fallback(reasoning_mode, **params)
-            reasoning_started = False
-            answer_started = False
+            state = {'reasoning_started': False, 'answer_started': False}
             async for chunk in response:
                 if chunk.choices and len(chunk.choices) > 0:
-                    delta = chunk.choices[0].delta
-                    reasoning_text, encrypted_reasoning = self._extract_reasoning_info(delta)
-                    if reasoning_text:
-                        if not reasoning_started:
-                            yield "【思考过程】\n"
-                            reasoning_started = True
-                        yield reasoning_text
-                    elif encrypted_reasoning and not reasoning_started:
-                        yield "【思考过程】\n（当前模型返回加密推理，无法显示明文）"
-                        reasoning_started = True
-                    content_text = self._extract_content_text(delta)
-                    if content_text:
-                        if reasoning_started and not answer_started:
-                            yield "\n\n【回答】\n"
-                            answer_started = True
-                        yield content_text
+                    for piece in self._visible_stream_pieces(
+                        chunk.choices[0].delta, state, include_reasoning
+                    ):
+                        yield piece
         except Exception as e:
             logger.error(f"[{self.provider_name}] Streaming error: {str(e)}")
             raise

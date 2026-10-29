@@ -7,7 +7,7 @@ from django.http import StreamingHttpResponse, JsonResponse, HttpResponse
 from django.db import models
 from asgiref.sync import sync_to_async
 from apps.works.models import Work, Act, Chapter, LoreEntry, Faction
-from .services import AIService, run_async_ai_task
+from .services import AIService, run_async_ai_task, strip_chat_reasoning
 from . import prompts
 import logging
 import json
@@ -124,7 +124,13 @@ def get_chat_history(work, chapter, user):
     try:
         session = ChatSession.objects.get(work=work, chapter=chapter, user=user)
         recent_messages = session.messages.all().order_by('-created_at')[:10]
-        return [{'role': msg.role, 'content': msg.content} for msg in reversed(list(recent_messages))]
+        return [
+            {
+                'role': msg.role,
+                'content': strip_chat_reasoning(msg.content) if msg.role == 'assistant' else msg.content,
+            }
+            for msg in reversed(list(recent_messages))
+        ]
     except ChatSession.DoesNotExist:
         return []
 
@@ -137,7 +143,13 @@ def get_work_chat_history(work, user):
         work=work, user=user, defaults={'session_id': str(uuid.uuid4())}
     )
     recent_messages = WorkChatMessage.objects.filter(session=session).order_by('-created_at')[:10]
-    return [{'role': msg.role, 'content': msg.content} for msg in reversed(list(recent_messages))]
+    return [
+        {
+            'role': msg.role,
+            'content': strip_chat_reasoning(msg.content) if msg.role == 'assistant' else msg.content,
+        }
+        for msg in reversed(list(recent_messages))
+    ]
 
 
 @sync_to_async
@@ -1275,30 +1287,29 @@ async def ai_auto_describe_entry(request):
     return response
 
 
-def _split_outline_planner_output(text: str, current_content: str):
-    """Whole response is either the outline JSON object or a normal chat reply."""
+def _split_outline_update_output(text: str, current_content: str):
+    """Parse the one-shot update JSON. Manual update always writes the outline."""
     raw = (text or '').strip()
     try:
         data = json.loads(raw)
     except json.JSONDecodeError:
-        logger.warning("Outline planner returned non-JSON content: %s", raw[:2000])
-        return raw, current_content, False
+        logger.warning("Outline update returned non-JSON content: %s", raw[:2000])
+        return None, current_content
     if not isinstance(data, dict) or not isinstance(data.get('reply'), str):
-        logger.warning("Outline planner JSON missing reply: %s", raw[:2000])
-        return raw, current_content, False
+        logger.warning("Outline update JSON missing reply: %s", raw[:2000])
+        return None, current_content
     document = data.get('document') if isinstance(data.get('document'), dict) else {}
     content = document.get('content', current_content)
     if not isinstance(content, str):
         content = current_content
-    if content.strip() == prompts.OUTLINE_PLANNER_UNCHANGED:
-        return data['reply'], current_content, False
-    return data['reply'], content, 'content' in document
+    return data['reply'], content
 
 
 @sync_to_async
-def get_outline_planner_bundle(work_id, act_id, user):
-    """Load planner context and the last 20 chat turns. Does not read Act.outline into auto-edit."""
+def get_outline_planner_bundle(work_id, act_id, user, current_message=''):
+    """Load planner context and the open round's messages."""
     from apps.chat.models import OutlineChatSession
+    from apps.chat.outline_rounds import ensure_open_round
     work = get_object_or_404(Work, id=work_id, author=user)
     act = get_object_or_404(Act, id=act_id, work=work)
 
@@ -1320,15 +1331,24 @@ def get_outline_planner_bundle(work_id, act_id, user):
     ]
 
     history = []
-    trimmed = False
     session = OutlineChatSession.objects.filter(work=work, act=act, user=user).first()
     if session:
-        messages = session.messages.all()
-        if session.api_history_after:
-            trimmed = True
-            messages = messages.filter(created_at__gte=session.api_history_after)
-        recent = list(messages.order_by('-created_at')[:20])
-        history = [{'role': msg.role, 'content': msg.content} for msg in reversed(recent)]
+        chat_round = ensure_open_round(session)
+        ordered = list(chat_round.messages.order_by('created_at'))
+        if (
+            current_message
+            and ordered
+            and ordered[-1].role == 'user'
+            and ordered[-1].content == current_message
+        ):
+            ordered = ordered[:-1]
+        history = [
+            {
+                'role': msg.role,
+                'content': strip_chat_reasoning(msg.content) if msg.role == 'assistant' else msg.content,
+            }
+            for msg in ordered
+        ]
 
     work_brief = "\n\n".join(part for part in [
         f"作品标题：{work.title}",
@@ -1340,12 +1360,25 @@ def get_outline_planner_bundle(work_id, act_id, user):
         "世界观与人物：\n" + "\n".join(lore_lines) if lore_lines else '',
     ] if part)
 
-    return work_brief, reference, history, trimmed
+    return work, act, work_brief, reference, history
+
+
+async def _outline_planner_auth(request, body):
+    user = None
+    token = request.GET.get('token') or body.get('token')
+    if token:
+        try:
+            user = await get_token_user(token)
+        except Exception:
+            return None
+    elif hasattr(request, 'user') and request.user.is_authenticated:
+        user = request.user
+    return user
 
 
 @csrf_exempt
-async def ai_outline_planner(request):
-    """卷大纲策划：一次返回对话回复和更新后的大纲 JSON。"""
+async def ai_outline_planner_chat(request):
+    """卷大纲策划对话：流式返回纯文本回复，不改大纲。"""
     if request.method != 'POST':
         return HttpResponse(
             'data: {"type": "error", "message": "仅支持POST请求"}\n\n',
@@ -1360,20 +1393,8 @@ async def ai_outline_planner(request):
             content_type='text/event-stream'
         )
 
-    user = None
-    token = request.GET.get('token') or body.get('token')
-    if token:
-        try:
-            user = await get_token_user(token)
-        except Exception:
-            return HttpResponse(
-                'data: {"type": "error", "message": "认证令牌无效"}\n\n',
-                content_type='text/event-stream',
-                status=401
-            )
-    elif hasattr(request, 'user') and request.user.is_authenticated:
-        user = request.user
-    else:
+    user = await _outline_planner_auth(request, body)
+    if not user:
         return HttpResponse(
             'data: {"type": "error", "message": "需要登录"}\n\n',
             content_type='text/event-stream',
@@ -1397,23 +1418,24 @@ async def ai_outline_planner(request):
 
     async def generate_stream():
         try:
-            work_brief, reference, history, trimmed = await get_outline_planner_bundle(work_id, act_id, user)
+            work, act, work_brief, reference, history = await get_outline_planner_bundle(
+                work_id, act_id, user, message
+            )
             if history and history[-1].get('role') == 'user' and history[-1].get('content') == message:
                 history = history[:-1]
+            prior_assistant = strip_chat_reasoning(prior_assistant)
             if prior_assistant and not any(
                 item.get('role') == 'assistant' and item.get('content') == prior_assistant
                 for item in history
             ):
                 history.append({'role': 'assistant', 'content': prior_assistant})
 
-            document_json = json.dumps({'content': current_content}, ensure_ascii=False)
-            user_turn = "\n\n".join(part for part in [
-                prompts.OUTLINE_PLANNER_TRIMMED_USER_NOTE if trimmed else '',
-                work_brief,
-                reference,
-                f"当前大纲 JSON：\n{document_json}",
-                f"作者消息：\n{message}",
-            ] if part)
+            is_first_user = not any(item.get('role') == 'user' for item in history)
+            user_parts = []
+            if is_first_user:
+                user_parts.extend([work_brief, reference, f"当前大纲：\n{current_content}"])
+            user_parts.append(f"作者消息：\n{message}")
+            user_turn = "\n\n".join(part for part in user_parts if part)
 
             api_key, provider, default_model = await get_user_api_key_async(user)
             ai_settings = await get_user_ai_settings(user)
@@ -1435,6 +1457,102 @@ async def ai_outline_planner(request):
 
             yield f'data: {json.dumps({"type": "start", "message": "大纲策划开始"})}\n\n'
 
+            accumulated = ''
+            async for chunk in ai_service.provider.chat_completion_stream(
+                messages,
+                temperature=ai_settings.get('temperature'),
+                top_p=ai_settings.get('top_p'),
+                max_tokens=ai_settings.get('max_tokens'),
+                frequency_penalty=ai_settings.get('frequency_penalty'),
+                presence_penalty=ai_settings.get('presence_penalty'),
+                include_reasoning=False,
+            ):
+                accumulated += chunk
+                yield f'data: {json.dumps({"type": "chunk", "content": chunk})}\n\n'
+
+            yield f'data: {json.dumps({"type": "end", "reply": accumulated}, ensure_ascii=False)}\n\n'
+        except Exception as e:
+            logger.error(f"Outline planner chat error: {str(e)}")
+            yield f'data: {json.dumps({"type": "error", "message": f"大纲策划失败: {str(e)}"}, ensure_ascii=False)}\n\n'
+
+    response = StreamingHttpResponse(generate_stream(), content_type='text/event-stream')
+    response['Cache-Control'] = 'no-cache'
+    response['X-Accel-Buffering'] = 'no'
+    response['Access-Control-Allow-Origin'] = '*'
+    return response
+
+
+@csrf_exempt
+async def ai_outline_planner_update(request):
+    """卷大纲策划更新：一次性返回 JSON，写入大纲并归档当前轮。"""
+    if request.method != 'POST':
+        return HttpResponse(
+            'data: {"type": "error", "message": "仅支持POST请求"}\n\n',
+            content_type='text/event-stream'
+        )
+
+    try:
+        body = json.loads(request.body.decode('utf-8'))
+    except Exception:
+        return HttpResponse(
+            'data: {"type": "error", "message": "无效的请求数据"}\n\n',
+            content_type='text/event-stream'
+        )
+
+    user = await _outline_planner_auth(request, body)
+    if not user:
+        return HttpResponse(
+            'data: {"type": "error", "message": "需要登录"}\n\n',
+            content_type='text/event-stream',
+            status=401
+        )
+
+    work_id = body.get('work_id')
+    act_id = body.get('act_id')
+    document = body.get('document') or {}
+    current_content = document.get('content') if isinstance(document, dict) else ''
+    if current_content is None:
+        current_content = ''
+
+    if not all([work_id, act_id]):
+        return HttpResponse(
+            'data: {"type": "error", "message": "缺少必要参数"}\n\n',
+            content_type='text/event-stream'
+        )
+
+    async def generate_stream():
+        try:
+            work, act, work_brief, reference, history = await get_outline_planner_bundle(
+                work_id, act_id, user
+            )
+
+            user_turn = "\n\n".join(part for part in [
+                work_brief,
+                reference,
+                f"当前大纲：\n{current_content}",
+                prompts.OUTLINE_PLANNER_UPDATE_PROMPT,
+            ] if part)
+
+            api_key, provider, default_model = await get_user_api_key_async(user)
+            ai_settings = await get_user_ai_settings(user)
+            ai_service = AIService(
+                api_key=api_key,
+                provider_name=provider,
+                default_model=default_model,
+                reasoning_effort=ai_settings.get('reasoning_effort', 'medium'),
+            )
+
+            messages = [
+                {
+                    'role': 'system',
+                    'content': f"{prompts.FICTION_PREAMBLE}\n\n{prompts.OUTLINE_PLANNER_UPDATE_SYSTEM}",
+                },
+                *history,
+                {'role': 'user', 'content': user_turn},
+            ]
+
+            yield f'data: {json.dumps({"type": "start", "message": "正在更新大纲"})}\n\n'
+
             raw = await ai_service.provider.chat_completion(
                 messages,
                 temperature=ai_settings.get('temperature'),
@@ -1446,17 +1564,34 @@ async def ai_outline_planner(request):
                 response_format={'type': 'json_object'},
             )
 
-            reply, content, document_updated = _split_outline_planner_output(raw, current_content)
+            reply, content = _split_outline_update_output(raw, current_content)
+            if reply is None:
+                yield f'data: {json.dumps({"type": "error", "message": "大纲更新失败：模型未返回有效 JSON"}, ensure_ascii=False)}\n\n'
+                return
+
+            from apps.chat.models import OutlineChatSession
+            from apps.chat.outline_rounds import commit_outline_update
+            session, _ = await sync_to_async(OutlineChatSession.objects.get_or_create)(
+                work=work,
+                act=act,
+                user=user,
+                defaults={'session_id': str(uuid.uuid4())}
+            )
+            new_messages, closed_payload = await sync_to_async(commit_outline_update)(
+                session, act, content, reply
+            )
+
             payload = {
                 'type': 'end',
                 'reply': reply,
                 'document': {'content': content},
-                'document_updated': document_updated,
+                'closed_round': closed_payload,
+                'messages': new_messages,
             }
             yield f'data: {json.dumps(payload, ensure_ascii=False)}\n\n'
         except Exception as e:
-            logger.error(f"Outline planner error: {str(e)}")
-            yield f'data: {json.dumps({"type": "error", "message": f"大纲策划失败: {str(e)}"}, ensure_ascii=False)}\n\n'
+            logger.error(f"Outline planner update error: {str(e)}")
+            yield f'data: {json.dumps({"type": "error", "message": f"大纲更新失败: {str(e)}"}, ensure_ascii=False)}\n\n'
 
     response = StreamingHttpResponse(generate_stream(), content_type='text/event-stream')
     response['Cache-Control'] = 'no-cache'

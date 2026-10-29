@@ -67,7 +67,7 @@ export const ChatMessageList: React.FC<ChatMessageListProps> = ({
               <ReactMarkdown>{message.content}</ReactMarkdown>
             </div>
           ) : (
-            <div className="whitespace-pre-wrap">{message.content}</div>
+            <div className="whitespace-pre-wrap chat-user-text">{message.content}</div>
           )}
         </div>
 

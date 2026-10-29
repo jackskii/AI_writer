@@ -92,6 +92,17 @@ body {
   color: white;
 }
 
+/* User chat bubbles are the same blue as the default selection. */
+.chat-user-text::selection {
+  background-color: #fde68a;
+  color: #111827;
+}
+
+.chat-user-text::-moz-selection {
+  background-color: #fde68a;
+  color: #111827;
+}
+
 /* Focus styles */
 .focus-ring {
   @apply focus:outline-none focus:ring-2 focus:ring-dark-primary focus:ring-opacity-50;
